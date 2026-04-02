@@ -635,6 +635,38 @@ function renderPlayerProfile() {
         </tbody>
       </table>`;
 
+  const upcomingHTML = (p.upcoming || []).length === 0
+    ? `<div class="empty-state"><strong>No upcoming matches</strong></div>`
+    : `<table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>League</th>
+            <th>Week</th>
+            <th>Division</th>
+            <th>Opponent</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${p.upcoming.map((m) => {
+            const showCourt = m.schedule_courts && m.court_number;
+            const timeInfo = showCourt
+              ? `Court ${m.court_number}${m.match_time ? ' · ' + m.match_time : ''}`
+              : (m.match_time || '—');
+            return `
+            <tr>
+              <td class="text-muted">${formatShortDate(m.week_date)}</td>
+              <td>${esc(m.league_name)}</td>
+              <td class="text-muted">Wk ${m.week_number}</td>
+              <td class="text-muted">${esc(m.division_name)}</td>
+              <td>${esc(m.opponent_name)}</td>
+              <td class="text-muted">${esc(timeInfo)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+
   document.getElementById('mainContent').innerHTML = `
     <div class="profile-header-card">
       <div class="profile-info">
@@ -653,6 +685,9 @@ function renderPlayerProfile() {
         ${winPct !== null ? `<div class="stat"><span class="stat-val">${winPct}%</span><span class="stat-label">Win Rate</span></div>` : ''}
       </div>
     </div>
+
+    <div class="section-title">Upcoming Matches <div class="divider"></div></div>
+    <div class="table-card">${upcomingHTML}</div>
 
     <div class="section-title">Match History <div class="divider"></div></div>
     <div class="table-card">${historyHTML}</div>`;
@@ -2118,6 +2153,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   try {
     state.currentUser = await fetch('/api/me').then((r) => r.json());
   } catch (_) {}
+
+  // Show "My Profile" nav item for players
+  if (state.currentUser?.role === 'player' && state.currentUser?.playerId) {
+    const navMyProfile = document.getElementById('navMyProfile');
+    navMyProfile.style.display = '';
+    navMyProfile.addEventListener('click', () => openPlayerProfile(state.currentUser.playerId));
+  }
+
   state.players = await window.api.getPlayers();
   navigate('players');
 });

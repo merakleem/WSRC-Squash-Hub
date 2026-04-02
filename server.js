@@ -183,10 +183,10 @@ app.post('/login', (req, res) => {
 
 function loginFormBody() {
   return `<form method="POST" action="/login">
-    <label>Email <span style="color:#aaa;font-weight:400">(leave blank for admin)</span></label>
+    <label>Email</label>
     <input type="email" name="email" placeholder="your@email.com" autocomplete="email">
-    <label>Member Number <span style="color:#aaa;font-weight:400">(admin: use your password)</span></label>
-    <input type="password" name="password" placeholder="e.g. X118" autofocus autocomplete="current-password">
+    <label>Member Number</label>
+    <input type="password" name="password" placeholder="Member number" autofocus autocomplete="current-password">
     <button type="submit">Sign In</button>
   </form>
   <div class="link-row"><a href="/forgot-password">Forgot your member number?</a></div>`;
@@ -258,14 +258,15 @@ app.get('/api/players/records', wrap(async (req, res) => {
 
 app.get('/api/players/:id/history', wrap(async (req, res) => {
   const id = Number(req.params.id);
-  const [player, history, records] = await Promise.all([
+  const [player, history, upcoming, records] = await Promise.all([
     playerService.getPlayerById(id),
     playerService.getPlayerMatchHistory(id),
+    playerService.getPlayerUpcomingMatches(id),
     playerService.getAllPlayerRecords(),
   ]);
   if (!player) return res.status(404).json({ error: 'Player not found' });
   const rec = records.find((r) => r.id === id) || { wins: 0, losses: 0 };
-  res.json({ ...player, wins: rec.wins || 0, losses: rec.losses || 0, history });
+  res.json({ ...player, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming });
 }));
 
 // ===== LEAGUES =====

@@ -171,4 +171,30 @@ async function getAllPlayerRecords() {
   `);
 }
 
-module.exports = { getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, getPlayerMatchHistory, getAllPlayerRecords };
+async function getPlayerUpcomingMatches(id) {
+  return all(`
+    SELECT
+      m.id,
+      w.date        AS week_date,
+      w.week_number,
+      l.id          AS league_id,
+      l.name        AS league_name,
+      d.name        AS division_name,
+      CASE WHEN m.player1_id = ? THEN p2.name ELSE p1.name END AS opponent_name,
+      m.court_number,
+      m.match_time,
+      l.schedule_courts
+    FROM matches m
+    JOIN players p1 ON p1.id = m.player1_id
+    JOIN players p2 ON p2.id = m.player2_id
+    JOIN team_matchups tm ON m.matchup_id = tm.id
+    JOIN weeks w          ON tm.week_id = w.id
+    JOIN leagues l        ON w.league_id = l.id
+    JOIN divisions d      ON m.division_id = d.id
+    WHERE (m.player1_id = ? OR m.player2_id = ?)
+      AND m.player1_score IS NULL
+    ORDER BY w.date ASC, m.match_time ASC
+  `, [id, id, id]);
+}
+
+module.exports = { getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, getPlayerMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords };

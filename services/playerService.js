@@ -33,8 +33,12 @@ async function getPlayerMatchHistory(id) {
   return playerModel.getPlayerMatchHistory(id);
 }
 
+async function getPlayerUpcomingMatches(id) {
+  return playerModel.getPlayerUpcomingMatches(id);
+}
+
 async function getAllPlayerRecords() {
   return playerModel.getAllPlayerRecords();
 }
 
-module.exports = { getAllPlayers, addPlayer, updatePlayer, deletePlayer, getPlayerById, getPlayerMatchHistory, getAllPlayerRecords };
+module.exports = { getAllPlayers, addPlayer, updatePlayer, deletePlayer, getPlayerById, getPlayerMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords };
