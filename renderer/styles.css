@@ -721,6 +721,19 @@ tbody td {
   color: #7d5a00;
   margin-top: 14px;
 }
+.struct-warning-late {
+  border-color: var(--danger);
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+/* ===== STEP 3: TWO-COLUMN GRID ===== */
+.step3-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: start;
+}
 
 /* ===== STEP 4: BLACKOUT DATES ===== */
 .blackout-list {
@@ -912,13 +925,25 @@ tbody td {
 }
 .match-row:last-child { border-bottom: none; }
 
+.match-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 80px;
+  flex-shrink: 0;
+}
+
 .match-div-label {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  width: 70px;
-  flex-shrink: 0;
+}
+
+.match-court-label {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .match-players {
@@ -931,8 +956,29 @@ tbody td {
 .match-player {
   flex: 1;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 .match-player.winner { color: var(--success); font-weight: 600; }
+
+.sub-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.match-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 
 .match-score {
   display: flex;

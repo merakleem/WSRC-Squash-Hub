@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS leagues (
     num_divisions INTEGER NOT NULL,
     num_rounds INTEGER NOT NULL DEFAULT 1,
     blackout_dates TEXT NOT NULL DEFAULT '[]',
+    match_start_time TEXT NOT NULL DEFAULT '19:00',
+    num_courts INTEGER NOT NULL DEFAULT 2,
+    match_duration INTEGER NOT NULL DEFAULT 45,
+    match_buffer INTEGER NOT NULL DEFAULT 15,
+    schedule_courts INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -82,8 +87,31 @@ CREATE TABLE IF NOT EXISTS matches (
     player1_score INTEGER,
     player2_score INTEGER,
     winner_id INTEGER,
+    court_number INTEGER,
+    match_time TEXT,
     FOREIGN KEY (matchup_id) REFERENCES team_matchups(id) ON DELETE CASCADE,
     FOREIGN KEY (division_id) REFERENCES divisions(id),
     FOREIGN KEY (player1_id) REFERENCES players(id),
     FOREIGN KEY (player2_id) REFERENCES players(id)
+);
+
+CREATE TABLE IF NOT EXISTS user_accounts (
+    player_id INTEGER PRIMARY KEY,
+    password_hash TEXT,
+    invite_token TEXT,
+    invite_expires TEXT,
+    reset_token TEXT,
+    reset_expires TEXT,
+    FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS match_subs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    original_player_id INTEGER NOT NULL,
+    sub_player_id INTEGER NOT NULL,
+    UNIQUE (match_id, original_player_id),
+    FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+    FOREIGN KEY (original_player_id) REFERENCES players(id),
+    FOREIGN KEY (sub_player_id) REFERENCES players(id)
 );

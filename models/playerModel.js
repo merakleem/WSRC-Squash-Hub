@@ -42,30 +42,87 @@ async function deletePlayer(id) {
  * Return all completed matches for a player with context (league, week, opponent, score, result).
  */
 async function getPlayerMatchHistory(id) {
+  // A player appears in a match if:
+  //   (a) they are player1/player2 AND were NOT subbed out, OR
+  //   (b) they subbed IN for someone
+  // "played_as_p1" = true means this player was on the player1 side (original or sub)
   return all(`
     SELECT
       m.id,
-      CASE WHEN m.player1_id = ? THEN m.player1_score ELSE m.player2_score END AS my_score,
-      CASE WHEN m.player1_id = ? THEN m.player2_score ELSE m.player1_score END AS their_score,
-      CASE WHEN m.winner_id = ? THEN 'W' ELSE 'L' END AS result,
-      CASE WHEN m.player1_id = ? THEN p2.name ELSE p1.name END AS opponent_name,
-      CASE WHEN m.player1_id = ? THEN p2.id   ELSE p1.id   END AS opponent_id,
+      played_as_p1,
+      CASE WHEN played_as_p1 THEN m.player1_score ELSE m.player2_score END AS my_score,
+      CASE WHEN played_as_p1 THEN m.player2_score ELSE m.player1_score END AS their_score,
+      CASE WHEN m.winner_id = eff_winner THEN 'W' ELSE 'L' END AS result,
+      opp_name  AS opponent_name,
+      opp_id    AS opponent_id,
       w.date        AS week_date,
       w.week_number,
       l.id          AS league_id,
       l.name        AS league_name,
       d.name        AS division_name
-    FROM matches m
+    FROM (
+      -- Player is original player1 and was NOT subbed out
+      SELECT m.id, 1 AS played_as_p1,
+             COALESCE(s1.sub_player_id, m.player1_id) AS eff_winner,
+             COALESCE(s2.sub_player_id, m.player2_id) AS opp_id,
+             COALESCE(sp2.name, p2.name)               AS opp_name
+      FROM matches m
+      JOIN players p2 ON p2.id = m.player2_id
+      LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
+      LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+      LEFT JOIN players sp2   ON sp2.id = s2.sub_player_id
+      WHERE m.player1_id = ? AND s1.sub_player_id IS NULL
+
+      UNION ALL
+
+      -- Player is original player2 and was NOT subbed out
+      SELECT m.id, 0 AS played_as_p1,
+             COALESCE(s2.sub_player_id, m.player2_id) AS eff_winner,
+             COALESCE(s1.sub_player_id, m.player1_id) AS opp_id,
+             COALESCE(sp1.name, p1.name)               AS opp_name
+      FROM matches m
+      JOIN players p1 ON p1.id = m.player1_id
+      LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
+      LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+      LEFT JOIN players sp1   ON sp1.id = s1.sub_player_id
+      WHERE m.player2_id = ? AND s2.sub_player_id IS NULL
+
+      UNION ALL
+
+      -- Player subbed in on the player1 side
+      SELECT m.id, 1 AS played_as_p1,
+             ? AS eff_winner,
+             COALESCE(s2.sub_player_id, m.player2_id) AS opp_id,
+             COALESCE(sp2.name, p2.name)               AS opp_name
+      FROM match_subs sub_in
+      JOIN matches m  ON m.id = sub_in.match_id AND sub_in.original_player_id = m.player1_id
+      JOIN players p2 ON p2.id = m.player2_id
+      LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+      LEFT JOIN players sp2   ON sp2.id = s2.sub_player_id
+      WHERE sub_in.sub_player_id = ?
+
+      UNION ALL
+
+      -- Player subbed in on the player2 side
+      SELECT m.id, 0 AS played_as_p1,
+             ? AS eff_winner,
+             COALESCE(s1.sub_player_id, m.player1_id) AS opp_id,
+             COALESCE(sp1.name, p1.name)               AS opp_name
+      FROM match_subs sub_in
+      JOIN matches m  ON m.id = sub_in.match_id AND sub_in.original_player_id = m.player2_id
+      JOIN players p1 ON p1.id = m.player1_id
+      LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
+      LEFT JOIN players sp1   ON sp1.id = s1.sub_player_id
+      WHERE sub_in.sub_player_id = ?
+    ) AS participated
+    JOIN matches m  ON m.id = participated.id
     JOIN team_matchups tm ON m.matchup_id = tm.id
     JOIN weeks w          ON tm.week_id = w.id
     JOIN leagues l        ON w.league_id = l.id
-    JOIN players p1       ON m.player1_id = p1.id
-    JOIN players p2       ON m.player2_id = p2.id
     JOIN divisions d      ON m.division_id = d.id
-    WHERE (m.player1_id = ? OR m.player2_id = ?)
-      AND m.player1_score IS NOT NULL
+    WHERE m.player1_score IS NOT NULL
     ORDER BY w.date DESC, w.week_number DESC
-  `, [id, id, id, id, id, id, id]);
+  `, [id, id, id, id, id, id]);
 }
 
 /**
@@ -73,13 +130,43 @@ async function getPlayerMatchHistory(id) {
  * Returns [{ id, wins, losses }].
  */
 async function getAllPlayerRecords() {
+  // Build a view of effective participants: original players not subbed out, plus subs
   return all(`
-    SELECT
-      p.id,
-      SUM(CASE WHEN m.winner_id = p.id THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN m.winner_id IS NOT NULL AND m.winner_id != p.id THEN 1 ELSE 0 END) AS losses
+    SELECT p.id,
+      COUNT(CASE WHEN played AND won  THEN 1 END) AS wins,
+      COUNT(CASE WHEN played AND NOT won AND finished THEN 1 END) AS losses
     FROM players p
-    LEFT JOIN matches m ON m.player1_id = p.id OR m.player2_id = p.id
+    LEFT JOIN (
+      -- Original player1, not subbed out
+      SELECT m.player1_id AS player_id,
+             m.winner_id IS NOT NULL AS finished,
+             (m.winner_id = m.player1_id) AS won,
+             1 AS played
+      FROM matches m
+      LEFT JOIN match_subs s ON s.match_id = m.id AND s.original_player_id = m.player1_id
+      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL
+
+      UNION ALL
+
+      -- Original player2, not subbed out
+      SELECT m.player2_id AS player_id,
+             m.winner_id IS NOT NULL AS finished,
+             (m.winner_id = m.player2_id) AS won,
+             1 AS played
+      FROM matches m
+      LEFT JOIN match_subs s ON s.match_id = m.id AND s.original_player_id = m.player2_id
+      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL
+
+      UNION ALL
+
+      -- Subs (credited as the side they played)
+      SELECT s.sub_player_id AS player_id,
+             m.winner_id IS NOT NULL AS finished,
+             (m.winner_id = s.original_player_id) AS won,
+             1 AS played
+      FROM match_subs s
+      JOIN matches m ON m.id = s.match_id AND m.player1_score IS NOT NULL
+    ) AS participation ON participation.player_id = p.id
     GROUP BY p.id
   `);
 }

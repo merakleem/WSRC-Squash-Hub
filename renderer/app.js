@@ -24,12 +24,18 @@ if (typeof window !== 'undefined' && !window.api) {
     deleteLeague:     (id)=> _apiFetch('DELETE', `/api/leagues/${id}`),
 
     updateMatchScore: (d) => _apiFetch('PUT',    `/api/matches/${d.matchId}/score`, d),
+    setMatchSub:      (d) => _apiFetch('PUT',    `/api/matches/${d.matchId}/sub`, d),
+    removeMatchSub:   (d) => _apiFetch('DELETE', `/api/matches/${d.matchId}/sub`, d),
+    setSubRemaining:  (d) => _apiFetch('PUT',    `/api/leagues/${d.leagueId}/sub-remaining`, d),
     getValidConfigs:  (n) => _apiFetch('GET',    `/api/configs/${n}`),
 
     getLadder:        ()    => _apiFetch('GET', '/api/ladder'),
     updateLadder:     (ids) => _apiFetch('PUT', '/api/ladder', { playerIds: ids }),
     getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
     getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
+
+    invitePlayer:           (id) => _apiFetch('POST', `/api/players/${id}/invite`),
+    resetPlayerPassword:    (id) => _apiFetch('POST', `/api/players/${id}/reset-password`),
   };
 }
 
@@ -42,6 +48,7 @@ const state = {
   leagues: [],
   currentLeague: null,
   currentPlayer: null,    // { id, name, email, phone, wins, losses, history: [...] }
+  currentUser: null,      // { role: 'admin'|'player', playerId: number|null }
   wizard: {
     step: 1,
     leagueName: '',
@@ -52,8 +59,16 @@ const state = {
     numRounds: 1,
     blackoutDates: [],
     teamNames: [],        // custom names; index matches team slot
+    matchStartTime: '19:00',
+    numCourts: 2,
+    matchDuration: 45,
+    matchBuffer: 15,
+    scheduleCourts: false,
   },
 };
+
+// ===== ROLE HELPERS =====
+const isAdmin = () => state.currentUser?.role === 'admin';
 
 // ===== UTILS =====
 function esc(str) {
@@ -159,22 +174,24 @@ function renderPage() {
 // ===== PLAYERS PAGE =====
 async function renderPlayers() {
   document.getElementById('pageTitle').textContent = 'Players';
-  document.getElementById('topbarActions').innerHTML = `
+  document.getElementById('topbarActions').innerHTML = isAdmin() ? `
     <button class="btn btn-outline" id="btnExport">Export CSV</button>
     <button class="btn btn-outline" id="btnImport">Import CSV</button>
     <button class="btn btn-outline" id="btnBulkAdd">Add Multiple</button>
     <button class="btn btn-primary" id="btnAddPlayer">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
       Add Player
-    </button>`;
+    </button>` : '';
 
   state.players = await window.api.getPlayers();
   renderPlayerTable(state.players);
 
-  document.getElementById('btnAddPlayer').addEventListener('click', openAddPlayerModal);
-  document.getElementById('btnBulkAdd').addEventListener('click', openBulkAddModal);
-  document.getElementById('btnExport').addEventListener('click', exportPlayersCsv);
-  document.getElementById('btnImport').addEventListener('click', openImportModal);
+  if (isAdmin()) {
+    document.getElementById('btnAddPlayer').addEventListener('click', openAddPlayerModal);
+    document.getElementById('btnBulkAdd').addEventListener('click', openBulkAddModal);
+    document.getElementById('btnExport').addEventListener('click', exportPlayersCsv);
+    document.getElementById('btnImport').addEventListener('click', openImportModal);
+  }
 }
 
 function playerRowsHTML(players, filtered) {
@@ -193,7 +210,7 @@ function playerRowsHTML(players, filtered) {
       <td class="text-muted">${esc(p.phone) || '—'}</td>
       <td>
         <div class="td-actions">
-          <button class="btn btn-outline btn-sm" data-action="edit" data-id="${p.id}">Edit</button>
+          ${isAdmin() ? `<button class="btn btn-outline btn-sm" data-action="edit" data-id="${p.id}">Edit</button>` : ''}
         </div>
       </td>
     </tr>`).join('');
@@ -322,6 +339,25 @@ function openEditPlayerModal(player) {
     } catch (e) {
       document.getElementById('fError').textContent = e.message || 'Failed to update player.';
     }
+  });
+}
+
+function showCopyLinkModal(title, url) {
+  modal.open(title, `
+    <p class="text-muted" style="font-size:13px;margin-bottom:10px">
+      Copy this link and send it to the player. It expires after 7 days.
+    </p>
+    <input class="form-control" id="copyLinkInput" value="${esc(url)}" readonly
+      style="font-size:12px;font-family:monospace" onclick="this.select()">
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-outline" id="fCancel">Close</button>
+      <button class="btn btn-primary" id="fCopy">Copy</button>
+    </div>`);
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fCopy').addEventListener('click', () => {
+    navigator.clipboard.writeText(url).then(() => toast('Link copied!', 'success')).catch(() => {
+      toast('Copy failed — select and copy the link manually', 'warning');
+    });
   });
 }
 
@@ -553,30 +589,49 @@ function renderPlayerProfile() {
   const p = state.currentPlayer;
   if (!p) { navigate('players'); return; }
 
+  const adminMode = isAdmin();
   document.getElementById('pageTitle').textContent = p.name;
-  document.getElementById('topbarActions').innerHTML = `
+  document.getElementById('topbarActions').innerHTML = adminMode ? `
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
       <div class="options-dropdown" id="optionsDropdown">
+        ${p.email ? `<button class="options-item" data-action="copy-invite" data-id="${p.id}">Copy Invite Link</button>
+        <button class="options-item" data-action="reset-password" data-id="${p.id}">Reset Password Link</button>` : ''}
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
       </div>
-    </div>`;
+    </div>` : '';
 
-  document.getElementById('optionsBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.getElementById('optionsDropdown').classList.toggle('open');
-  });
-  document.getElementById('optionsDropdown').addEventListener('click', (e) => {
-    const action = e.target.dataset.action;
-    if (action === 'delete-player') {
+  if (adminMode) {
+    document.getElementById('optionsBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('optionsDropdown').classList.toggle('open');
+    });
+    document.getElementById('optionsDropdown').addEventListener('click', async (e) => {
+      const action = e.target.dataset.action;
       document.getElementById('optionsDropdown').classList.remove('open');
-      confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
-    }
-  });
-  document.addEventListener('click', function closeOptions() {
-    document.getElementById('optionsDropdown')?.classList.remove('open');
-    document.removeEventListener('click', closeOptions);
-  }, { once: false });
+      if (action === 'delete-player') {
+        confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
+      } else if (action === 'copy-invite') {
+        try {
+          const { inviteUrl } = await window.api.invitePlayer(Number(e.target.dataset.id));
+          showCopyLinkModal('Invite Link', inviteUrl);
+        } catch (err) {
+          toast(err.message || 'Failed to generate invite link', 'warning');
+        }
+      } else if (action === 'reset-password') {
+        try {
+          const { resetUrl } = await window.api.resetPlayerPassword(Number(e.target.dataset.id));
+          showCopyLinkModal('Password Reset Link', resetUrl);
+        } catch (err) {
+          toast(err.message || 'Failed to generate reset link', 'warning');
+        }
+      }
+    });
+    document.addEventListener('click', function closeOptions() {
+      document.getElementById('optionsDropdown')?.classList.remove('open');
+      document.removeEventListener('click', closeOptions);
+    }, { once: false });
+  }
 
   const played = (p.wins || 0) + (p.losses || 0);
   const winPct = played > 0 ? Math.round((p.wins / played) * 100) : null;
@@ -659,10 +714,11 @@ async function renderLadder(showNonMembers = false) {
 
   const visible = showNonMembers ? state.ladder : state.ladder.filter((p) => p.wsrc_member);
 
+  const adminMode = isAdmin();
   content.innerHTML = `
     <div class="table-card">
       <div class="table-toolbar">
-        <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''} &mdash; drag rows or use arrows to reorder</span>
+        <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''}${adminMode ? ' &mdash; drag rows or use arrows to reorder' : ''}</span>
         <label class="check-label check-label-inline">
           <input type="checkbox" id="showNonMembers" ${showNonMembers ? 'checked' : ''}>
           Show non-members
@@ -673,19 +729,19 @@ async function renderLadder(showNonMembers = false) {
           const rec = records[p.id] || { wins: 0, losses: 0 };
           const rating = p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : null;
           const nonMemberBadge = !p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : '';
-          const ratingBadge = rating ? `<span class="ladder-rating">${rating}</span>` : '';
+          const ratingBadge = adminMode && rating ? `<span class="ladder-rating">${rating}</span>` : '';
           return `
-          <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" draggable="true" data-id="${p.id}" data-idx="${i}">
-            <span class="ladder-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
+          <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" ${adminMode ? 'draggable="true"' : ''} data-id="${p.id}" data-idx="${i}">
+            ${adminMode ? `<span class="ladder-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>` : ''}
             <span class="ladder-rank">${i + 1}</span>
             <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
             ${ratingBadge}
             ${nonMemberBadge}
             <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
-            <div class="ladder-controls">
+            ${adminMode ? `<div class="ladder-controls">
               <button class="rank-btn" data-action="ladder-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
               <button class="rank-btn" data-action="ladder-down" data-idx="${i}" ${i === visible.length - 1 ? 'disabled' : ''}>&#9660;</button>
-            </div>
+            </div>` : ''}
           </div>`;
         }).join('')}
       </div>
@@ -720,10 +776,10 @@ async function renderLadder(showNonMembers = false) {
     renderLadder(showNonMembers);
   });
 
-  // Drag-and-drop (idx is within visible; map to state.ladder via id)
+  // Drag-and-drop (admin only)
   let dragIdx = null;
 
-  list.querySelectorAll('.ladder-row').forEach((row) => {
+  if (adminMode) list.querySelectorAll('.ladder-row').forEach((row) => {
     row.addEventListener('dragstart', (e) => {
       dragIdx = Number(row.dataset.idx);
       e.dataTransfer.effectAllowed = 'move';
@@ -763,11 +819,11 @@ async function saveLadder() {
 // ===== LEAGUES PAGE =====
 async function renderLeagues() {
   document.getElementById('pageTitle').textContent = 'Leagues';
-  document.getElementById('topbarActions').innerHTML = `
+  document.getElementById('topbarActions').innerHTML = isAdmin() ? `
     <button class="btn btn-primary" id="btnCreateLeague">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
       New League
-    </button>`;
+    </button>` : '';
 
   state.leagues = await window.api.getLeagues();
   const content = document.getElementById('mainContent');
@@ -777,7 +833,7 @@ async function renderLeagues() {
       <div class="table-card">
         <div class="empty-state">
           <strong>No leagues yet</strong>
-          <p>Create your first league to get started.</p>
+          <p>${isAdmin() ? 'Create your first league to get started.' : 'No leagues have been created yet.'}</p>
         </div>
       </div>`;
   } else {
@@ -790,7 +846,9 @@ async function renderLeagues() {
     });
   }
 
-  document.getElementById('btnCreateLeague').addEventListener('click', startCreateLeague);
+  if (isAdmin()) {
+    document.getElementById('btnCreateLeague').addEventListener('click', startCreateLeague);
+  }
 }
 
 function leagueCardHTML(league) {
@@ -1049,34 +1107,37 @@ function renderLeagueDetail() {
   const league = state.currentLeague;
   if (!league) { navigate('leagues'); return; }
 
+  const adminMode = isAdmin();
   document.getElementById('pageTitle').textContent = league.name;
-  document.getElementById('topbarActions').innerHTML = `
+  document.getElementById('topbarActions').innerHTML = adminMode ? `
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="print-boxes">Print Boxes</button>
         <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
       </div>
-    </div>`;
+    </div>` : '';
 
-  document.getElementById('optionsBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.getElementById('optionsDropdown').classList.toggle('open');
-  });
-  document.getElementById('optionsDropdown').addEventListener('click', (e) => {
-    const action = e.target.dataset.action;
-    if (action === 'print-boxes') {
-      document.getElementById('optionsDropdown').classList.remove('open');
-      printBoxes(league);
-    } else if (action === 'delete-league') {
-      document.getElementById('optionsDropdown').classList.remove('open');
-      confirmDeleteLeague(Number(e.target.dataset.id), e.target.dataset.name);
-    }
-  });
-  document.addEventListener('click', function closeOptions() {
-    document.getElementById('optionsDropdown')?.classList.remove('open');
-    document.removeEventListener('click', closeOptions);
-  }, { once: false });
+  if (adminMode) {
+    document.getElementById('optionsBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('optionsDropdown').classList.toggle('open');
+    });
+    document.getElementById('optionsDropdown').addEventListener('click', (e) => {
+      const action = e.target.dataset.action;
+      if (action === 'print-boxes') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        printBoxes(league);
+      } else if (action === 'delete-league') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        confirmDeleteLeague(Number(e.target.dataset.id), e.target.dataset.name);
+      }
+    });
+    document.addEventListener('click', function closeOptions() {
+      document.getElementById('optionsDropdown')?.classList.remove('open');
+      document.removeEventListener('click', closeOptions);
+    }, { once: false });
+  }
 
   const content = document.getElementById('mainContent');
   const numPlayers = league.num_teams * league.num_divisions;
@@ -1098,7 +1159,7 @@ function renderLeagueDetail() {
 
     <div class="section-title">Schedule <div class="divider"></div></div>
     <div class="schedule-list" id="scheduleList">
-      ${(league.weeks || []).map(renderWeekCard).join('')}
+      ${(league.weeks || []).map((w) => renderWeekCard(w, league, adminMode)).join('')}
     </div>`;
 
   // Week toggle
@@ -1108,10 +1169,17 @@ function renderLeagueDetail() {
     });
   });
 
-  // Score forms
-  content.querySelectorAll('.score-save-btn').forEach((btn) => {
-    btn.addEventListener('click', () => saveMatchScore(btn));
-  });
+  // Score forms (admin only)
+  if (adminMode) {
+    content.querySelectorAll('.score-save-btn').forEach((btn) => {
+      btn.addEventListener('click', () => saveMatchScore(btn));
+    });
+
+    // Sub buttons
+    content.querySelectorAll('.sub-btn').forEach((btn) => {
+      btn.addEventListener('click', () => openSubModal(btn));
+    });
+  }
 }
 
 function renderRosters(league) {
@@ -1134,7 +1202,7 @@ function renderRosters(league) {
   </div>`;
 }
 
-function renderWeekCard(week) {
+function renderWeekCard(week, league, adminMode = true) {
   const matchupsHTML = week.matchups.map((mu) => {
     if (mu.bye_team_id) {
       return `
@@ -1147,7 +1215,7 @@ function renderWeekCard(week) {
         <div class="matchup-title">
           ${esc(mu.team1_name)} <span class="vs-badge">VS</span> ${esc(mu.team2_name)}
         </div>
-        ${mu.matches.map((m) => renderMatchRow(m)).join('')}
+        ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
       </div>`;
   }).join('');
 
@@ -1176,38 +1244,64 @@ function bo5ScoreInputHTML(s1 = '', s2 = '') {
     <span class="score-hint">Bo5</span>`;
 }
 
-function renderMatchRow(match) {
+function renderMatchRow(match, league, adminMode = true) {
   const p1Won = match.winner_id != null && match.winner_id === match.player1_id;
   const p2Won = match.winner_id != null && match.winner_id === match.player2_id;
   const hasScore = match.player1_score != null && match.player2_score != null;
 
-  const scoreSection = hasScore
-    ? `<div class="match-score">
+  // Effective players (sub overrides original)
+  const eff1Name = match.sub1_name || match.player1_name;
+  const eff2Name = match.sub2_name || match.player2_name;
+  const p1SubBadge = match.sub1_name
+    ? `<span class="sub-badge" title="Subbing for ${esc(match.player1_name)}">SUB</span>` : '';
+  const p2SubBadge = match.sub2_name
+    ? `<span class="sub-badge" title="Subbing for ${esc(match.player2_name)}">SUB</span>` : '';
+
+  const showCourt = league && league.schedule_courts && match.court_number;
+  const courtInfo = showCourt
+    ? `<span class="match-court-label">Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}</span>`
+    : (match.match_time ? `<span class="match-court-label">${match.match_time}</span>` : '');
+
+  let scoreSection;
+  if (hasScore) {
+    scoreSection = `<div class="match-score">
          <span class="score-display">${match.player1_score} – ${match.player2_score}</span>
-         <button class="btn btn-ghost btn-sm score-save-btn" style="font-size:11px;padding:4px 8px"
-           data-match-id="${match.id}"
-           data-p1-id="${match.player1_id}"
-           data-p2-id="${match.player2_id}"
-           data-editing="false">Edit</button>
-       </div>`
-    : `<div class="match-score">
+         ${adminMode ? `<button class="btn btn-ghost btn-sm score-save-btn" style="font-size:11px;padding:4px 8px"
+           data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="false">Edit</button>` : ''}
+       </div>`;
+  } else if (adminMode) {
+    scoreSection = `<div class="match-score">
          ${bo5ScoreInputHTML()}
          <button class="btn btn-success btn-sm score-save-btn" style="font-size:11px"
-           data-match-id="${match.id}"
-           data-p1-id="${match.player1_id}"
-           data-p2-id="${match.player2_id}"
-           data-editing="true">Save</button>
+           data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="true">Save</button>
        </div>`;
+  } else {
+    scoreSection = `<div class="match-score"><span class="text-muted" style="font-size:13px">—</span></div>`;
+  }
+
+  const leagueId = league ? league.id : '';
 
   return `
     <div class="match-row" data-match-id="${match.id}">
-      <span class="match-div-label">${esc(match.division_name)}</span>
-      <div class="match-players">
-        <span class="match-player${p1Won ? ' winner' : ''}">${esc(match.player1_name)}</span>
-        <span class="text-muted" style="font-size:11px">vs</span>
-        <span class="match-player${p2Won ? ' winner' : ''}">${esc(match.player2_name)}</span>
+      <div class="match-meta">
+        <span class="match-div-label">${esc(match.division_name)}</span>
+        ${courtInfo}
       </div>
-      ${scoreSection}
+      <div class="match-players">
+        <span class="match-player${p1Won ? ' winner' : ''}">${p1SubBadge}${esc(eff1Name)}</span>
+        <span class="text-muted" style="font-size:11px">vs</span>
+        <span class="match-player${p2Won ? ' winner' : ''}">${p2SubBadge}${esc(eff2Name)}</span>
+      </div>
+      <div class="match-actions">
+        ${scoreSection}
+        ${adminMode && !hasScore ? `<button class="btn btn-ghost btn-sm sub-btn" style="font-size:11px"
+          data-match-id="${match.id}"
+          data-league-id="${leagueId}"
+          data-p1-id="${match.player1_id}" data-p1-name="${esc(match.player1_name)}"
+          data-p2-id="${match.player2_id}" data-p2-name="${esc(match.player2_name)}"
+          data-sub1-id="${match.sub1_id || ''}" data-sub1-name="${esc(match.sub1_name || '')}"
+          data-sub2-id="${match.sub2_id || ''}" data-sub2-name="${esc(match.sub2_name || '')}">Sub</button>` : ''}
+      </div>
     </div>`;
 }
 
@@ -1264,6 +1358,108 @@ async function saveMatchScore(btn) {
   );
 }
 
+// ===== SUB MODAL =====
+async function openSubModal(btn) {
+  const matchId   = Number(btn.dataset.matchId);
+  const leagueId  = Number(btn.dataset.leagueId);
+  const p1Id      = Number(btn.dataset.p1Id);
+  const p1Name    = btn.dataset.p1Name;
+  const p2Id      = Number(btn.dataset.p2Id);
+  const p2Name    = btn.dataset.p2Name;
+  const sub1Id    = btn.dataset.sub1Id ? Number(btn.dataset.sub1Id) : null;
+  const sub1Name  = btn.dataset.sub1Name || '';
+  const sub2Id    = btn.dataset.sub2Id ? Number(btn.dataset.sub2Id) : null;
+  const sub2Name  = btn.dataset.sub2Name || '';
+
+  // Load all players for the picker
+  const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
+
+  const playerOptions = (excludeIds) => allPlayers
+    .filter((p) => !excludeIds.includes(p.id))
+    .map((p) => `<option value="${p.id}">${esc(p.name)}</option>`)
+    .join('');
+
+  const subRowHTML = (slot, origId, origName, _subId, subName) => `
+    <div class="sub-slot" style="margin-bottom:18px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">
+        ${esc(origName)}
+        ${subName ? `<span class="sub-badge" style="margin-left:6px">SUB: ${esc(subName)}</span>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="form-control sub-select" data-slot="${slot}" data-orig-id="${origId}" style="flex:1">
+          <option value="">— No sub (play original player) —</option>
+          ${playerOptions([origId])}
+        </select>
+      </div>
+    </div>`;
+
+  modal.open('Manage Subs', `
+    <p class="text-muted" style="font-size:13px;margin-bottom:20px">
+      Select a substitute for either player. Choose "No sub" to remove an existing sub.
+    </p>
+    ${subRowHTML(1, p1Id, p1Name, sub1Id, sub1Name)}
+    ${subRowHTML(2, p2Id, p2Name, sub2Id, sub2Name)}
+    <div class="form-group form-group-check" id="subRemainingGroup">
+      <label class="check-label">
+        <input type="checkbox" id="subRemaining" checked>
+        Apply to all remaining unscored matches for this player
+      </label>
+    </div>
+    <div id="fError" class="form-error"></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit">Save</button>
+    </div>`);
+
+  // Pre-select existing subs
+  const sel1 = document.querySelector('.sub-select[data-slot="1"]');
+  const sel2 = document.querySelector('.sub-select[data-slot="2"]');
+  if (sub1Id) sel1.value = sub1Id;
+  if (sub2Id) sel2.value = sub2Id;
+
+  // Show "apply remaining" only when a sub is actually selected
+  const updateRemainingVisibility = () => {
+    const anySubSelected = sel1.value !== '' || sel2.value !== '';
+    document.getElementById('subRemainingGroup').style.display = anySubSelected ? '' : 'none';
+  };
+  updateRemainingVisibility();
+  sel1.addEventListener('change', updateRemainingVisibility);
+  sel2.addEventListener('change', updateRemainingVisibility);
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSubmit').addEventListener('click', async () => {
+    const applyRemaining = document.getElementById('subRemaining').checked;
+    const saves = [];
+
+    for (const sel of [sel1, sel2]) {
+      const origId = Number(sel.dataset.origId);
+      const subVal = sel.value ? Number(sel.value) : null;
+
+      if (subVal) {
+        saves.push(window.api.setMatchSub({ matchId, originalPlayerId: origId, subPlayerId: subVal }));
+        if (applyRemaining) {
+          saves.push(window.api.setSubRemaining({ leagueId, originalPlayerId: origId, subPlayerId: subVal }));
+        }
+      } else {
+        // No sub selected — remove if there was one
+        saves.push(window.api.removeMatchSub({ matchId, originalPlayerId: origId }));
+      }
+    }
+
+    try {
+      await Promise.all(saves);
+      modal.close();
+      toast('Subs updated', 'success');
+      // Reload the league to reflect changes
+      const league = await window.api.getLeague(leagueId);
+      state.currentLeague = league;
+      renderLeagueDetail();
+    } catch (e) {
+      document.getElementById('fError').textContent = e.message || 'Failed to save subs.';
+    }
+  });
+}
+
 // ===== CREATE LEAGUE WIZARD =====
 function startCreateLeague() {
   state.wizard = {
@@ -1276,6 +1472,11 @@ function startCreateLeague() {
     numRounds: 1,
     blackoutDates: [],
     teamNames: [],
+    matchStartTime: '19:00',
+    numCourts: 2,
+    matchDuration: 45,
+    matchBuffer: 15,
+    scheduleCourts: false,
   };
   navigate('createLeague');
 }
@@ -1454,7 +1655,7 @@ async function renderStep2() {
 // Step 3 — Structure
 async function renderStep3() {
   const n = state.wizard.rankedPlayers.length;
-  const { numTeams, numRounds } = state.wizard;
+  const { numTeams, numRounds, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
   const configs = await window.api.getValidConfigs(n);
 
   const isValid = numTeams >= 2 && n % numTeams === 0;
@@ -1468,39 +1669,84 @@ async function renderStep3() {
     warning = nearestConfigWarning(n, configs, 'teams', numTeams);
   }
 
+  // Late night warning: calculate latest possible end time on a league night
+  let lateWarning = '';
+  if (isValid && matchStartTime && numCourts >= 1) {
+    const matchesPerWeek = Math.floor(numTeams / 2) * numDivisions;
+    const slots = Math.ceil(matchesPerWeek / numCourts);
+    const totalMins = slots * (matchDuration + matchBuffer);
+    const [sh, sm] = matchStartTime.split(':').map(Number);
+    const endMins = sh * 60 + sm + totalMins;
+    if (endMins > 21 * 60) {
+      const endH = Math.floor(endMins / 60);
+      const endM = String(endMins % 60).padStart(2, '0');
+      lateWarning = `Latest matches on a league night may finish around <strong>${endH}:${endM}</strong> — after 9:00 PM.`;
+    }
+  }
+
   document.getElementById('wizardCard').innerHTML = `
     <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">League Structure</h3>
     <p class="text-muted" style="font-size:13px;margin-bottom:20px">
-      You have <strong>${n} players</strong>. Set the number of teams and how many times to play through the schedule.
+      You have <strong>${n} players</strong>. Set the number of teams and match scheduling options.
     </p>
 
-    <div class="form-group" style="max-width:200px">
-      <label>Number of Teams</label>
-      <input class="form-control" id="wTeams" type="number" min="2" value="${numTeams}" style="font-size:16px;font-weight:600">
-    </div>
+    <div class="step3-grid">
+      <div>
+        <div class="form-group">
+          <label>Number of Teams</label>
+          <input class="form-control" id="wTeams" type="number" min="2" value="${numTeams}" style="font-size:16px;font-weight:600">
+        </div>
 
-    <div class="structure-calc">
-      <div class="calc-row">
-        <span><strong>${numTeams || '?'}</strong> teams</span>
-        <span class="calc-eq">&times;</span>
-        <span><strong>${isValid ? numDivisions : '?'}</strong> divisions</span>
-        <span class="calc-eq">=</span>
-        <span class="calc-val ${calcClass}">${isValid ? n : '?'} players ${isValid ? '&#10003;' : ''}</span>
+        <div class="structure-calc">
+          <div class="calc-row">
+            <span><strong>${numTeams || '?'}</strong> teams</span>
+            <span class="calc-eq">&times;</span>
+            <span><strong>${isValid ? numDivisions : '?'}</strong> divisions</span>
+            <span class="calc-eq">=</span>
+            <span class="calc-val ${calcClass}">${isValid ? n : '?'} players ${isValid ? '&#10003;' : ''}</span>
+          </div>
+        </div>
+
+        ${warning ? `<div class="struct-warning">${warning}</div>` : ''}
+
+        <div class="form-group" style="margin-top:20px">
+          <label>Rounds through the schedule</label>
+          <input class="form-control" id="wRounds" type="number" min="1" value="${numRounds}">
+          ${isValid ? `<p class="text-muted" style="font-size:12px;margin-top:6px">${baseWeeks} weeks &times; ${numRounds} round(s) = <strong>${totalWeeks} total weeks</strong></p>` : ''}
+        </div>
+
+        ${configs.length > 0 ? `
+          <p style="font-size:12px;color:var(--text-muted);margin-top:4px">
+            Valid team counts: ${configs.map((c) => `<strong>${c.teams}</strong>`).join(', ')}
+          </p>` : ''}
+      </div>
+
+      <div>
+        <div class="form-group">
+          <label>Match Start Time</label>
+          <input class="form-control" id="wStartTime" type="time" value="${matchStartTime}">
+        </div>
+        <div class="form-group">
+          <label># of Courts</label>
+          <input class="form-control" id="wCourts" type="number" min="1" value="${numCourts}">
+        </div>
+        <div class="form-group">
+          <label>Match Duration <span class="form-hint">(minutes)</span></label>
+          <input class="form-control" id="wDuration" type="number" min="1" value="${matchDuration}">
+        </div>
+        <div class="form-group">
+          <label>Buffer Between Matches <span class="form-hint">(minutes)</span></label>
+          <input class="form-control" id="wBuffer" type="number" min="0" value="${matchBuffer}">
+        </div>
+        <div class="form-group form-group-check">
+          <label class="check-label">
+            <input type="checkbox" id="wScheduleCourts" ${scheduleCourts ? 'checked' : ''}>
+            Display court assignments on schedule
+          </label>
+        </div>
+        ${lateWarning ? `<div class="struct-warning struct-warning-late">&#9888; ${lateWarning}</div>` : ''}
       </div>
     </div>
-
-    ${warning ? `<div class="struct-warning">${warning}</div>` : ''}
-
-    <div class="form-group" style="max-width:200px;margin-top:20px">
-      <label>Rounds through the schedule</label>
-      <input class="form-control" id="wRounds" type="number" min="1" value="${numRounds}">
-      ${isValid ? `<p class="text-muted" style="font-size:12px;margin-top:6px">${baseWeeks} weeks &times; ${numRounds} round(s) = <strong>${totalWeeks} total weeks</strong></p>` : ''}
-    </div>
-
-    ${configs.length > 0 ? `
-      <p style="font-size:12px;color:var(--text-muted);margin-top:14px">
-        Valid team counts for ${n} players: ${configs.map((c) => `<strong>${c.teams}</strong>`).join(', ')}
-      </p>` : ''}
 
     <div id="wError" class="form-error mt-4"></div>
     <div class="wizard-footer">
@@ -1521,9 +1767,28 @@ async function renderStep3() {
     state.wizard.numTeams = Number(e.target.value) || 0;
     renderCreateLeague();
   });
-
   document.getElementById('wRounds').addEventListener('input', (e) => {
     state.wizard.numRounds = Math.max(1, Number(e.target.value) || 1);
+    renderCreateLeague();
+  });
+  document.getElementById('wStartTime').addEventListener('change', (e) => {
+    state.wizard.matchStartTime = e.target.value;
+    renderCreateLeague();
+  });
+  document.getElementById('wCourts').addEventListener('input', (e) => {
+    state.wizard.numCourts = Math.max(1, Number(e.target.value) || 1);
+    renderCreateLeague();
+  });
+  document.getElementById('wDuration').addEventListener('input', (e) => {
+    state.wizard.matchDuration = Math.max(1, Number(e.target.value) || 1);
+    renderCreateLeague();
+  });
+  document.getElementById('wBuffer').addEventListener('input', (e) => {
+    state.wizard.matchBuffer = Math.max(0, Number(e.target.value) || 0);
+    renderCreateLeague();
+  });
+  document.getElementById('wScheduleCourts').addEventListener('change', (e) => {
+    state.wizard.scheduleCourts = e.target.checked;
     renderCreateLeague();
   });
 }
@@ -1669,11 +1934,14 @@ function renderStep5() {
 
     <div class="preview-grid">
       <div class="preview-section">
-        <h4>Team Rosters <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(click name to edit)</span></h4>
-        <div class="team-list">
-          ${teams.map((t, i) => `
+        <h4 style="display:flex;align-items:center;justify-content:space-between">
+          Team Rosters
+          <button class="btn btn-outline btn-sm" id="btnEditTeams">Edit Teams</button>
+        </h4>
+        <div class="team-list" id="rosterPreview">
+          ${teams.map((t) => `
             <div class="team-row">
-              <input class="team-name-input" data-team-idx="${i}" value="${esc(t.name)}" aria-label="Team name">
+              <div class="team-name-display">${esc(t.name)}</div>
               <div class="team-players">${t.players.map((p) => `${esc(p.name)} (${p.div})`).join(', ')}</div>
             </div>`).join('')}
         </div>
@@ -1694,17 +1962,118 @@ function renderStep5() {
   document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 4; renderCreateLeague(); });
   document.getElementById('wCreate').addEventListener('click', submitCreateLeague);
 
-  // Live-update teamNames in state and schedule preview spans as user types
-  const LABELS_PREVIEW = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  document.querySelectorAll('.team-name-input').forEach((input) => {
-    input.addEventListener('input', (e) => {
-      const idx = Number(e.target.dataset.teamIdx);
-      state.wizard.teamNames[idx] = e.target.value;
-      const displayName = e.target.value.trim() || `Team ${LABELS_PREVIEW[idx]}`;
-      document.querySelectorAll(`.sched-team[data-team-idx="${idx}"]`).forEach((span) => {
-        span.textContent = displayName;
+  document.getElementById('btnEditTeams').addEventListener('click', () => openEditTeamsModal(numTeams, numDivisions));
+}
+
+function openEditTeamsModal(numTeams, numDivisions) {
+  const LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  // Work on a mutable copy of rankedPlayers and teamNames
+  let workingPlayers = [...state.wizard.rankedPlayers];
+  let workingNames = [...state.wizard.teamNames];
+
+  const getPlayer = (divIdx, teamIdx) => workingPlayers[divIdx * numTeams + teamIdx];
+
+  const renderGrid = () => {
+    // Team name inputs
+    document.querySelectorAll('.et-team-name').forEach((inp) => {
+      workingNames[Number(inp.dataset.teamIdx)] = inp.value;
+    });
+
+    const nameInputs = Array.from({ length: numTeams }, (_, i) => `
+      <th style="padding:6px 8px;min-width:110px">
+        <input class="form-control et-team-name" data-team-idx="${i}"
+          value="${esc(workingNames[i])}" placeholder="Team ${LABELS[i]}"
+          style="font-size:12px;padding:5px 8px;text-align:center">
+      </th>`).join('');
+
+    const divRows = Array.from({ length: numDivisions }, (_, divIdx) => {
+      const cells = Array.from({ length: numTeams }, (_, teamIdx) => {
+        const p = getPlayer(divIdx, teamIdx);
+        return `<td style="padding:6px 8px;text-align:center">
+          <button class="et-player-btn" data-div="${divIdx}" data-team="${teamIdx}"
+            style="width:100%;padding:7px 10px;border:2px solid var(--border);border-radius:6px;
+                   background:var(--surface);cursor:pointer;font-size:13px;white-space:nowrap">
+            ${esc(p?.name || '—')}
+          </button>
+        </td>`;
+      }).join('');
+      return `<tr>
+        <td style="padding:6px 10px;font-size:12px;font-weight:600;color:var(--text-muted);white-space:nowrap">Div ${divIdx + 1}</td>
+        ${cells}
+      </tr>`;
+    }).join('');
+
+    document.getElementById('etGrid').innerHTML = `
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr><th></th>${nameInputs}</tr></thead>
+        <tbody>${divRows}</tbody>
+      </table>`;
+
+    let selected = null; // { divIdx, teamIdx }
+
+    document.querySelectorAll('.et-player-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // Flush name inputs before any swap
+        document.querySelectorAll('.et-team-name').forEach((inp) => {
+          workingNames[Number(inp.dataset.teamIdx)] = inp.value;
+        });
+
+        const divIdx  = Number(btn.dataset.div);
+        const teamIdx = Number(btn.dataset.team);
+
+        if (!selected) {
+          selected = { divIdx, teamIdx };
+          btn.style.borderColor = 'var(--accent)';
+          btn.style.background = 'rgba(58,77,181,0.08)';
+        } else {
+          if (selected.divIdx === divIdx && selected.teamIdx === teamIdx) {
+            // Deselect
+            selected = null;
+            btn.style.borderColor = 'var(--border)';
+            btn.style.background = 'var(--surface)';
+            return;
+          }
+          // Swap the two players in workingPlayers
+          const idxA = selected.divIdx * numTeams + selected.teamIdx;
+          const idxB = divIdx * numTeams + teamIdx;
+          [workingPlayers[idxA], workingPlayers[idxB]] = [workingPlayers[idxB], workingPlayers[idxA]];
+          selected = null;
+          renderGrid();
+        }
       });
     });
+
+    // Re-attach name input listeners to keep workingNames in sync
+    document.querySelectorAll('.et-team-name').forEach((inp) => {
+      inp.addEventListener('input', () => {
+        workingNames[Number(inp.dataset.teamIdx)] = inp.value;
+      });
+    });
+  };
+
+  modal.open('Edit Teams', `
+    <p class="text-muted" style="font-size:13px;margin-bottom:16px">
+      Edit team names above. Click any two players in the same or different divisions to swap them.
+    </p>
+    <div id="etGrid"></div>
+    <div id="fError" class="form-error" style="margin-top:8px"></div>
+    <div class="form-actions" style="margin-top:20px">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit">Save</button>
+    </div>`, { wide: true });
+
+  renderGrid();
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSubmit').addEventListener('click', () => {
+    // Flush any unsaved name inputs
+    document.querySelectorAll('.et-team-name').forEach((inp) => {
+      workingNames[Number(inp.dataset.teamIdx)] = inp.value.trim() || `Team ${LABELS[Number(inp.dataset.teamIdx)]}`;
+    });
+    state.wizard.rankedPlayers = workingPlayers;
+    state.wizard.teamNames = workingNames;
+    modal.close();
+    renderStep5(); // Re-render step 5 with updated data
   });
 }
 
@@ -1744,7 +2113,8 @@ async function submitCreateLeague() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Creating…';
 
-  const { leagueName, startDate, rankedPlayers, numTeams, numDivisions, numRounds, blackoutDates, teamNames } = state.wizard;
+  const { leagueName, startDate, rankedPlayers, numTeams, numDivisions, numRounds, blackoutDates, teamNames,
+          matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
   const payload = {
     name: leagueName,
     startDate,
@@ -1753,6 +2123,11 @@ async function submitCreateLeague() {
     numRounds,
     blackoutDates,
     teamNames,
+    matchStartTime,
+    numCourts,
+    matchDuration,
+    matchBuffer,
+    scheduleCourts,
     rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
   };
 
@@ -1770,6 +2145,9 @@ async function submitCreateLeague() {
 
 // ===== INIT =====
 window.addEventListener('DOMContentLoaded', async () => {
+  try {
+    state.currentUser = await fetch('/api/me').then((r) => r.json());
+  } catch (_) {}
   state.players = await window.api.getPlayers();
   navigate('players');
 });

@@ -15,8 +15,16 @@ function initDB(dbPath) {
   const migrations = [
     `ALTER TABLE leagues ADD COLUMN num_rounds INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE leagues ADD COLUMN blackout_dates TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE leagues ADD COLUMN match_start_time TEXT NOT NULL DEFAULT '19:00'`,
+    `ALTER TABLE leagues ADD COLUMN num_courts INTEGER NOT NULL DEFAULT 2`,
+    `ALTER TABLE leagues ADD COLUMN match_duration INTEGER NOT NULL DEFAULT 45`,
+    `ALTER TABLE leagues ADD COLUMN match_buffer INTEGER NOT NULL DEFAULT 15`,
+    `ALTER TABLE leagues ADD COLUMN schedule_courts INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE players ADD COLUMN wsrc_member INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE players ADD COLUMN club_locker_rating REAL`,
+    `ALTER TABLE matches ADD COLUMN court_number INTEGER`,
+    `ALTER TABLE matches ADD COLUMN match_time TEXT`,
+    `CREATE TABLE IF NOT EXISTS user_accounts (player_id INTEGER PRIMARY KEY, password_hash TEXT, invite_token TEXT, invite_expires TEXT, reset_token TEXT, reset_expires TEXT, FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE)`,
   ];
   for (const sql of migrations) {
     try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }

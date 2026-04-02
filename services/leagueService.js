@@ -15,7 +15,13 @@ const { generateRoundRobin, addDays } = require('../utils/helpers');
  * @param {string[]} [data.blackoutDates=[]]   YYYY-MM-DD dates to skip when assigning weeks
  * @param {string[]} [data.teamNames=[]]       Custom team names; falls back to "Team A", "Team B", …
  */
-async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [] }) {
+function addMinutes(timeStr, minutes) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
   const total = numTeams * numDivisions;
   if (total !== rankedPlayers.length) {
     throw new Error(
@@ -24,7 +30,7 @@ async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivis
   }
 
   // --- League record ---
-  const leagueId = await leagueModel.createLeagueRecord({ name, startDate, numTeams, numDivisions, numRounds, blackoutDates });
+  const leagueId = await leagueModel.createLeagueRecord({ name, startDate, numTeams, numDivisions, numRounds, blackoutDates, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts });
 
   // --- Teams ---
   const TEAM_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -71,10 +77,10 @@ async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivis
   }
 
   const blackoutSet = new Set(blackoutDates);
+  const slotMinutes = matchDuration + matchBuffer;
   let currentDate = startDate;
 
   for (let r = 0; r < allRounds.length; r++) {
-    // Skip any blackout dates
     while (blackoutSet.has(currentDate)) {
       currentDate = addDays(currentDate, 7);
     }
@@ -86,6 +92,9 @@ async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivis
       [leagueId, r + 1, weekDate]
     );
     const weekId = weekResult.lastID;
+
+    // Collect all matches for this week so we can assign courts/times
+    const weekMatches = []; // { matchupId, divId, p1, p2 }
 
     for (const matchup of allRounds[r]) {
       if (matchup.bye) {
@@ -100,7 +109,6 @@ async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivis
         );
         const matchupId = matchupResult.lastID;
 
-        // One match per division between the two teams
         for (let d = 0; d < numDivisions; d++) {
           const divId = divisionIds[d];
           const p1 = await get(
@@ -111,15 +119,30 @@ async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivis
             'SELECT player_id FROM league_players WHERE league_id = ? AND team_id = ? AND division_id = ?',
             [leagueId, matchup.team2, divId]
           );
-
           if (p1 && p2) {
-            await run(
-              'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id) VALUES (?, ?, ?, ?)',
-              [matchupId, divId, p1.player_id, p2.player_id]
-            );
+            weekMatches.push({ matchupId, divId, p1Id: p1.player_id, p2Id: p2.player_id });
           }
         }
       }
+    }
+
+    // Shuffle matches randomly so no team/player always gets the same time slot
+    for (let i = weekMatches.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
+    }
+
+    // Assign courts and times: stagger across numCourts
+    for (let i = 0; i < weekMatches.length; i++) {
+      const courtIdx = i % numCourts;
+      const slotIdx  = Math.floor(i / numCourts);
+      const time = addMinutes(matchStartTime, slotIdx * slotMinutes);
+      const courtNumber = courtIdx + 1;
+
+      await run(
+        'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
+        [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtNumber, time]
+      );
     }
   }
 
