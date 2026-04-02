@@ -160,6 +160,8 @@ function renderPage() {
 async function renderPlayers() {
   document.getElementById('pageTitle').textContent = 'Players';
   document.getElementById('topbarActions').innerHTML = `
+    <button class="btn btn-outline" id="btnExport">Export CSV</button>
+    <button class="btn btn-outline" id="btnImport">Import CSV</button>
     <button class="btn btn-outline" id="btnBulkAdd">Add Multiple</button>
     <button class="btn btn-primary" id="btnAddPlayer">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
@@ -171,6 +173,8 @@ async function renderPlayers() {
 
   document.getElementById('btnAddPlayer').addEventListener('click', openAddPlayerModal);
   document.getElementById('btnBulkAdd').addEventListener('click', openBulkAddModal);
+  document.getElementById('btnExport').addEventListener('click', exportPlayersCsv);
+  document.getElementById('btnImport').addEventListener('click', openImportModal);
 }
 
 function playerRowsHTML(players, filtered) {
@@ -334,6 +338,120 @@ function confirmDeletePlayer(id, name) {
     modal.close();
     toast('Player deleted');
     navigate('players');
+  });
+}
+
+function exportPlayersCsv() {
+  const headers = ['name', 'email', 'phone', 'wsrc_member', 'club_locker_rating'];
+  const rows = state.players.map((p) => [
+    p.name,
+    p.email || '',
+    p.phone || '',
+    p.wsrc_member ? '1' : '0',
+    p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : '',
+  ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'wsrc-players.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function openImportModal() {
+  modal.open('Import Players from CSV', `
+    <p class="text-muted" style="font-size:13px;margin-bottom:4px">
+      Upload a CSV exported from this app. Existing players with the same name will be skipped.
+    </p>
+    <p class="text-muted" style="font-size:12px;margin-bottom:16px">
+      Expected columns: <code>name, email, phone, wsrc_member, club_locker_rating</code>
+    </p>
+    <input type="file" accept=".csv" id="fCsvFile" class="form-control" style="margin-bottom:0">
+    <div id="fError" class="form-error" style="margin-top:8px"></div>
+    <div id="importPreview" style="margin-top:14px"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit" disabled>Import</button>
+    </div>`);
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+
+  let parsed = [];
+
+  document.getElementById('fCsvFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const lines = ev.target.result.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) {
+        document.getElementById('fError').textContent = 'File appears to be empty.';
+        return;
+      }
+      const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
+      const nameIdx   = headers.indexOf('name');
+      const emailIdx  = headers.indexOf('email');
+      const phoneIdx  = headers.indexOf('phone');
+      const memberIdx = headers.indexOf('wsrc_member');
+      const ratingIdx = headers.indexOf('club_locker_rating');
+      if (nameIdx === -1) {
+        document.getElementById('fError').textContent = 'Missing required "name" column.';
+        return;
+      }
+      const parseCell = (row, idx) => {
+        if (idx === -1 || !row[idx]) return '';
+        return row[idx].trim().replace(/^"|"$/g, '').replace(/""/g, '"');
+      };
+      parsed = [];
+      const existingNames = new Set(state.players.map((p) => p.name.toLowerCase()));
+      const skipped = [];
+      for (let i = 1; i < lines.length; i++) {
+        const row = lines[i].match(/(".*?"|[^,]+|(?<=,)(?=,)|^(?=,)|(?<=,)$)/g) || lines[i].split(',');
+        const name = parseCell(row, nameIdx).trim();
+        if (!name) continue;
+        if (existingNames.has(name.toLowerCase())) { skipped.push(name); continue; }
+        parsed.push({
+          name,
+          email: parseCell(row, emailIdx),
+          phone: parseCell(row, phoneIdx),
+          wsrc_member: parseCell(row, memberIdx) === '1',
+          club_locker_rating: parseCell(row, ratingIdx) || '',
+        });
+      }
+      document.getElementById('fError').textContent = '';
+      const preview = document.getElementById('importPreview');
+      if (parsed.length === 0 && skipped.length === 0) {
+        preview.innerHTML = `<p class="text-muted" style="font-size:13px">No new players found in file.</p>`;
+        document.getElementById('fSubmit').disabled = true;
+        return;
+      }
+      preview.innerHTML = `
+        <p style="font-size:13px;margin-bottom:6px">
+          <strong>${parsed.length}</strong> player${parsed.length !== 1 ? 's' : ''} will be imported
+          ${skipped.length ? `<span class="text-muted"> &mdash; ${skipped.length} skipped (name already exists)</span>` : ''}
+        </p>
+        <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;font-size:12px">
+          ${parsed.map((p) => `<div style="padding:6px 10px;border-bottom:1px solid var(--border)">${esc(p.name)}${p.email ? ` &mdash; ${esc(p.email)}` : ''}</div>`).join('')}
+        </div>`;
+      document.getElementById('fSubmit').disabled = parsed.length === 0;
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById('fSubmit').addEventListener('click', async () => {
+    if (!parsed.length) return;
+    document.getElementById('fSubmit').disabled = true;
+    document.getElementById('fSubmit').textContent = 'Importing…';
+    let added = 0;
+    for (const p of parsed) {
+      try { await window.api.addPlayer(p); added++; } catch (_) {}
+    }
+    modal.close();
+    toast(`Imported ${added} player${added !== 1 ? 's' : ''}`, 'success');
+    state.players = await window.api.getPlayers();
+    renderPlayerTable(state.players);
   });
 }
 
