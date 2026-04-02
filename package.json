@@ -3,11 +3,8 @@
   "version": "1.0.0",
   "main": "main/main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "node server/server.js",
     "dev": "node server.js"
-  },
-  "devDependencies": {
-    "electron": "^33.4.11"
   },
   "dependencies": {
     "express": "^5.2.1",
