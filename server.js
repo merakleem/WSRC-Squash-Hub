@@ -9,7 +9,7 @@ const ladderModel = require('./models/ladderModel');
 const { getValidConfigurations } = require('./utils/helpers');
 
 const PORT = process.env.PORT || 3000;
-const DB_PATH = path.join(__dirname, 'squash.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
 const SITE_PASSWORD = process.env.SITE_PASSWORD || 'wsrc2025';
 // Token is a hash of the password — used as the cookie value
 const AUTH_TOKEN = crypto.createHash('sha256').update(SITE_PASSWORD).digest('hex');
@@ -36,9 +36,8 @@ function isAuthenticated(req) {
   return parseCookies(req)[COOKIE_NAME] === AUTH_TOKEN;
 }
 
-app.get('/login', (req, res) => {
-  if (isAuthenticated(req)) return res.redirect('/');
-  res.send(`<!DOCTYPE html>
+function loginPage(error = false) {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -57,15 +56,20 @@ app.get('/login', (req, res) => {
     .card {
       background: #fff;
       border-radius: 12px;
-      padding: 40px 36px;
+      overflow: hidden;
       width: 100%;
       max-width: 360px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.35);
       text-align: center;
     }
-    .logo { width: 80px; height: 80px; object-fit: contain; margin-bottom: 16px; }
+    .card-header {
+      background: #1e2758;
+      padding: 32px 36px 28px;
+    }
+    .logo { width: 90px; height: 90px; object-fit: contain; }
+    .card-body { padding: 28px 36px 32px; }
     h1 { font-size: 18px; font-weight: 700; color: #1e2758; margin-bottom: 6px; }
-    p { font-size: 13px; color: #6b7e93; margin-bottom: 24px; }
+    p { font-size: 13px; color: #6b7e93; margin-bottom: 20px; }
     input {
       width: 100%;
       padding: 10px 14px;
@@ -93,17 +97,26 @@ app.get('/login', (req, res) => {
 </head>
 <body>
   <div class="card">
-    <img class="logo" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC Logo">
-    <h1>WSRC Squash Manager</h1>
-    <p>Enter the password to continue</p>
-    <form method="POST" action="/login">
-      <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
-      <button type="submit">Sign In</button>
-      ${res.locals.error ? `<div class="error">Incorrect password</div>` : ''}
-    </form>
+    <div class="card-header">
+      <img class="logo" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC Logo">
+    </div>
+    <div class="card-body">
+      <h1>WSRC Squash Manager</h1>
+      <p>Enter the password to continue</p>
+      <form method="POST" action="/login">
+        <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
+        <button type="submit">Sign In</button>
+        ${error ? '<div class="error">Incorrect password</div>' : ''}
+      </form>
+    </div>
   </div>
 </body>
-</html>`);
+</html>`;
+}
+
+app.get('/login', (req, res) => {
+  if (isAuthenticated(req)) return res.redirect('/');
+  res.send(loginPage());
 });
 
 app.post('/login', (req, res) => {
@@ -111,74 +124,11 @@ app.post('/login', (req, res) => {
     res.setHeader('Set-Cookie', `${COOKIE_NAME}=${AUTH_TOKEN}; Path=/; HttpOnly; SameSite=Lax`);
     return res.redirect('/');
   }
-  res.locals.error = true;
-  res.status(401).send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WSRC Squash Manager</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1e2758;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-    }
-    .card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 40px 36px;
-      width: 100%;
-      max-width: 360px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
-      text-align: center;
-    }
-    .logo { width: 80px; height: 80px; object-fit: contain; margin-bottom: 16px; }
-    h1 { font-size: 18px; font-weight: 700; color: #1e2758; margin-bottom: 6px; }
-    p { font-size: 13px; color: #6b7e93; margin-bottom: 24px; }
-    input {
-      width: 100%;
-      padding: 10px 14px;
-      border: 1px solid #dce3ed;
-      border-radius: 8px;
-      font-size: 14px;
-      margin-bottom: 12px;
-      outline: none;
-    }
-    input:focus { border-color: #3a4db5; }
-    button {
-      width: 100%;
-      padding: 10px;
-      background: #1e2758;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    button:hover { background: #28348a; }
-    .error { color: #c0392b; font-size: 13px; margin-top: 10px; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <img class="logo" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC Logo">
-    <h1>WSRC Squash Manager</h1>
-    <p>Enter the password to continue</p>
-    <form method="POST" action="/login">
-      <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
-      <button type="submit">Sign In</button>
-      <div class="error">Incorrect password</div>
-    </form>
-  </div>
-</body>
-</html>`);
+  res.status(401).send(loginPage(true));
 });
+
+// Public assets (served before auth check so login page logo works)
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Protect all other routes
 app.use((req, res, next) => {
@@ -187,7 +137,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.static(path.join(__dirname, 'renderer')));
-app.use(express.static(path.join(__dirname, 'public')));
 
 // Wrap async route handlers so unhandled rejections become 500 responses
 const wrap = (fn) => (req, res) =>
