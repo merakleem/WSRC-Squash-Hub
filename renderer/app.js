@@ -34,8 +34,7 @@ if (typeof window !== 'undefined' && !window.api) {
     getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
     getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
 
-    invitePlayer:           (id) => _apiFetch('POST', `/api/players/${id}/invite`),
-    resetPlayerPassword:    (id) => _apiFetch('POST', `/api/players/${id}/reset-password`),
+    getPasswordLink:        (id) => _apiFetch('POST', `/api/players/${id}/invite`),
   };
 }
 
@@ -345,7 +344,7 @@ function openEditPlayerModal(player) {
 function showCopyLinkModal(title, url) {
   modal.open(title, `
     <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-      Copy this link and send it to the player. It expires after 7 days.
+      Send this link to the player. They'll use it to set (or reset) their password. Expires in 7 days.
     </p>
     <input class="form-control" id="copyLinkInput" value="${esc(url)}" readonly
       style="font-size:12px;font-family:monospace" onclick="this.select()">
@@ -595,8 +594,7 @@ function renderPlayerProfile() {
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
       <div class="options-dropdown" id="optionsDropdown">
-        ${p.email ? `<button class="options-item" data-action="copy-invite" data-id="${p.id}">Copy Invite Link</button>
-        <button class="options-item" data-action="reset-password" data-id="${p.id}">Reset Password Link</button>` : ''}
+        ${p.email ? `<button class="options-item" data-action="copy-password-link" data-id="${p.id}">Copy Password Link</button>` : ''}
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
       </div>
     </div>` : '';
@@ -611,19 +609,12 @@ function renderPlayerProfile() {
       document.getElementById('optionsDropdown').classList.remove('open');
       if (action === 'delete-player') {
         confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
-      } else if (action === 'copy-invite') {
+      } else if (action === 'copy-password-link') {
         try {
-          const { inviteUrl } = await window.api.invitePlayer(Number(e.target.dataset.id));
-          showCopyLinkModal('Invite Link', inviteUrl);
+          const { url } = await window.api.getPasswordLink(Number(e.target.dataset.id));
+          showCopyLinkModal('Password Link', url);
         } catch (err) {
-          toast(err.message || 'Failed to generate invite link', 'warning');
-        }
-      } else if (action === 'reset-password') {
-        try {
-          const { resetUrl } = await window.api.resetPlayerPassword(Number(e.target.dataset.id));
-          showCopyLinkModal('Password Reset Link', resetUrl);
-        } catch (err) {
-          toast(err.message || 'Failed to generate reset link', 'warning');
+          toast(err.message || 'Failed to generate password link', 'warning');
         }
       }
     });

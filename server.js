@@ -252,15 +252,16 @@ app.get('/invite/:token', (req, res) => {
   if (!account || !account.invite_expires || Date.now() > new Date(account.invite_expires).getTime()) {
     return res.send(authPage({ title: 'Invalid Link', error: 'This invite link has expired or is invalid. Ask your administrator to generate a new one.', body: '<div class="link-row"><a href="/login">Back to login</a></div>' }));
   }
+  const isNew = !account?.password_hash;
   res.send(authPage({
-    title: 'Set Your Password',
-    info: 'Welcome! Set a password to activate your account.',
+    title: isNew ? 'Set Your Password' : 'Reset Your Password',
+    info: isNew ? 'Welcome! Set a password to activate your account.' : 'Enter a new password for your account.',
     body: `<form method="POST" action="/invite/${req.params.token}">
       <label>New Password</label>
       <input type="password" name="password" placeholder="Choose a password" autofocus minlength="6">
       <label>Confirm Password</label>
       <input type="password" name="confirm" placeholder="Confirm password">
-      <button type="submit">Activate Account</button>
+      <button type="submit">${isNew ? 'Activate Account' : 'Reset Password'}</button>
     </form>`,
   }));
 });
