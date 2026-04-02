@@ -22,6 +22,7 @@ function initDB(dbPath) {
     `ALTER TABLE leagues ADD COLUMN schedule_courts INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE players ADD COLUMN wsrc_member INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE players ADD COLUMN club_locker_rating REAL`,
+    `ALTER TABLE players ADD COLUMN member_number TEXT`,
     `ALTER TABLE matches ADD COLUMN court_number INTEGER`,
     `ALTER TABLE matches ADD COLUMN match_time TEXT`,
     `CREATE TABLE IF NOT EXISTS user_accounts (player_id INTEGER PRIMARY KEY, password_hash TEXT, invite_token TEXT, invite_expires TEXT, reset_token TEXT, reset_expires TEXT, FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE)`,

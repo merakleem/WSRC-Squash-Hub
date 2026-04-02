@@ -1,7 +1,6 @@
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
 const { initDB, getDB } = require('./database/db');
 const playerService = require('./services/playerService');
 const leagueService = require('./services/leagueService');
@@ -14,8 +13,6 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
 const ADMIN_PASSWORD = process.env.SITE_PASSWORD || 'wsrc2025';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'wsrc-dev-secret-change-in-production';
 const COOKIE_NAME = 'wsrc_session';
-const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;   // 7 days
-const RESET_TTL_MS  = 24 * 60 * 60 * 1000;        // 24 hours
 
 const app = express();
 app.use(express.json());
@@ -88,29 +85,6 @@ function requireAdminPage(req, res, next) {
   next();
 }
 
-// ===== USER ACCOUNT HELPERS =====
-
-function generateToken(bytes = 32) {
-  return crypto.randomBytes(bytes).toString('hex');
-}
-
-function getAccount(playerId) {
-  return getDB().prepare('SELECT * FROM user_accounts WHERE player_id = ?').get([playerId]);
-}
-
-function upsertAccount(playerId, fields) {
-  const existing = getAccount(playerId);
-  if (existing) {
-    const sets = Object.keys(fields).map(k => `${k} = ?`).join(', ');
-    getDB().prepare(`UPDATE user_accounts SET ${sets} WHERE player_id = ?`)
-      .run([...Object.values(fields), playerId]);
-  } else {
-    const cols = ['player_id', ...Object.keys(fields)].join(', ');
-    const vals = Array(Object.keys(fields).length + 1).fill('?').join(', ');
-    getDB().prepare(`INSERT INTO user_accounts (${cols}) VALUES (${vals})`)
-      .run([playerId, ...Object.values(fields)]);
-  }
-}
 
 // ===== PAGE TEMPLATE =====
 
@@ -175,20 +149,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/login', (req, res) => {
   if (getSession(req)) return res.redirect('/');
-  res.send(authPage({
-    title: 'Sign In',
-    body: `<form method="POST" action="/login">
-      <label>Email <span style="color:#aaa;font-weight:400">(leave blank for admin)</span></label>
-      <input type="email" name="email" placeholder="your@email.com" autocomplete="email">
-      <label>Password</label>
-      <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
-      <button type="submit">Sign In</button>
-    </form>
-    <div class="link-row"><a href="/forgot-password">Forgot password?</a></div>`,
-  }));
+  res.send(authPage({ title: 'Sign In', body: loginFormBody() }));
 });
 
-app.post('/login', async (req, res) => {
+app.post('/login', (req, res) => {
   const { email, password } = req.body;
 
   // Admin login — email blank, password matches env var
@@ -197,31 +161,20 @@ app.post('/login', async (req, res) => {
       setSessionCookie(res, { role: 'admin' });
       return res.redirect('/');
     }
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect password.', body: `<form method="POST" action="/login">
-      <label>Email <span style="color:#aaa;font-weight:400">(leave blank for admin)</span></label>
-      <input type="email" name="email" placeholder="your@email.com" autocomplete="email">
-      <label>Password</label>
-      <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
-      <button type="submit">Sign In</button>
-    </form>
-    <div class="link-row"><a href="/forgot-password">Forgot password?</a></div>` }));
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect password.', body: loginFormBody() }));
   }
 
-  // Player login
+  // Player login — authenticate with email + member number
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE LOWER(email) = LOWER(?)').get([email.trim()]);
   if (!player) {
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'No account found for that email. Ask your administrator to add you as a player.', body: loginFormBody() }));
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'No account found for that email.', body: loginFormBody() }));
   }
-
-  const account = getAccount(player.id);
-  if (!account || !account.password_hash) {
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'Your account has not been set up yet. Use the invite link sent by your administrator.', body: loginFormBody() }));
+  if (!player.member_number) {
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'Your member number has not been set. Contact your administrator.', body: loginFormBody() }));
   }
-
-  const valid = await bcrypt.compare(password, account.password_hash);
-  if (!valid) {
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect password.', body: loginFormBody() }));
+  if (player.member_number.toUpperCase() !== (password || '').toUpperCase()) {
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect member number.', body: loginFormBody() }));
   }
 
   setSessionCookie(res, { role: 'player', playerId: player.id });
@@ -232,11 +185,11 @@ function loginFormBody() {
   return `<form method="POST" action="/login">
     <label>Email <span style="color:#aaa;font-weight:400">(leave blank for admin)</span></label>
     <input type="email" name="email" placeholder="your@email.com" autocomplete="email">
-    <label>Password</label>
-    <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
+    <label>Member Number <span style="color:#aaa;font-weight:400">(admin: use your password)</span></label>
+    <input type="password" name="password" placeholder="e.g. X118" autofocus autocomplete="current-password">
     <button type="submit">Sign In</button>
   </form>
-  <div class="link-row"><a href="/forgot-password">Forgot password?</a></div>`;
+  <div class="link-row"><a href="/forgot-password">Forgot your member number?</a></div>`;
 }
 
 app.get('/logout', (req, res) => {
@@ -244,94 +197,14 @@ app.get('/logout', (req, res) => {
   res.redirect('/login');
 });
 
-// ===== INVITE (first-time password setup) =====
-
-app.get('/invite/:token', (req, res) => {
-  const db = getDB();
-  const account = db.prepare('SELECT * FROM user_accounts WHERE invite_token = ?').get([req.params.token]);
-  if (!account || !account.invite_expires || Date.now() > new Date(account.invite_expires).getTime()) {
-    return res.send(authPage({ title: 'Invalid Link', error: 'This invite link has expired or is invalid. Ask your administrator to generate a new one.', body: '<div class="link-row"><a href="/login">Back to login</a></div>' }));
-  }
-  const isNew = !account?.password_hash;
-  res.send(authPage({
-    title: isNew ? 'Set Your Password' : 'Reset Your Password',
-    info: isNew ? 'Welcome! Set a password to activate your account.' : 'Enter a new password for your account.',
-    body: `<form method="POST" action="/invite/${req.params.token}">
-      <label>New Password</label>
-      <input type="password" name="password" placeholder="Choose a password" autofocus minlength="6">
-      <label>Confirm Password</label>
-      <input type="password" name="confirm" placeholder="Confirm password">
-      <button type="submit">${isNew ? 'Activate Account' : 'Reset Password'}</button>
-    </form>`,
-  }));
-});
-
-app.post('/invite/:token', async (req, res) => {
-  const db = getDB();
-  const account = db.prepare('SELECT * FROM user_accounts WHERE invite_token = ?').get([req.params.token]);
-  if (!account || !account.invite_expires || Date.now() > new Date(account.invite_expires).getTime()) {
-    return res.send(authPage({ title: 'Invalid Link', error: 'This invite link has expired.', body: '<div class="link-row"><a href="/login">Back to login</a></div>' }));
-  }
-  const { password, confirm } = req.body;
-  if (!password || password.length < 6) {
-    return res.send(authPage({ title: 'Set Your Password', error: 'Password must be at least 6 characters.', body: `<form method="POST" action="/invite/${req.params.token}"><label>New Password</label><input type="password" name="password" placeholder="Choose a password" autofocus minlength="6"><label>Confirm Password</label><input type="password" name="confirm" placeholder="Confirm password"><button type="submit">Activate Account</button></form>` }));
-  }
-  if (password !== confirm) {
-    return res.send(authPage({ title: 'Set Your Password', error: 'Passwords do not match.', body: `<form method="POST" action="/invite/${req.params.token}"><label>New Password</label><input type="password" name="password" placeholder="Choose a password" autofocus minlength="6"><label>Confirm Password</label><input type="password" name="confirm" placeholder="Confirm password"><button type="submit">Activate Account</button></form>` }));
-  }
-  const hash = await bcrypt.hash(password, 10);
-  upsertAccount(account.player_id, { password_hash: hash, invite_token: null, invite_expires: null });
-  setSessionCookie(res, { role: 'player', playerId: account.player_id });
-  res.redirect('/');
-});
-
-// ===== PASSWORD RESET =====
-
 app.get('/forgot-password', (req, res) => {
   res.send(authPage({
-    title: 'Forgot Password',
+    title: 'Forgot Member Number',
     body: `<p style="font-size:13px;color:#6b7e93;margin-bottom:20px">
-      Contact your administrator to reset your password. They can generate a reset link from your player profile.
+      Your password is your WSRC member number (e.g. X118). Contact your administrator if you don't know it.
     </p>
     <div class="link-row"><a href="/login">Back to login</a></div>`,
   }));
-});
-
-app.get('/reset/:token', (req, res) => {
-  const db = getDB();
-  const account = db.prepare('SELECT * FROM user_accounts WHERE reset_token = ?').get([req.params.token]);
-  if (!account || !account.reset_expires || Date.now() > new Date(account.reset_expires).getTime()) {
-    return res.send(authPage({ title: 'Invalid Link', error: 'This reset link has expired or is invalid.', body: '<div class="link-row"><a href="/login">Back to login</a></div>' }));
-  }
-  res.send(authPage({
-    title: 'Reset Password',
-    body: `<form method="POST" action="/reset/${req.params.token}">
-      <label>New Password</label>
-      <input type="password" name="password" placeholder="New password" autofocus minlength="6">
-      <label>Confirm Password</label>
-      <input type="password" name="confirm" placeholder="Confirm password">
-      <button type="submit">Reset Password</button>
-    </form>`,
-  }));
-});
-
-app.post('/reset/:token', async (req, res) => {
-  const db = getDB();
-  const account = db.prepare('SELECT * FROM user_accounts WHERE reset_token = ?').get([req.params.token]);
-  if (!account || !account.reset_expires || Date.now() > new Date(account.reset_expires).getTime()) {
-    return res.send(authPage({ title: 'Invalid Link', error: 'This reset link has expired.', body: '<div class="link-row"><a href="/login">Back to login</a></div>' }));
-  }
-  const { password, confirm } = req.body;
-  if (!password || password.length < 6) {
-    return res.send(authPage({ title: 'Reset Password', error: 'Password must be at least 6 characters.', body: `<form method="POST" action="/reset/${req.params.token}"><label>New Password</label><input type="password" name="password" placeholder="New password" autofocus minlength="6"><label>Confirm Password</label><input type="password" name="confirm" placeholder="Confirm password"><button type="submit">Reset Password</button></form>` }));
-  }
-  if (password !== confirm) {
-    return res.send(authPage({ title: 'Reset Password', error: 'Passwords do not match.', body: `<form method="POST" action="/reset/${req.params.token}"><label>New Password</label><input type="password" name="password" placeholder="New password" autofocus minlength="6"><label>Confirm Password</label><input type="password" name="confirm" placeholder="Confirm password"><button type="submit">Reset Password</button></form>` }));
-  }
-  const hash = await bcrypt.hash(password, 10);
-  upsertAccount(account.player_id, { password_hash: hash, reset_token: null, reset_expires: null });
-  setSessionCookie(res, { role: 'player', playerId: account.player_id });
-  res.redirect('/');
 });
 
 // ===== PROTECT ALL OTHER ROUTES =====
@@ -363,26 +236,11 @@ app.get('/api/players', wrap(async (req, res) => {
 
 app.post('/api/players', requireAdmin, wrap(async (req, res) => {
   const player = await playerService.addPlayer(req.body);
-  // Auto-generate invite token if player has an email
-  if (player.email) {
-    const token = generateToken();
-    const expires = new Date(Date.now() + INVITE_TTL_MS).toISOString();
-    upsertAccount(player.id, { invite_token: token, invite_expires: expires });
-  }
   res.json(player);
 }));
 
 app.put('/api/players/:id', requireAdmin, wrap(async (req, res) => {
   const player = await playerService.updatePlayer({ ...req.body, id: Number(req.params.id) });
-  // If email was added/changed and no account set up yet, regenerate invite token
-  if (player.email) {
-    const account = getAccount(player.id);
-    if (!account || !account.password_hash) {
-      const token = generateToken();
-      const expires = new Date(Date.now() + INVITE_TTL_MS).toISOString();
-      upsertAccount(player.id, { invite_token: token, invite_expires: expires });
-    }
-  }
   res.json(player);
 }));
 
@@ -408,33 +266,6 @@ app.get('/api/players/:id/history', wrap(async (req, res) => {
   if (!player) return res.status(404).json({ error: 'Player not found' });
   const rec = records.find((r) => r.id === id) || { wins: 0, losses: 0 };
   res.json({ ...player, wins: rec.wins || 0, losses: rec.losses || 0, history });
-}));
-
-// Generate / refresh invite link for a player (admin only)
-app.post('/api/players/:id/invite', requireAdmin, wrap(async (req, res) => {
-  const player = await playerService.getPlayerById(Number(req.params.id));
-  if (!player) return res.status(404).json({ error: 'Player not found' });
-  if (!player.email) return res.status(400).json({ error: 'Player has no email address.' });
-  const token = generateToken();
-  const expires = new Date(Date.now() + INVITE_TTL_MS).toISOString();
-  upsertAccount(player.id, { invite_token: token, invite_expires: expires });
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  res.json({ url: `${baseUrl}/invite/${token}` });
-}));
-
-// Generate password reset link for a player (admin only)
-app.post('/api/players/:id/reset-password', requireAdmin, wrap(async (req, res) => {
-  const player = await playerService.getPlayerById(Number(req.params.id));
-  if (!player) return res.status(404).json({ error: 'Player not found' });
-  const account = getAccount(player.id);
-  if (!account || !account.password_hash) {
-    return res.status(400).json({ error: 'Player has not activated their account yet. Use the invite link instead.' });
-  }
-  const token = generateToken();
-  const expires = new Date(Date.now() + RESET_TTL_MS).toISOString();
-  upsertAccount(player.id, { reset_token: token, reset_expires: expires });
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  res.json({ url: `${baseUrl}/reset/${token}` });
 }));
 
 // ===== LEAGUES =====

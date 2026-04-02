@@ -34,7 +34,6 @@ if (typeof window !== 'undefined' && !window.api) {
     getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
     getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
 
-    getPasswordLink:        (id) => _apiFetch('POST', `/api/players/${id}/invite`),
   };
 }
 
@@ -281,6 +280,10 @@ function playerFormHTML(player = {}) {
       <input class="form-control" id="fPhone" value="${esc(player.phone || '')}" placeholder="(optional)">
     </div>
     <div class="form-group">
+      <label>Member Number <span class="form-hint">(used as login password, e.g. X118)</span></label>
+      <input class="form-control" id="fMemberNumber" value="${esc(player.member_number || '')}" placeholder="e.g. X118">
+    </div>
+    <div class="form-group">
       <label>Club Locker Rating <span class="form-hint">(1.0 – 7.0, optional)</span></label>
       <input class="form-control" id="fRating" type="number" min="1" max="7" step="0.01" value="${esc(rating)}" placeholder="e.g. 3.50">
     </div>
@@ -304,11 +307,12 @@ function openAddPlayerModal() {
     const name = document.getElementById('fName').value.trim();
     const email = document.getElementById('fEmail').value.trim();
     const phone = document.getElementById('fPhone').value.trim();
+    const member_number = document.getElementById('fMemberNumber').value.trim();
     const club_locker_rating = document.getElementById('fRating').value.trim();
     const wsrc_member = document.getElementById('fMember').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.addPlayer({ name, email, phone, wsrc_member, club_locker_rating });
+      await window.api.addPlayer({ name, email, phone, member_number, wsrc_member, club_locker_rating });
       modal.close();
       toast('Player added', 'success');
       state.players = await window.api.getPlayers();
@@ -326,11 +330,12 @@ function openEditPlayerModal(player) {
     const name = document.getElementById('fName').value.trim();
     const email = document.getElementById('fEmail').value.trim();
     const phone = document.getElementById('fPhone').value.trim();
+    const member_number = document.getElementById('fMemberNumber').value.trim();
     const club_locker_rating = document.getElementById('fRating').value.trim();
     const wsrc_member = document.getElementById('fMember').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.updatePlayer({ id: player.id, name, email, phone, wsrc_member, club_locker_rating });
+      await window.api.updatePlayer({ id: player.id, name, email, phone, member_number, wsrc_member, club_locker_rating });
       modal.close();
       toast('Player updated', 'success');
       state.players = await window.api.getPlayers();
@@ -338,25 +343,6 @@ function openEditPlayerModal(player) {
     } catch (e) {
       document.getElementById('fError').textContent = e.message || 'Failed to update player.';
     }
-  });
-}
-
-function showCopyLinkModal(title, url) {
-  modal.open(title, `
-    <p class="text-muted" style="font-size:13px;margin-bottom:10px">
-      Send this link to the player. They'll use it to set (or reset) their password. Expires in 7 days.
-    </p>
-    <input class="form-control" id="copyLinkInput" value="${esc(url)}" readonly
-      style="font-size:12px;font-family:monospace" onclick="this.select()">
-    <div class="form-actions" style="margin-top:16px">
-      <button class="btn btn-outline" id="fCancel">Close</button>
-      <button class="btn btn-primary" id="fCopy">Copy</button>
-    </div>`);
-  document.getElementById('fCancel').addEventListener('click', modal.close);
-  document.getElementById('fCopy').addEventListener('click', () => {
-    navigator.clipboard.writeText(url).then(() => toast('Link copied!', 'success')).catch(() => {
-      toast('Copy failed — select and copy the link manually', 'warning');
-    });
   });
 }
 
@@ -594,7 +580,6 @@ function renderPlayerProfile() {
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
       <div class="options-dropdown" id="optionsDropdown">
-        ${p.email ? `<button class="options-item" data-action="copy-password-link" data-id="${p.id}">Copy Password Link</button>` : ''}
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
       </div>
     </div>` : '';
@@ -604,18 +589,11 @@ function renderPlayerProfile() {
       e.stopPropagation();
       document.getElementById('optionsDropdown').classList.toggle('open');
     });
-    document.getElementById('optionsDropdown').addEventListener('click', async (e) => {
+    document.getElementById('optionsDropdown').addEventListener('click', (e) => {
       const action = e.target.dataset.action;
       document.getElementById('optionsDropdown').classList.remove('open');
       if (action === 'delete-player') {
         confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
-      } else if (action === 'copy-password-link') {
-        try {
-          const { url } = await window.api.getPasswordLink(Number(e.target.dataset.id));
-          showCopyLinkModal('Password Link', url);
-        } catch (err) {
-          toast(err.message || 'Failed to generate password link', 'warning');
-        }
       }
     });
     document.addEventListener('click', function closeOptions() {
@@ -665,6 +643,7 @@ function renderPlayerProfile() {
           <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">${esc(p.name)}</h2>
           ${p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
           ${p.phone ? `<div class="text-muted" style="font-size:13px">${esc(p.phone)}</div>` : ''}
+          ${adminMode && p.member_number ? `<div class="text-muted" style="font-size:13px">Member #: <strong>${esc(p.member_number)}</strong></div>` : ''}
         </div>
       </div>
       <div class="profile-stats">

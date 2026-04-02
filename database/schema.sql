@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS players (
     name TEXT NOT NULL,
     email TEXT,
     phone TEXT,
+    member_number TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
