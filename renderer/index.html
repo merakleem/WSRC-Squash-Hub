@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    />
+    <title>WSRC Squash Manager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-logo">
+          <img class="sidebar-logo-img" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC Logo">
+          <span class="sidebar-logo-text">WSRC Squash Manager</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a class="nav-item" data-page="players">
+            <img class="nav-icon" src="/assets/players-icon.png" alt="">
+            Players
+          </a>
+          <a class="nav-item" data-page="ladder">
+            <img class="nav-icon" src="/assets/ladder-icon.png" alt="">
+            Ladder
+          </a>
+          <a class="nav-item" data-page="leagues">
+            <img class="nav-icon" src="/assets/leagues-icon.png" alt="">
+            Leagues
+          </a>
+        </nav>
+      </aside>
+
+      <!-- Main area -->
+      <div class="main-wrapper">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button class="btn-back" id="btnBack" style="display:none">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M19 12H5M12 5l-7 7 7 7"/>
+              </svg>
+              Back
+            </button>
+            <h1 class="topbar-title" id="pageTitle">Players</h1>
+          </div>
+          <div class="topbar-actions" id="topbarActions"></div>
+        </header>
+
+        <main class="content" id="mainContent"></main>
+      </div>
+    </div>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+      <div class="modal" id="modal">
+        <div class="modal-header">
+          <h2 class="modal-title" id="modalTitle"></h2>
+          <button class="modal-close" id="modalClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

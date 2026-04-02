@@ -1,0 +1,1657 @@
+// ===== WEB API SHIM (active when running in browser, not Electron) =====
+if (typeof window !== 'undefined' && !window.api) {
+  async function _apiFetch(method, url, body = null) {
+    const opts = { method };
+    if (body !== null) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    const r = await fetch(url, opts);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  window.api = {
+    getPlayers:       ()  => _apiFetch('GET',    '/api/players'),
+    addPlayer:        (d) => _apiFetch('POST',   '/api/players', d),
+    updatePlayer:     (d) => _apiFetch('PUT',    `/api/players/${d.id}`, d),
+    deletePlayer:     (id)=> _apiFetch('DELETE', `/api/players/${id}`),
+
+    getLeagues:       ()  => _apiFetch('GET',    '/api/leagues'),
+    getLeague:        (id)=> _apiFetch('GET',    `/api/leagues/${id}`),
+    createLeague:     (d) => _apiFetch('POST',   '/api/leagues', d),
+    deleteLeague:     (id)=> _apiFetch('DELETE', `/api/leagues/${id}`),
+
+    updateMatchScore: (d) => _apiFetch('PUT',    `/api/matches/${d.matchId}/score`, d),
+    getValidConfigs:  (n) => _apiFetch('GET',    `/api/configs/${n}`),
+
+    getLadder:        ()    => _apiFetch('GET', '/api/ladder'),
+    updateLadder:     (ids) => _apiFetch('PUT', '/api/ladder', { playerIds: ids }),
+    getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
+    getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
+  };
+}
+
+// ===== STATE =====
+const state = {
+  page: 'players',        // 'players' | 'ladder' | 'leagues' | 'leagueDetail' | 'createLeague' | 'playerProfile'
+  prevPage: null,
+  players: [],
+  ladder: [],             // [{ id, name, position }] in ladder order
+  leagues: [],
+  currentLeague: null,
+  currentPlayer: null,    // { id, name, email, phone, wins, losses, history: [...] }
+  wizard: {
+    step: 1,
+    leagueName: '',
+    startDate: '',
+    rankedPlayers: [],    // [{ id, name }] ordered best → worst
+    numTeams: 3,
+    numDivisions: 1,
+    numRounds: 1,
+    blackoutDates: [],
+    teamNames: [],        // custom names; index matches team slot
+  },
+};
+
+// ===== UTILS =====
+function esc(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function formatShortDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// ===== TOAST =====
+function toast(msg, type = 'default') {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 220);
+  }, 3000);
+}
+
+// ===== MODAL =====
+const modal = {
+  open(title, bodyHTML, { wide = false } = {}) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalBody').innerHTML = bodyHTML;
+    document.getElementById('modal').classList.toggle('modal-wide', wide);
+    document.getElementById('modalOverlay').classList.add('open');
+  },
+  close() {
+    document.getElementById('modal').classList.remove('modal-wide');
+    document.getElementById('modalOverlay').classList.remove('open');
+  },
+};
+
+document.getElementById('modalClose').addEventListener('click', () => modal.close());
+document.getElementById('modalOverlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('modalOverlay')) modal.close();
+});
+
+// ===== NAVIGATION =====
+function navigate(page, params = {}) {
+  state.prevPage = state.page;
+  state.page = page;
+  if (params.league) state.currentLeague = params.league;
+  if (params.player) state.currentPlayer = params.player;
+
+  // Sidebar active state
+  const navPage = (page === 'leagueDetail' || page === 'createLeague') ? 'leagues'
+    : page === 'playerProfile' ? 'players'
+    : page;
+  document.querySelectorAll('.nav-item').forEach((el) => {
+    el.classList.toggle('active', el.dataset.page === navPage);
+  });
+
+  // Back button
+  const btnBack = document.getElementById('btnBack');
+  const showBack = page === 'leagueDetail' || page === 'createLeague' || page === 'playerProfile';
+  btnBack.style.display = showBack ? 'inline-flex' : 'none';
+
+  renderPage();
+}
+
+document.getElementById('btnBack').addEventListener('click', () => {
+  if (state.page === 'leagueDetail' || state.page === 'createLeague') {
+    navigate('leagues');
+  } else if (state.page === 'playerProfile') {
+    navigate(state.prevPage || 'players');
+  }
+});
+
+document.querySelectorAll('.nav-item').forEach((el) => {
+  el.addEventListener('click', () => navigate(el.dataset.page));
+});
+
+function renderPage() {
+  switch (state.page) {
+    case 'players':       renderPlayers(); break;
+    case 'ladder':        renderLadder(); break;
+    case 'leagues':       renderLeagues(); break;
+    case 'leagueDetail':  renderLeagueDetail(); break;
+    case 'createLeague':  renderCreateLeague(); break;
+    case 'playerProfile': renderPlayerProfile(); break;
+  }
+}
+
+// ===== PLAYERS PAGE =====
+async function renderPlayers() {
+  document.getElementById('pageTitle').textContent = 'Players';
+  document.getElementById('topbarActions').innerHTML = `
+    <button class="btn btn-outline" id="btnBulkAdd">Add Multiple</button>
+    <button class="btn btn-primary" id="btnAddPlayer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+      Add Player
+    </button>`;
+
+  state.players = await window.api.getPlayers();
+  renderPlayerTable(state.players);
+
+  document.getElementById('btnAddPlayer').addEventListener('click', openAddPlayerModal);
+  document.getElementById('btnBulkAdd').addEventListener('click', openBulkAddModal);
+}
+
+function playerRowsHTML(players, filtered) {
+  if (filtered.length === 0) {
+    return `<tr><td colspan="4">
+      <div class="empty-state">
+        <strong>${players.length === 0 ? 'No players yet' : 'No results'}</strong>
+        <p>${players.length === 0 ? 'Add your first player to get started.' : 'Try a different search term.'}</p>
+      </div>
+    </td></tr>`;
+  }
+  return filtered.map((p) => `
+    <tr>
+      <td><a class="player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a></td>
+      <td class="text-muted">${esc(p.email) || '—'}</td>
+      <td class="text-muted">${esc(p.phone) || '—'}</td>
+      <td>
+        <div class="td-actions">
+          <button class="btn btn-outline btn-sm" data-action="edit" data-id="${p.id}">Edit</button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function attachPlayerTableListeners(content) {
+  content.querySelectorAll('[data-action="view-profile"]').forEach((a) => {
+    a.addEventListener('click', () => openPlayerProfile(Number(a.dataset.id)));
+  });
+  content.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const player = state.players.find((p) => p.id == btn.dataset.id);
+      openEditPlayerModal(player);
+    });
+  });
+}
+
+function renderPlayerTable(players) {
+  const content = document.getElementById('mainContent');
+
+  // Full render (first time or after a data change)
+  const filtered = players; // show all on initial render; search will filter live
+  content.innerHTML = `
+    <div class="table-card">
+      <div class="table-toolbar">
+        <span class="text-muted" id="playerCount">${players.length} player${players.length !== 1 ? 's' : ''}</span>
+        <input class="search-input" id="playerSearch" placeholder="Search players..." autocomplete="off">
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Email</th><th>Phone</th><th style="text-align:right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="playerTbody">${playerRowsHTML(players, filtered)}</tbody>
+      </table>
+    </div>`;
+
+  attachPlayerTableListeners(content);
+
+  // On search: only replace tbody — never touch the input, preserving cursor/selection
+  document.getElementById('playerSearch').addEventListener('input', (e) => {
+    const input = e.target;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const val = input.value.toLowerCase();
+    const f = val ? players.filter((p) => p.name.toLowerCase().includes(val)) : players;
+    const tbody = document.getElementById('playerTbody');
+    tbody.innerHTML = playerRowsHTML(players, f);
+    attachPlayerTableListeners(tbody);
+    input.setSelectionRange(start, end);
+  });
+}
+
+function playerFormHTML(player = {}) {
+  const isMember = player.id ? player.wsrc_member : true;
+  const rating = player.club_locker_rating != null ? Number(player.club_locker_rating).toFixed(2) : '';
+  return `
+    <div class="form-group">
+      <label>Name *</label>
+      <input class="form-control" id="fName" value="${esc(player.name || '')}" placeholder="Full name" autofocus>
+    </div>
+    <div class="form-group">
+      <label>Email</label>
+      <input class="form-control" id="fEmail" type="email" value="${esc(player.email || '')}" placeholder="email@example.com">
+    </div>
+    <div class="form-group">
+      <label>Phone</label>
+      <input class="form-control" id="fPhone" value="${esc(player.phone || '')}" placeholder="(optional)">
+    </div>
+    <div class="form-group">
+      <label>Club Locker Rating <span class="form-hint">(1.0 – 7.0, optional)</span></label>
+      <input class="form-control" id="fRating" type="number" min="1" max="7" step="0.01" value="${esc(rating)}" placeholder="e.g. 3.50">
+    </div>
+    <div class="form-group form-group-check">
+      <label class="check-label">
+        <input type="checkbox" id="fMember" ${isMember ? 'checked' : ''}>
+        WSRC Member
+      </label>
+    </div>
+    <div id="fError" class="form-error"></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit">${player.id ? 'Save Changes' : 'Add Player'}</button>
+    </div>`;
+}
+
+function openAddPlayerModal() {
+  modal.open('Add Player', playerFormHTML());
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSubmit').addEventListener('click', async () => {
+    const name = document.getElementById('fName').value.trim();
+    const email = document.getElementById('fEmail').value.trim();
+    const phone = document.getElementById('fPhone').value.trim();
+    const club_locker_rating = document.getElementById('fRating').value.trim();
+    const wsrc_member = document.getElementById('fMember').checked;
+    if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
+    try {
+      await window.api.addPlayer({ name, email, phone, wsrc_member, club_locker_rating });
+      modal.close();
+      toast('Player added', 'success');
+      state.players = await window.api.getPlayers();
+      renderPlayerTable(state.players);
+    } catch (e) {
+      document.getElementById('fError').textContent = e.message || 'Failed to add player.';
+    }
+  });
+}
+
+function openEditPlayerModal(player) {
+  modal.open('Edit Player', playerFormHTML(player));
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSubmit').addEventListener('click', async () => {
+    const name = document.getElementById('fName').value.trim();
+    const email = document.getElementById('fEmail').value.trim();
+    const phone = document.getElementById('fPhone').value.trim();
+    const club_locker_rating = document.getElementById('fRating').value.trim();
+    const wsrc_member = document.getElementById('fMember').checked;
+    if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
+    try {
+      await window.api.updatePlayer({ id: player.id, name, email, phone, wsrc_member, club_locker_rating });
+      modal.close();
+      toast('Player updated', 'success');
+      state.players = await window.api.getPlayers();
+      renderPlayerTable(state.players);
+    } catch (e) {
+      document.getElementById('fError').textContent = e.message || 'Failed to update player.';
+    }
+  });
+}
+
+function confirmDeletePlayer(id, name) {
+  modal.open('Delete Player', `
+    <p>Are you sure you want to delete <strong>${esc(name)}</strong>? This cannot be undone.</p>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-danger" id="fConfirm">Delete</button>
+    </div>`);
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fConfirm').addEventListener('click', async () => {
+    await window.api.deletePlayer(id);
+    modal.close();
+    toast('Player deleted');
+    navigate('players');
+  });
+}
+
+function openBulkAddModal() {
+  const renderRows = (count) => Array.from({ length: count }, (_, i) => `
+    <div class="bulk-row" data-row="${i}">
+      <span class="bulk-row-num">${i + 1}</span>
+      <input class="form-control bulk-name" placeholder="Name *" data-field="name" data-row="${i}">
+      <input class="form-control bulk-email" placeholder="Email" data-field="email" data-row="${i}">
+      <input class="form-control bulk-phone" placeholder="Phone" data-field="phone" data-row="${i}">
+      <button class="btn btn-ghost btn-sm bulk-remove" data-row="${i}" title="Remove row">&times;</button>
+    </div>`).join('');
+
+  let rowCount = 5;
+
+  const rebuild = () => {
+    document.getElementById('bulkRows').innerHTML = renderRows(rowCount);
+    document.querySelectorAll('.bulk-remove').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // Copy values from rows after the removed one up by one
+        const idx = Number(btn.dataset.row);
+        const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
+        const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
+        const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
+        names.splice(idx, 1);  emails.splice(idx, 1);  phones.splice(idx, 1);
+        rowCount = Math.max(1, rowCount - 1);
+        rebuild();
+        document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
+        document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
+        document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
+      });
+    });
+  };
+
+  modal.open('Add Multiple Players', `
+    <p class="text-muted" style="font-size:13px;margin-bottom:16px">Fill in each player's details. Rows without a name will be skipped.</p>
+    <div class="bulk-header">
+      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span></span>
+    </div>
+    <div id="bulkRows">${renderRows(rowCount)}</div>
+    <button class="btn btn-outline btn-sm" id="bulkAddRow" style="margin-top:10px">+ Add Row</button>
+    <div id="fError" class="form-error" style="margin-top:12px"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit">Add Players</button>
+    </div>`, { wide: true });
+
+  rebuild();
+
+  document.getElementById('bulkAddRow').addEventListener('click', () => {
+    const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
+    const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
+    const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
+    rowCount++;
+    rebuild();
+    document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
+    document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
+    document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
+  });
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSubmit').addEventListener('click', async () => {
+    const rows = [];
+    document.querySelectorAll('.bulk-row').forEach((row) => {
+      const name  = row.querySelector('.bulk-name').value.trim();
+      const email = row.querySelector('.bulk-email').value.trim();
+      const phone = row.querySelector('.bulk-phone').value.trim();
+      if (name) rows.push({ name, email, phone });
+    });
+    if (rows.length === 0) {
+      document.getElementById('fError').textContent = 'Enter at least one player name.';
+      return;
+    }
+    const btn = document.getElementById('fSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Adding…';
+    try {
+      for (const r of rows) await window.api.addPlayer(r);
+      modal.close();
+      toast(`${rows.length} player${rows.length !== 1 ? 's' : ''} added`, 'success');
+      navigate('players');
+    } catch (e) {
+      document.getElementById('fError').textContent = e.message || 'Failed to add players.';
+      btn.disabled = false;
+      btn.textContent = 'Add Players';
+    }
+  });
+}
+
+// ===== PLAYER PROFILE =====
+async function openPlayerProfile(id) {
+  const backPage = state.page;   // capture before async — navigate may change state.page
+  const player = await window.api.getPlayerHistory(id);
+  navigate('playerProfile', { player });
+  state.prevPage = backPage;     // override what navigate set, ensuring back goes to the right place
+}
+
+function renderPlayerProfile() {
+  const p = state.currentPlayer;
+  if (!p) { navigate('players'); return; }
+
+  document.getElementById('pageTitle').textContent = p.name;
+  document.getElementById('topbarActions').innerHTML = `
+    <div class="options-menu" id="optionsMenu">
+      <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
+      <div class="options-dropdown" id="optionsDropdown">
+        <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
+      </div>
+    </div>`;
+
+  document.getElementById('optionsBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('optionsDropdown').classList.toggle('open');
+  });
+  document.getElementById('optionsDropdown').addEventListener('click', (e) => {
+    const action = e.target.dataset.action;
+    if (action === 'delete-player') {
+      document.getElementById('optionsDropdown').classList.remove('open');
+      confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
+    }
+  });
+  document.addEventListener('click', function closeOptions() {
+    document.getElementById('optionsDropdown')?.classList.remove('open');
+    document.removeEventListener('click', closeOptions);
+  }, { once: false });
+
+  const played = (p.wins || 0) + (p.losses || 0);
+  const winPct = played > 0 ? Math.round((p.wins / played) * 100) : null;
+
+  const historyHTML = (p.history || []).length === 0
+    ? `<div class="empty-state"><strong>No matches played yet</strong></div>`
+    : `<table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>League</th>
+            <th>Week</th>
+            <th>Division</th>
+            <th>Opponent</th>
+            <th style="text-align:center">Score</th>
+            <th style="text-align:center">Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${p.history.map((m) => `
+            <tr>
+              <td class="text-muted">${formatShortDate(m.week_date)}</td>
+              <td>${esc(m.league_name)}</td>
+              <td class="text-muted">Wk ${m.week_number}</td>
+              <td class="text-muted">${esc(m.division_name)}</td>
+              <td>${esc(m.opponent_name)}</td>
+              <td style="text-align:center;font-weight:600">${m.my_score} – ${m.their_score}</td>
+              <td style="text-align:center">
+                <span class="result-badge ${m.result === 'W' ? 'result-win' : 'result-loss'}">${m.result}</span>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  document.getElementById('mainContent').innerHTML = `
+    <div class="profile-header-card">
+      <div class="profile-info">
+        <div class="profile-avatar">${esc(p.name.charAt(0).toUpperCase())}</div>
+        <div>
+          <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">${esc(p.name)}</h2>
+          ${p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
+          ${p.phone ? `<div class="text-muted" style="font-size:13px">${esc(p.phone)}</div>` : ''}
+        </div>
+      </div>
+      <div class="profile-stats">
+        <div class="stat"><span class="stat-val">${p.wins || 0}</span><span class="stat-label">Wins</span></div>
+        <div class="stat"><span class="stat-val">${p.losses || 0}</span><span class="stat-label">Losses</span></div>
+        <div class="stat"><span class="stat-val">${played}</span><span class="stat-label">Played</span></div>
+        ${winPct !== null ? `<div class="stat"><span class="stat-val">${winPct}%</span><span class="stat-label">Win Rate</span></div>` : ''}
+      </div>
+    </div>
+
+    <div class="section-title">Match History <div class="divider"></div></div>
+    <div class="table-card">${historyHTML}</div>`;
+}
+
+// ===== LADDER PAGE =====
+async function renderLadder(showNonMembers = false) {
+  document.getElementById('pageTitle').textContent = 'Ladder';
+  document.getElementById('topbarActions').innerHTML = '';
+
+  [state.ladder] = await Promise.all([window.api.getLadder()]);
+  const recordsArr = await window.api.getPlayerRecords();
+  const records = Array.isArray(recordsArr)
+    ? Object.fromEntries(recordsArr.map((r) => [r.id, r]))
+    : recordsArr;
+
+  const content = document.getElementById('mainContent');
+
+  if (state.ladder.length === 0) {
+    content.innerHTML = `
+      <div class="table-card">
+        <div class="empty-state">
+          <strong>No players yet</strong>
+          <p>Add players on the Players page and they will appear here.</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const visible = showNonMembers ? state.ladder : state.ladder.filter((p) => p.wsrc_member);
+
+  content.innerHTML = `
+    <div class="table-card">
+      <div class="table-toolbar">
+        <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''} &mdash; drag rows or use arrows to reorder</span>
+        <label class="check-label check-label-inline">
+          <input type="checkbox" id="showNonMembers" ${showNonMembers ? 'checked' : ''}>
+          Show non-members
+        </label>
+      </div>
+      <div class="ladder-list" id="ladderList">
+        ${visible.map((p, i) => {
+          const rec = records[p.id] || { wins: 0, losses: 0 };
+          const rating = p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : null;
+          const nonMemberBadge = !p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : '';
+          const ratingBadge = rating ? `<span class="ladder-rating">${rating}</span>` : '';
+          return `
+          <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" draggable="true" data-id="${p.id}" data-idx="${i}">
+            <span class="ladder-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
+            <span class="ladder-rank">${i + 1}</span>
+            <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
+            ${ratingBadge}
+            ${nonMemberBadge}
+            <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
+            <div class="ladder-controls">
+              <button class="rank-btn" data-action="ladder-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
+              <button class="rank-btn" data-action="ladder-down" data-idx="${i}" ${i === visible.length - 1 ? 'disabled' : ''}>&#9660;</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  document.getElementById('showNonMembers').addEventListener('change', (e) => {
+    renderLadder(e.target.checked);
+  });
+
+  // Arrow buttons + player profile links
+  // data-idx is the index within `visible`; map back to state.ladder via player id
+  const list = document.getElementById('ladderList');
+  list.addEventListener('click', async (e) => {
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (!action) return;
+    if (action === 'view-profile') {
+      openPlayerProfile(Number(e.target.closest('[data-action]').dataset.id));
+      return;
+    }
+    const visIdx = Number(e.target.closest('[data-action]').dataset.idx);
+    const playerId = visible[visIdx]?.id;
+    const fullIdx = state.ladder.findIndex((p) => p.id === playerId);
+    if (fullIdx === -1) return;
+    if (action === 'ladder-up' && fullIdx > 0) {
+      [state.ladder[fullIdx - 1], state.ladder[fullIdx]] = [state.ladder[fullIdx], state.ladder[fullIdx - 1]];
+    } else if (action === 'ladder-down' && fullIdx < state.ladder.length - 1) {
+      [state.ladder[fullIdx], state.ladder[fullIdx + 1]] = [state.ladder[fullIdx + 1], state.ladder[fullIdx]];
+    } else {
+      return;
+    }
+    await saveLadder();
+    renderLadder(showNonMembers);
+  });
+
+  // Drag-and-drop (idx is within visible; map to state.ladder via id)
+  let dragIdx = null;
+
+  list.querySelectorAll('.ladder-row').forEach((row) => {
+    row.addEventListener('dragstart', (e) => {
+      dragIdx = Number(row.dataset.idx);
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      list.querySelectorAll('.ladder-row').forEach((r) => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      list.querySelectorAll('.ladder-row').forEach((r) => r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      const dropVisIdx = Number(row.dataset.idx);
+      if (dragIdx === null || dragIdx === dropVisIdx) return;
+      const fromId = visible[dragIdx]?.id;
+      const toId = visible[dropVisIdx]?.id;
+      const fromFull = state.ladder.findIndex((p) => p.id === fromId);
+      const toFull = state.ladder.findIndex((p) => p.id === toId);
+      if (fromFull === -1 || toFull === -1) return;
+      const [moved] = state.ladder.splice(fromFull, 1);
+      state.ladder.splice(toFull, 0, moved);
+      await saveLadder();
+      renderLadder(showNonMembers);
+    });
+  });
+}
+
+async function saveLadder() {
+  await window.api.updateLadder(state.ladder.map((p) => p.id));
+}
+
+// ===== LEAGUES PAGE =====
+async function renderLeagues() {
+  document.getElementById('pageTitle').textContent = 'Leagues';
+  document.getElementById('topbarActions').innerHTML = `
+    <button class="btn btn-primary" id="btnCreateLeague">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+      New League
+    </button>`;
+
+  state.leagues = await window.api.getLeagues();
+  const content = document.getElementById('mainContent');
+
+  if (state.leagues.length === 0) {
+    content.innerHTML = `
+      <div class="table-card">
+        <div class="empty-state">
+          <strong>No leagues yet</strong>
+          <p>Create your first league to get started.</p>
+        </div>
+      </div>`;
+  } else {
+    content.innerHTML = `<div class="league-grid">${state.leagues.map(leagueCardHTML).join('')}</div>`;
+    content.querySelectorAll('[data-action="view"]').forEach((btn) => {
+      btn.addEventListener('click', (e) => { e.stopPropagation(); openLeague(Number(btn.dataset.id)); });
+    });
+    content.querySelectorAll('.league-card').forEach((card) => {
+      card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
+    });
+  }
+
+  document.getElementById('btnCreateLeague').addEventListener('click', startCreateLeague);
+}
+
+function leagueCardHTML(league) {
+  return `
+    <div class="league-card" data-id="${league.id}">
+      <div class="league-card-header">
+        <h3>${esc(league.name)}</h3>
+        <span class="badge badge-${league.status}">${esc(league.status)}</span>
+      </div>
+      <div class="league-card-meta">
+        <div class="meta-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+          </svg>
+          Starts ${formatShortDate(league.start_date)}
+        </div>
+        <div class="meta-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          ${league.num_teams} teams &times; ${league.num_divisions} divisions &mdash; ${league.num_teams * league.num_divisions} players
+        </div>
+      </div>
+      <div class="league-card-footer">
+        <button class="btn btn-primary btn-sm" data-action="view" data-id="${league.id}">View League</button>
+      </div>
+    </div>`;
+}
+
+async function openLeague(id) {
+  const league = await window.api.getLeague(id);
+  navigate('leagueDetail', { league });
+}
+
+function confirmDeleteLeague(id, name) {
+  modal.open('Delete League', `
+    <p>Delete <strong>${esc(name)}</strong>? This will remove all schedule data and cannot be undone.</p>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-danger" id="fConfirm">Delete League</button>
+    </div>`);
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fConfirm').addEventListener('click', async () => {
+    await window.api.deleteLeague(id);
+    modal.close();
+    toast('League deleted');
+    renderLeagues();
+  });
+}
+
+// ===== PRINT BOXES =====
+function printBoxes(league) {
+  const numRounds = league.num_rounds || 1;
+  const weeks = league.weeks || [];
+  const weeksPerRound = Math.round(weeks.length / numRounds);
+
+  // Group weeks into rounds
+  const rounds = [];
+  for (let r = 0; r < numRounds; r++) {
+    rounds.push(weeks.slice(r * weeksPerRound, (r + 1) * weeksPerRound));
+  }
+
+  // Group players by division (sorted by team_order within each division)
+  const divMap = {};
+  (league.players || []).forEach((p) => {
+    if (!divMap[p.division_level]) {
+      divMap[p.division_level] = { name: p.division_name, level: p.division_level, players: [] };
+    }
+    divMap[p.division_level].players.push(p);
+  });
+  const divisions = Object.values(divMap)
+    .sort((a, b) => a.level - b.level)
+    .map((d) => ({ ...d, players: d.players.slice().sort((a, b) => a.team_order - b.team_order) }));
+
+  let pagesHTML = '';
+
+  rounds.forEach((roundWeeks, roundIdx) => {
+    // Build pairIndex: sorted player-id pair -> week
+    const pairWeek = {};
+    roundWeeks.forEach((week) => {
+      (week.matchups || []).forEach((mu) => {
+        (mu.matches || []).forEach((match) => {
+          const key = [match.player1_id, match.player2_id].sort((a, b) => a - b).join('-');
+          pairWeek[key] = week;
+        });
+      });
+    });
+
+    divisions.forEach((div) => {
+      const players = div.players;
+      const roundLabel = numRounds > 1 ? ` &mdash; Round ${roundIdx + 1}` : '';
+
+      // Column headers
+      const colHeaders = players.map((p) => `
+        <th class="box-col-header">
+          <div class="box-col-player">${esc(p.player_name)}</div>
+          <div class="box-col-team">${esc(p.team_name)}</div>
+        </th>`).join('');
+
+      // Rows
+      const rows = players.map((rowP) => {
+        const cells = players.map((colP) => {
+          if (rowP.player_id === colP.player_id) {
+            return '<td class="box-cell box-cell-self"><div class="box-cell-x">✕</div></td>';
+          }
+          return '<td class="box-cell"></td>';
+        }).join('');
+        return `<tr>
+          <td class="box-row-header">
+            <div class="box-row-player">${esc(rowP.player_name)}</div>
+            <div class="box-row-team">${esc(rowP.team_name)}</div>
+          </td>${cells}</tr>`;
+      }).join('');
+
+      pagesHTML += `
+        <div class="box-page">
+          <div class="box-title-bar">
+            <div class="box-league">${esc(league.name)}</div>
+            <div class="box-division">${esc(div.name)}${roundLabel}</div>
+          </div>
+          <table class="box-grid">
+            <thead>
+              <tr>
+                <th class="box-corner"></th>
+                ${colHeaders}
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    });
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Box Sheets &mdash; ${esc(league.name)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; }
+
+    .box-page {
+      width: 100%;
+      min-height: 100vh;
+      padding: 18mm 16mm 14mm;
+      display: flex;
+      flex-direction: column;
+      page-break-after: always;
+      break-after: page;
+    }
+
+    .box-title-bar {
+      margin-bottom: 10mm;
+    }
+    .box-league {
+      font-size: 13pt;
+      color: #555;
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+    .box-division {
+      font-size: 22pt;
+      font-weight: 800;
+      color: #000;
+      line-height: 1.1;
+    }
+    .box-grid {
+      width: 100%;
+      flex: 1;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .box-corner {
+      width: 52mm;
+    }
+
+    .box-col-header {
+      border: 2px solid #000;
+      padding: 6px 4px;
+      text-align: center;
+      vertical-align: bottom;
+      background: #fff;
+      color: #000;
+    }
+    .box-col-player {
+      font-size: 11pt;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .box-col-team {
+      font-size: 8pt;
+      opacity: 0.8;
+      margin-top: 2px;
+    }
+
+    .box-row-header {
+      border: 2px solid #000;
+      padding: 6px 10px;
+      background: #fff;
+      color: #000;
+      vertical-align: middle;
+    }
+    .box-row-player {
+      font-size: 11pt;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .box-row-team {
+      font-size: 8pt;
+      opacity: 0.8;
+      margin-top: 2px;
+    }
+
+    .box-cell {
+      border: 2px solid #000;
+      vertical-align: top;
+      padding: 5px 6px;
+      min-height: 30mm;
+    }
+    .box-cell-self {
+      background: #ccc;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .box-cell-x {
+      font-size: 22pt;
+      font-weight: 700;
+      color: #000;
+      line-height: 1;
+    }
+
+    @page { size: A4 landscape; margin: 0; }
+    @media print {
+      body { background: #fff; }
+      .box-page { min-height: 0; padding: 12mm 14mm 10mm; }
+    }
+  </style>
+</head>
+<body>${pagesHTML}</body>
+</html>`;
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win2 = window.open(url, '_blank');
+  win2.addEventListener('load', () => {
+    win2.print();
+    URL.revokeObjectURL(url);
+  });
+}
+
+// ===== LEAGUE DETAIL =====
+function renderLeagueDetail() {
+  const league = state.currentLeague;
+  if (!league) { navigate('leagues'); return; }
+
+  document.getElementById('pageTitle').textContent = league.name;
+  document.getElementById('topbarActions').innerHTML = `
+    <div class="options-menu" id="optionsMenu">
+      <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
+      <div class="options-dropdown" id="optionsDropdown">
+        <button class="options-item" data-action="print-boxes">Print Boxes</button>
+        <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
+      </div>
+    </div>`;
+
+  document.getElementById('optionsBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('optionsDropdown').classList.toggle('open');
+  });
+  document.getElementById('optionsDropdown').addEventListener('click', (e) => {
+    const action = e.target.dataset.action;
+    if (action === 'print-boxes') {
+      document.getElementById('optionsDropdown').classList.remove('open');
+      printBoxes(league);
+    } else if (action === 'delete-league') {
+      document.getElementById('optionsDropdown').classList.remove('open');
+      confirmDeleteLeague(Number(e.target.dataset.id), e.target.dataset.name);
+    }
+  });
+  document.addEventListener('click', function closeOptions() {
+    document.getElementById('optionsDropdown')?.classList.remove('open');
+    document.removeEventListener('click', closeOptions);
+  }, { once: false });
+
+  const content = document.getElementById('mainContent');
+  const numPlayers = league.num_teams * league.num_divisions;
+
+  content.innerHTML = `
+    <div class="league-header-card">
+      <h2>${esc(league.name)}</h2>
+      <div class="league-stats">
+        <div class="stat"><span class="stat-val">${league.num_teams}</span><span class="stat-label">Teams</span></div>
+        <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
+        <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
+        <div class="stat"><span class="stat-val">${league.weeks ? league.weeks.length : 0}</span><span class="stat-label">Weeks</span></div>
+        <div class="stat"><span class="stat-val">${formatShortDate(league.start_date)}</span><span class="stat-label">Start Date</span></div>
+      </div>
+    </div>
+
+    <div class="section-title">Rosters <div class="divider"></div></div>
+    ${renderRosters(league)}
+
+    <div class="section-title">Schedule <div class="divider"></div></div>
+    <div class="schedule-list" id="scheduleList">
+      ${(league.weeks || []).map(renderWeekCard).join('')}
+    </div>`;
+
+  // Week toggle
+  content.querySelectorAll('.week-header').forEach((header) => {
+    header.addEventListener('click', () => {
+      header.closest('.week-card').classList.toggle('open');
+    });
+  });
+
+  // Score forms
+  content.querySelectorAll('.score-save-btn').forEach((btn) => {
+    btn.addEventListener('click', () => saveMatchScore(btn));
+  });
+}
+
+function renderRosters(league) {
+  if (!league.teams || league.teams.length === 0) return '';
+  return `<div class="roster-grid">
+    ${league.teams.map((team) => {
+      const members = (league.players || [])
+        .filter((p) => p.team_id === team.id)
+        .sort((a, b) => a.division_level - b.division_level);
+      return `
+        <div class="roster-team-card">
+          <div class="roster-team-title">${esc(team.name)}</div>
+          ${members.map((m) => `
+            <div class="roster-player">
+              <span class="div-chip">${esc(m.division_name)}</span>
+              ${esc(m.player_name)}
+            </div>`).join('')}
+        </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderWeekCard(week) {
+  const matchupsHTML = week.matchups.map((mu) => {
+    if (mu.bye_team_id) {
+      return `
+        <div class="matchup-block">
+          <div class="matchup-title">${esc(mu.bye_team_name)} <span class="bye-badge">BYE</span></div>
+        </div>`;
+    }
+    return `
+      <div class="matchup-block">
+        <div class="matchup-title">
+          ${esc(mu.team1_name)} <span class="vs-badge">VS</span> ${esc(mu.team2_name)}
+        </div>
+        ${mu.matches.map((m) => renderMatchRow(m)).join('')}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="week-card">
+      <div class="week-header">
+        <div class="week-title">
+          <span class="week-num">Week ${week.week_number}</span>
+          <span class="week-date">${formatDate(week.date)}</span>
+        </div>
+        <svg class="week-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </div>
+      <div class="week-body">${matchupsHTML}</div>
+    </div>`;
+}
+
+function bo5ScoreInputHTML(s1 = '', s2 = '') {
+  return `
+    <div class="score-input-form">
+      <input class="score-input" data-score="p1" type="number" min="0" max="3" placeholder="0" value="${esc(String(s1))}">
+      <span class="score-sep">–</span>
+      <input class="score-input" data-score="p2" type="number" min="0" max="3" placeholder="0" value="${esc(String(s2))}">
+    </div>
+    <span class="score-hint">Bo5</span>`;
+}
+
+function renderMatchRow(match) {
+  const p1Won = match.winner_id != null && match.winner_id === match.player1_id;
+  const p2Won = match.winner_id != null && match.winner_id === match.player2_id;
+  const hasScore = match.player1_score != null && match.player2_score != null;
+
+  const scoreSection = hasScore
+    ? `<div class="match-score">
+         <span class="score-display">${match.player1_score} – ${match.player2_score}</span>
+         <button class="btn btn-ghost btn-sm score-save-btn" style="font-size:11px;padding:4px 8px"
+           data-match-id="${match.id}"
+           data-p1-id="${match.player1_id}"
+           data-p2-id="${match.player2_id}"
+           data-editing="false">Edit</button>
+       </div>`
+    : `<div class="match-score">
+         ${bo5ScoreInputHTML()}
+         <button class="btn btn-success btn-sm score-save-btn" style="font-size:11px"
+           data-match-id="${match.id}"
+           data-p1-id="${match.player1_id}"
+           data-p2-id="${match.player2_id}"
+           data-editing="true">Save</button>
+       </div>`;
+
+  return `
+    <div class="match-row" data-match-id="${match.id}">
+      <span class="match-div-label">${esc(match.division_name)}</span>
+      <div class="match-players">
+        <span class="match-player${p1Won ? ' winner' : ''}">${esc(match.player1_name)}</span>
+        <span class="text-muted" style="font-size:11px">vs</span>
+        <span class="match-player${p2Won ? ' winner' : ''}">${esc(match.player2_name)}</span>
+      </div>
+      ${scoreSection}
+    </div>`;
+}
+
+async function saveMatchScore(btn) {
+  const matchId = Number(btn.dataset.matchId);
+  const p1Id = Number(btn.dataset.p1Id);
+  const p2Id = Number(btn.dataset.p2Id);
+  const isEditing = btn.dataset.editing === 'true';
+
+  const row = btn.closest('.match-row');
+
+  // If showing saved score and clicking "Edit", switch to edit mode
+  if (!isEditing) {
+    const scoreDisplay = row.querySelector('.score-display');
+    const parts = scoreDisplay.textContent.split('–').map((s) => s.trim());
+    row.querySelector('.match-score').innerHTML = `
+      ${bo5ScoreInputHTML(parts[0], parts[1])}
+      <button class="btn btn-success btn-sm score-save-btn" style="font-size:11px"
+        data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="true">Save</button>`;
+    row.querySelector('.score-save-btn').addEventListener('click', () =>
+      saveMatchScore(row.querySelector('.score-save-btn'))
+    );
+    return;
+  }
+
+  const s1 = Number(row.querySelector('[data-score="p1"]').value);
+  const s2 = Number(row.querySelector('[data-score="p2"]').value);
+
+  // Validate Bo5: one player must win exactly 3, the other 0–2
+  const valid = Number.isInteger(s1) && Number.isInteger(s2)
+    && s1 >= 0 && s1 <= 3 && s2 >= 0 && s2 <= 3
+    && (s1 === 3 || s2 === 3)
+    && s1 !== s2;
+  if (!valid) {
+    toast('Invalid score — one player must win 3 games (e.g. 3-1, 2-3)', 'warning');
+    return;
+  }
+
+  const winnerId = s1 > s2 ? p1Id : p2Id;
+  await window.api.updateMatchScore({ matchId, player1Score: s1, player2Score: s2, winnerId });
+  toast('Score saved', 'success');
+
+  // Update winner highlight — use index-based querySelectorAll to avoid matching div.match-players
+  const playerSpans = row.querySelectorAll('.match-player');
+  playerSpans[0].className = `match-player${winnerId === p1Id ? ' winner' : ''}`;
+  playerSpans[1].className = `match-player${winnerId === p2Id ? ' winner' : ''}`;
+
+  row.querySelector('.match-score').innerHTML = `
+    <span class="score-display">${s1} – ${s2}</span>
+    <button class="btn btn-ghost btn-sm score-save-btn" style="font-size:11px;padding:4px 8px"
+      data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="false">Edit</button>`;
+  row.querySelector('.score-save-btn').addEventListener('click', () =>
+    saveMatchScore(row.querySelector('.score-save-btn'))
+  );
+}
+
+// ===== CREATE LEAGUE WIZARD =====
+function startCreateLeague() {
+  state.wizard = {
+    step: 1,
+    leagueName: '',
+    startDate: defaultStartDate(),
+    rankedPlayers: [],
+    numTeams: 3,
+    numDivisions: 1,
+    numRounds: 1,
+    blackoutDates: [],
+    teamNames: [],
+  };
+  navigate('createLeague');
+}
+
+function defaultStartDate() {
+  const d = new Date();
+  d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7 || 7)); // next Monday
+  return d.toISOString().split('T')[0];
+}
+
+function renderCreateLeague() {
+  document.getElementById('pageTitle').textContent = 'New League';
+  document.getElementById('topbarActions').innerHTML = '';
+  const content = document.getElementById('mainContent');
+
+  const steps = [
+    { label: 'League Info' },
+    { label: 'Add Players' },
+    { label: 'Structure' },
+    { label: 'Blackout Dates' },
+    { label: 'Preview' },
+  ];
+  const s = state.wizard.step;
+
+  const stepsHTML = steps.map((step, i) => {
+    const num = i + 1;
+    const cls = num < s ? 'done' : num === s ? 'active' : '';
+    const connCls = num < s ? 'done' : '';
+    return `
+      <div class="wizard-step ${cls}">
+        <div class="step-num">${num < s ? '&#10003;' : num}</div>
+        <span class="step-label">${step.label}</span>
+      </div>
+      ${i < steps.length - 1 ? `<div class="step-connector ${connCls}"></div>` : ''}`;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="wizard">
+      <div class="wizard-steps">${stepsHTML}</div>
+      <div class="wizard-card" id="wizardCard"></div>
+    </div>`;
+
+  renderWizardStep();
+}
+
+function renderWizardStep() {
+  switch (state.wizard.step) {
+    case 1: renderStep1(); break;
+    case 2: renderStep2(); break;
+    case 3: renderStep3(); break;
+    case 4: renderStep4(); break;
+    case 5: renderStep5(); break;
+  }
+}
+
+// Step 1 — League Info
+function renderStep1() {
+  document.getElementById('wizardCard').innerHTML = `
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">League Information</h3>
+    <div class="form-group">
+      <label>League Name *</label>
+      <input class="form-control" id="wName" value="${esc(state.wizard.leagueName)}" placeholder="e.g. Fall 2024 League" autofocus>
+    </div>
+    <div class="form-group">
+      <label>Start Date *</label>
+      <input class="form-control" id="wDate" type="date" value="${esc(state.wizard.startDate)}">
+    </div>
+    <div id="wError" class="form-error"></div>
+    <div class="wizard-footer">
+      <button class="btn btn-outline" onclick="navigate('leagues')">Cancel</button>
+      <button class="btn btn-primary" id="wNext">Next &rarr;</button>
+    </div>`;
+
+  document.getElementById('wNext').addEventListener('click', () => {
+    const name = document.getElementById('wName').value.trim();
+    const date = document.getElementById('wDate').value;
+    if (!name) { document.getElementById('wError').textContent = 'League name is required.'; return; }
+    if (!date) { document.getElementById('wError').textContent = 'Start date is required.'; return; }
+    state.wizard.leagueName = name;
+    state.wizard.startDate = date;
+    state.wizard.step = 2;
+    renderCreateLeague();
+  });
+}
+
+// Step 2 — Select Players (order is determined by the Ladder)
+async function renderStep2() {
+  // Load ladder (source of truth for skill ranking)
+  if (!state.ladder.length) state.ladder = await window.api.getLadder();
+  const ladderOrder = state.ladder.map((p) => p.id);
+
+  const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
+  state.players = allPlayers;
+
+  const selectedIds = new Set(state.wizard.rankedPlayers.map((p) => p.id));
+
+  // Available list shown in ladder order (unranked players appended alphabetically)
+  const available = ladderOrder
+    .map((id) => allPlayers.find((p) => p.id === id))
+    .filter((p) => p && !selectedIds.has(p.id));
+  // Also include any players not on the ladder yet
+  allPlayers.forEach((p) => {
+    if (!selectedIds.has(p.id) && !ladderOrder.includes(p.id)) available.push(p);
+  });
+
+  document.getElementById('wizardCard').innerHTML = `
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">Select Players</h3>
+    <p class="text-muted" style="font-size:13px;margin-bottom:18px">
+      Click a player to add them. Order is set by the <strong>Ladder</strong> ranking.
+    </p>
+    <div class="player-picker">
+      <div class="picker-col">
+        <h4>Club Players</h4>
+        <div class="picker-list" id="availableList">
+          ${available.length === 0
+            ? '<div class="empty-state"><strong>All players added</strong></div>'
+            : available.map((p) => `
+                <div class="picker-item" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
+                  <span style="flex:1">${esc(p.name)}</span>
+                  <span style="color:var(--accent);font-size:18px">+</span>
+                </div>`).join('')}
+        </div>
+      </div>
+      <div class="picker-col">
+        <h4>Selected (${state.wizard.rankedPlayers.length}) &mdash; ladder order</h4>
+        <div class="picker-list" id="rankedList">
+          ${state.wizard.rankedPlayers.length === 0
+            ? '<div class="empty-state" style="padding:40px 20px"><strong>No players selected</strong><p>Click players on the left to add them.</p></div>'
+            : state.wizard.rankedPlayers.map((p, i) => `
+                <div class="picker-item">
+                  <div class="rank-badge">${i + 1}</div>
+                  <span style="flex:1">${esc(p.name)}</span>
+                  <button class="remove-btn" data-action="remove-player" data-idx="${i}">&times;</button>
+                </div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div id="wError" class="form-error mt-4"></div>
+    <div class="wizard-footer">
+      <button class="btn btn-outline" id="wBack">&larr; Back</button>
+      <button class="btn btn-primary" id="wNext">Next &rarr;</button>
+    </div>`;
+
+  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 1; renderCreateLeague(); });
+  document.getElementById('wNext').addEventListener('click', () => {
+    if (state.wizard.rankedPlayers.length < 2) {
+      document.getElementById('wError').textContent = 'Select at least 2 players.';
+      return;
+    }
+    state.wizard.step = 3;
+    renderCreateLeague();
+  });
+
+  document.getElementById('wizardCard').addEventListener('click', (e) => {
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (!action) return;
+
+    if (action === 'add-player') {
+      const el = e.target.closest('[data-action]');
+      state.wizard.rankedPlayers.push({ id: Number(el.dataset.id), name: el.dataset.name });
+      // Re-sort by ladder order
+      state.wizard.rankedPlayers.sort((a, b) => {
+        const ai = ladderOrder.indexOf(a.id);
+        const bi = ladderOrder.indexOf(b.id);
+        return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
+      });
+      renderCreateLeague();
+    } else if (action === 'remove-player') {
+      const idx = Number(e.target.closest('[data-action]').dataset.idx);
+      state.wizard.rankedPlayers.splice(idx, 1);
+      renderCreateLeague();
+    }
+  });
+}
+
+// Step 3 — Structure
+async function renderStep3() {
+  const n = state.wizard.rankedPlayers.length;
+  const { numTeams, numRounds } = state.wizard;
+  const configs = await window.api.getValidConfigs(n);
+
+  const isValid = numTeams >= 2 && n % numTeams === 0;
+  const numDivisions = isValid ? n / numTeams : null;
+  const baseWeeks = isValid ? (numTeams % 2 === 0 ? numTeams - 1 : numTeams) : null;
+  const totalWeeks = isValid ? baseWeeks * numRounds : null;
+  const calcClass = numTeams < 2 ? '' : isValid ? 'ok' : 'err';
+
+  let warning = '';
+  if (numTeams >= 2 && !isValid) {
+    warning = nearestConfigWarning(n, configs, 'teams', numTeams);
+  }
+
+  document.getElementById('wizardCard').innerHTML = `
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">League Structure</h3>
+    <p class="text-muted" style="font-size:13px;margin-bottom:20px">
+      You have <strong>${n} players</strong>. Set the number of teams and how many times to play through the schedule.
+    </p>
+
+    <div class="form-group" style="max-width:200px">
+      <label>Number of Teams</label>
+      <input class="form-control" id="wTeams" type="number" min="2" value="${numTeams}" style="font-size:16px;font-weight:600">
+    </div>
+
+    <div class="structure-calc">
+      <div class="calc-row">
+        <span><strong>${numTeams || '?'}</strong> teams</span>
+        <span class="calc-eq">&times;</span>
+        <span><strong>${isValid ? numDivisions : '?'}</strong> divisions</span>
+        <span class="calc-eq">=</span>
+        <span class="calc-val ${calcClass}">${isValid ? n : '?'} players ${isValid ? '&#10003;' : ''}</span>
+      </div>
+    </div>
+
+    ${warning ? `<div class="struct-warning">${warning}</div>` : ''}
+
+    <div class="form-group" style="max-width:200px;margin-top:20px">
+      <label>Rounds through the schedule</label>
+      <input class="form-control" id="wRounds" type="number" min="1" value="${numRounds}">
+      ${isValid ? `<p class="text-muted" style="font-size:12px;margin-top:6px">${baseWeeks} weeks &times; ${numRounds} round(s) = <strong>${totalWeeks} total weeks</strong></p>` : ''}
+    </div>
+
+    ${configs.length > 0 ? `
+      <p style="font-size:12px;color:var(--text-muted);margin-top:14px">
+        Valid team counts for ${n} players: ${configs.map((c) => `<strong>${c.teams}</strong>`).join(', ')}
+      </p>` : ''}
+
+    <div id="wError" class="form-error mt-4"></div>
+    <div class="wizard-footer">
+      <button class="btn btn-outline" id="wBack">&larr; Back</button>
+      <button class="btn btn-primary" id="wNext" ${!isValid ? 'disabled' : ''}>Next &rarr;</button>
+    </div>`;
+
+  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 2; renderCreateLeague(); });
+  document.getElementById('wNext').addEventListener('click', () => {
+    if (!isValid) return;
+    state.wizard.numTeams = numTeams;
+    state.wizard.numDivisions = numDivisions;
+    state.wizard.step = 4;
+    renderCreateLeague();
+  });
+
+  document.getElementById('wTeams').addEventListener('input', (e) => {
+    state.wizard.numTeams = Number(e.target.value) || 0;
+    renderCreateLeague();
+  });
+
+  document.getElementById('wRounds').addEventListener('input', (e) => {
+    state.wizard.numRounds = Math.max(1, Number(e.target.value) || 1);
+    renderCreateLeague();
+  });
+}
+
+function nearestConfigWarning(n, configs, mode, inputVal) {
+  if (configs.length === 0) return `${n} players cannot be evenly divided. Add or remove players.`;
+  const nearest = configs.reduce((best, c) => {
+    const val = mode === 'teams' ? c.teams : c.divisions;
+    const bestVal = mode === 'teams' ? best.teams : best.divisions;
+    return Math.abs(val - inputVal) < Math.abs(bestVal - inputVal) ? c : best;
+  });
+  if (mode === 'teams') {
+    return `${n} players can't be split into ${inputVal} teams evenly. Try <strong>${nearest.teams} teams</strong> (${nearest.divisions} divisions).`;
+  }
+  return `${n} players can't be split into ${inputVal} divisions evenly. Try <strong>${nearest.divisions} divisions</strong> (${nearest.teams} teams).`;
+}
+
+// Step 4 — Blackout Dates
+function renderStep4() {
+  const { blackoutDates, startDate, numTeams, numRounds } = state.wizard;
+  const baseWeeks = numTeams % 2 === 0 ? numTeams - 1 : numTeams;
+  const totalWeeks = baseWeeks * numRounds;
+
+  document.getElementById('wizardCard').innerHTML = `
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">Blackout Dates</h3>
+    <p class="text-muted" style="font-size:13px;margin-bottom:4px">
+      Mark any weeks to skip. The schedule will extend past those dates automatically.
+    </p>
+    <p class="text-muted" style="font-size:12px;margin-bottom:20px">
+      League runs <strong>${totalWeeks} week${totalWeeks !== 1 ? 's' : ''}</strong> starting ${formatDate(startDate)}.
+    </p>
+
+    <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px">
+      <div class="form-group" style="flex:1;max-width:240px;margin-bottom:0">
+        <label>Add a date to skip</label>
+        <input class="form-control" id="wBlackoutDate" type="date" min="${startDate}">
+      </div>
+      <button class="btn btn-outline" id="wAddBlackout">Add</button>
+    </div>
+
+    ${blackoutDates.length === 0
+      ? '<p class="text-muted" style="font-size:13px">No blackout dates added.</p>'
+      : `<div class="blackout-list">
+          ${blackoutDates.map((d, i) => `
+            <div class="blackout-item">
+              <span>${formatDate(d)}</span>
+              <button class="btn btn-ghost btn-sm" data-action="remove-blackout" data-idx="${i}">&times; Remove</button>
+            </div>`).join('')}
+        </div>`}
+
+    <div class="wizard-footer" style="margin-top:24px">
+      <button class="btn btn-outline" id="wBack">&larr; Back</button>
+      <button class="btn btn-primary" id="wNext">Next &rarr;</button>
+    </div>`;
+
+  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 3; renderCreateLeague(); });
+  document.getElementById('wNext').addEventListener('click', () => { state.wizard.step = 5; renderCreateLeague(); });
+
+  document.getElementById('wAddBlackout').addEventListener('click', () => {
+    const dateVal = document.getElementById('wBlackoutDate').value;
+    if (!dateVal) return;
+    if (!state.wizard.blackoutDates.includes(dateVal)) {
+      state.wizard.blackoutDates.push(dateVal);
+      state.wizard.blackoutDates.sort();
+    }
+    renderCreateLeague();
+  });
+
+  document.getElementById('wizardCard').addEventListener('click', (e) => {
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action === 'remove-blackout') {
+      const idx = Number(e.target.closest('[data-action]').dataset.idx);
+      state.wizard.blackoutDates.splice(idx, 1);
+      renderCreateLeague();
+    }
+  });
+}
+
+// Step 5 — Preview & Confirm
+function renderStep5() {
+  const { leagueName, startDate, rankedPlayers, numTeams, numDivisions, numRounds, blackoutDates } = state.wizard;
+  const LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  // Initialise / resize teamNames, preserving any custom names already entered
+  if (state.wizard.teamNames.length !== numTeams) {
+    state.wizard.teamNames = Array.from({ length: numTeams }, (_, i) =>
+      state.wizard.teamNames[i] || `Team ${LABELS[i]}`
+    );
+  }
+  const teamNames = state.wizard.teamNames;
+
+  // Build preview teams using current teamNames
+  const teams = Array.from({ length: numTeams }, (_, i) => ({ name: teamNames[i], players: [] }));
+  rankedPlayers.forEach((p, i) => {
+    const teamIdx = i % numTeams;
+    const divIdx = Math.floor(i / numTeams);
+    teams[teamIdx].players.push({ name: p.name, div: `Div ${divIdx + 1}` });
+  });
+
+  // Build full schedule with numRounds repetitions, skipping blackout dates
+  const teamIndexes = Array.from({ length: numTeams }, (_, i) => i);
+  const oneRoundRobin = previewRoundRobin(teamIndexes);
+  const allRounds = [];
+  for (let rep = 0; rep < numRounds; rep++) allRounds.push(...oneRoundRobin);
+
+  // Assign dates, skipping blackouts
+  const blackoutSet = new Set(blackoutDates);
+  const weekDates = [];
+  let cur = startDate;
+  for (let i = 0; i < allRounds.length; i++) {
+    while (blackoutSet.has(cur)) cur = addDaysPreview(cur, 7);
+    weekDates.push(cur);
+    cur = addDaysPreview(cur, 7);
+  }
+
+  const totalWeeks = allRounds.length;
+  const previewCount = Math.min(3, totalWeeks);
+  const weeksHTML = allRounds.slice(0, previewCount).map((round, r) => {
+    const dateStr = new Date(weekDates[r] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return `
+      <div style="margin-bottom:12px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--text)">
+          Week ${r + 1}: ${dateStr}
+        </div>
+        ${round.map((mu) => mu.bye != null
+          ? `<div style="font-size:13px;color:var(--text-muted);padding:3px 0"><span class="sched-team" data-team-idx="${mu.bye}">${esc(teams[mu.bye].name)}</span> — <em>Bye</em></div>`
+          : `<div style="font-size:13px;padding:3px 0"><span class="sched-team" data-team-idx="${mu.team1}">${esc(teams[mu.team1].name)}</span> vs <span class="sched-team" data-team-idx="${mu.team2}">${esc(teams[mu.team2].name)}</span></div>`
+        ).join('')}
+      </div>`;
+  }).join('');
+
+  const blackoutNote = blackoutDates.length > 0
+    ? ` (${blackoutDates.length} blackout date${blackoutDates.length !== 1 ? 's' : ''} skipped)`
+    : '';
+
+  document.getElementById('wizardCard').innerHTML = `
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">Preview &amp; Confirm</h3>
+
+    <div class="info-banner">
+      <strong>${esc(leagueName)}</strong> &mdash; starts ${formatDate(startDate)} &mdash;
+      ${numTeams} teams &times; ${numDivisions} divisions &mdash; ${totalWeeks} weeks${blackoutNote}
+    </div>
+
+    <div class="preview-grid">
+      <div class="preview-section">
+        <h4>Team Rosters <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(click name to edit)</span></h4>
+        <div class="team-list">
+          ${teams.map((t, i) => `
+            <div class="team-row">
+              <input class="team-name-input" data-team-idx="${i}" value="${esc(t.name)}" aria-label="Team name">
+              <div class="team-players">${t.players.map((p) => `${esc(p.name)} (${p.div})`).join(', ')}</div>
+            </div>`).join('')}
+        </div>
+      </div>
+      <div class="preview-section">
+        <h4>Schedule Preview (first ${previewCount} weeks)</h4>
+        ${weeksHTML}
+        ${totalWeeks > previewCount ? `<p class="text-muted" style="font-size:12px;margin-top:4px">+ ${totalWeeks - previewCount} more weeks…</p>` : ''}
+      </div>
+    </div>
+
+    <div id="wError" class="form-error"></div>
+    <div class="wizard-footer">
+      <button class="btn btn-outline" id="wBack">&larr; Back</button>
+      <button class="btn btn-success btn-lg" id="wCreate">Create League</button>
+    </div>`;
+
+  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 4; renderCreateLeague(); });
+  document.getElementById('wCreate').addEventListener('click', submitCreateLeague);
+
+  // Live-update teamNames in state and schedule preview spans as user types
+  const LABELS_PREVIEW = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  document.querySelectorAll('.team-name-input').forEach((input) => {
+    input.addEventListener('input', (e) => {
+      const idx = Number(e.target.dataset.teamIdx);
+      state.wizard.teamNames[idx] = e.target.value;
+      const displayName = e.target.value.trim() || `Team ${LABELS_PREVIEW[idx]}`;
+      document.querySelectorAll(`.sched-team[data-team-idx="${idx}"]`).forEach((span) => {
+        span.textContent = displayName;
+      });
+    });
+  });
+}
+
+function addDaysPreview(dateStr, days) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+function previewRoundRobin(indexes) {
+  if (indexes.length < 2) return [];
+  let list = [...indexes];
+  if (list.length % 2 === 1) list.push('BYE');
+  const numRounds = list.length - 1;
+  const half = list.length / 2;
+  const fixed = list[0];
+  let rotating = list.slice(1);
+  const rounds = [];
+
+  for (let r = 0; r < numRounds; r++) {
+    const current = [fixed, ...rotating];
+    const round = [];
+    for (let i = 0; i < half; i++) {
+      const t1 = current[i], t2 = current[current.length - 1 - i];
+      if (t1 === 'BYE') round.push({ bye: t2 });
+      else if (t2 === 'BYE') round.push({ bye: t1 });
+      else round.push({ team1: t1, team2: t2 });
+    }
+    rounds.push(round);
+    rotating = [rotating[rotating.length - 1], ...rotating.slice(0, -1)];
+  }
+  return rounds;
+}
+
+async function submitCreateLeague() {
+  const btn = document.getElementById('wCreate');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Creating…';
+
+  const { leagueName, startDate, rankedPlayers, numTeams, numDivisions, numRounds, blackoutDates, teamNames } = state.wizard;
+  const payload = {
+    name: leagueName,
+    startDate,
+    numTeams,
+    numDivisions,
+    numRounds,
+    blackoutDates,
+    teamNames,
+    rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
+  };
+
+  try {
+    const leagueId = await window.api.createLeague(payload);
+    toast(`League "${leagueName}" created!`, 'success');
+    const league = await window.api.getLeague(leagueId);
+    navigate('leagueDetail', { league });
+  } catch (e) {
+    document.getElementById('wError').textContent = e.message || 'Failed to create league.';
+    btn.disabled = false;
+    btn.textContent = 'Create League';
+  }
+}
+
+// ===== INIT =====
+window.addEventListener('DOMContentLoaded', async () => {
+  state.players = await window.api.getPlayers();
+  navigate('players');
+});
