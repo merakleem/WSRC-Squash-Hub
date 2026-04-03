@@ -1503,6 +1503,14 @@ tbody td {
 .dash-area-rank     { grid-area: rank; }
 .dash-area-quick    { grid-area: quick; }
 
+/* No upcoming matches: next spans full width, rank+quick sit side by side below */
+.dash-player-no-upcoming {
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "next  next"
+    "rank  quick";
+}
+
 /* Next match card */
 .dash-next-card {
   background: var(--primary);
@@ -1736,7 +1744,7 @@ tbody td {
   .dash-admin-grid { grid-template-columns: 1fr; gap: 10px; }
   .dash-admin-card { flex-direction: row; align-items: center; padding: 18px 16px; gap: 14px; }
   .dash-admin-card-icon img { width: 28px; height: 28px; }
-  .dash-player { grid-template-columns: 1fr; grid-template-areas: "next" "upcoming" "rank" "quick"; }
+  .dash-player, .dash-player-no-upcoming { grid-template-columns: 1fr; grid-template-areas: "next" "upcoming" "rank" "quick"; }
   .dash-next-card { padding: 22px 20px 20px; border-radius: 14px; min-height: unset; }
   .dash-next-you, .dash-next-opp { font-size: 19px; }
   .dash-next-date { font-size: 12px; margin-bottom: 14px; }

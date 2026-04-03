@@ -306,8 +306,9 @@ async function renderDashboard() {
       </div>
     </div>`;
 
+  const hasUpcoming = restUpcoming.length > 0;
   content.innerHTML = `
-    <div class="dash-player">
+    <div class="dash-player${hasUpcoming ? '' : ' dash-player-no-upcoming'}">
       <div class="dash-section dash-area-next">
         <div class="dash-section-label">Next Match</div>
         ${nextMatchHTML}
