@@ -6,16 +6,23 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
     />
-    <title>WSRC Squash Manager</title>
+    <title>WSRC Squash Hub</title>
+    <link rel="icon" type="image/png" href="/assets/logo-blue.png">
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app-container">
       <!-- Sidebar -->
+    <button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
+      <span class="bar"></span>
+      <span class="bar"></span>
+      <span class="bar"></span>
+    </button>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
       <aside class="sidebar">
         <div class="sidebar-logo">
           <img class="sidebar-logo-img" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC Logo">
-          <span class="sidebar-logo-text">WSRC Squash Manager</span>
+          <span class="sidebar-logo-text">WSRC Squash Hub</span>
         </div>
         <nav class="sidebar-nav">
           <a class="nav-item" data-page="players">
@@ -30,18 +37,14 @@
             <img class="nav-icon" src="/assets/leagues-icon.png" alt="">
             Leagues
           </a>
-        </nav>
-        <div class="sidebar-bottom">
-          <a class="nav-item" id="navMyProfile" style="display:none">
-            <img class="nav-icon" src="/assets/players-icon.png" alt="">
+          <a class="nav-item" id="navMyProfile" data-page="myProfile" style="display:none">
+            <img class="nav-icon" src="/assets/profile-icon.png" alt="">
             My Profile
           </a>
+        </nav>
+        <div class="sidebar-bottom">
           <a class="nav-item nav-item-logout" href="/logout">
-            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-              <polyline points="16 17 21 12 16 7"/>
-              <line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
+            <img class="nav-icon" src="/assets/logout-icon.png" alt="">
             Logout
           </a>
         </div>

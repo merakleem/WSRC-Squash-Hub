@@ -120,6 +120,46 @@ body {
   gap: 2px;
   border-top: 1px solid rgba(255,255,255,0.12);
 }
+.hamburger-btn {
+  display: none;
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 56px;
+  height: var(--topbar-h);
+  z-index: 300;
+  background: var(--surface);
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0;
+}
+.hamburger-btn .bar {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 2px;
+  transition: transform 0.25s, opacity 0.25s;
+  transform-origin: center;
+}
+.hamburger-btn.open .bar:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.hamburger-btn.open .bar:nth-child(2) { opacity: 0; }
+.hamburger-btn.open .bar:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 250;
+}
+.sidebar-overlay.open { display: block; }
 
 /* ===== TOPBAR ===== */
 .topbar {
@@ -154,7 +194,7 @@ body {
 /* ===== BULK ADD MODAL ===== */
 .bulk-header {
   display: grid;
-  grid-template-columns: 24px 1fr 1fr 1fr 28px;
+  grid-template-columns: 24px 1fr 1fr 1fr 52px 1fr 28px;
   gap: 8px;
   padding: 0 4px 6px;
   font-size: 12px;
@@ -165,7 +205,7 @@ body {
 }
 .bulk-row {
   display: grid;
-  grid-template-columns: 24px 1fr 1fr 1fr 28px;
+  grid-template-columns: 24px 1fr 1fr 1fr 52px 1fr 28px;
   gap: 8px;
   align-items: center;
   margin-bottom: 6px;
@@ -443,7 +483,7 @@ tbody td {
   display: flex;
   flex-direction: column;
 }
-.modal.modal-wide { width: 760px; }
+.modal.modal-wide { width: 920px; }
 
 .modal-header {
   display: flex;
@@ -1115,11 +1155,52 @@ tbody td {
   border-radius: var(--radius);
   border: 1px solid transparent;
   background: var(--surface);
-  cursor: grab;
+  cursor: default;
   user-select: none;
   transition: background 0.1s, border-color 0.1s;
 }
+.ladder-list:not(.ladder-list-readonly) .ladder-row { cursor: grab; }
 .ladder-row:hover { background: var(--surface-2); border-color: var(--border); }
+.ladder-list-readonly .ladder-row:hover { background: var(--surface); border-color: transparent; cursor: default; }
+.ladder-top10-section {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.ladder-top10-header {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  color: #fff;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ladder-rest-section {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.ladder-rest-header {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.ladder-top10-section .ladder-row,
+.ladder-rest-section .ladder-row { border-radius: 0; border-left: none; border-right: none; border-top: none; border-bottom: 1px solid var(--border); }
+.ladder-top10-section .ladder-row:last-child,
+.ladder-rest-section .ladder-row:last-child { border-bottom: none; }
 .ladder-row.dragging { opacity: 0.4; }
 .ladder-row.drag-over { border-color: var(--accent); background: #eaf4fb; }
 .ladder-drag-handle {
@@ -1133,7 +1214,8 @@ tbody td {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--primary);
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.18);
   color: #fff;
   font-size: 12px;
   font-weight: 600;
@@ -1142,6 +1224,8 @@ tbody td {
   justify-content: center;
   flex-shrink: 0;
 }
+.ladder-row .ladder-rank { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); }
+.ladder-rank-top10 { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
 .ladder-name { font-weight: 500; }
 .ladder-rating {
   font-size: 12px;
@@ -1239,4 +1323,80 @@ tbody td {
   font-size: 13px;
   color: #1a5276;
   margin-bottom: 20px;
+}
+
+/* ===== MOBILE ===== */
+@media (max-width: 768px) {
+  :root { --topbar-h: 56px; }
+
+  .hamburger-btn { display: flex; }
+
+  .sidebar {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    left: auto;
+    z-index: 260;
+    transform: translateX(100%);
+    transition: transform 0.28s ease;
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+
+  .main-wrapper { width: 100%; }
+
+  .topbar {
+    padding: 0 68px 0 16px;
+  }
+  .topbar-title { font-size: 16px; }
+  .topbar-actions { gap: 6px; }
+  .topbar-actions .btn { padding: 6px 10px; font-size: 12px; }
+  .topbar-actions .btn span,
+  .topbar-actions .btn svg + * { display: none; }
+
+  .content { padding: 16px; }
+
+  /* Players table — mobile: name only */
+  .players-table .player-col-email,
+  .players-table .player-col-phone { display: none; }
+  .players-table tbody tr { cursor: pointer; }
+  .players-table tbody td:first-child { width: 100%; }
+
+  /* League cards */
+  .league-grid { grid-template-columns: 1fr; }
+
+  /* League detail header */
+  .league-header-card { padding: 18px 16px; }
+  .league-header-card h2 { font-size: 18px; }
+  .league-stats { gap: 16px; }
+  .stat-val { font-size: 17px; }
+
+  /* Rosters */
+  .roster-grid { grid-template-columns: 1fr 1fr; }
+
+  /* Schedule / match rows */
+  .match-row { flex-wrap: wrap; gap: 8px; padding: 10px 10px; }
+  .match-meta { width: 100%; flex-direction: row; gap: 8px; }
+  .match-players { width: 100%; }
+  .match-actions { width: 100%; justify-content: flex-end; }
+
+  /* Profile header */
+  .profile-header-card { padding: 18px 16px; flex-direction: column; align-items: flex-start; }
+  .profile-stats { gap: 16px; }
+  .stat-val { font-size: 18px; }
+
+  /* Profile tables — hide Week and Division columns */
+  .profile-header-card ~ .table-card table thead th:nth-child(3),
+  .profile-header-card ~ .table-card table tbody td:nth-child(3),
+  .profile-header-card ~ .table-card table thead th:nth-child(4),
+  .profile-header-card ~ .table-card table tbody td:nth-child(4) { display: none; }
+
+  /* Ladder */
+  .ladder-record { min-width: 60px; font-size: 11px; }
+
+  /* Search bar full width */
+  .search-input { width: 100%; }
+  .table-toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .check-label-inline { margin-left: 0; }
+
+  /* Section title spacing */
+  .section-title { margin-top: 20px; }
 }

@@ -94,7 +94,7 @@ function authPage({ title, body, error, info }) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title} — WSRC Squash Manager</title>
+  <title>${title} — WSRC Squash Hub</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -132,7 +132,7 @@ function authPage({ title, body, error, info }) {
       <img class="logo" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC Logo">
     </div>
     <div class="card-body">
-      <h1>WSRC Squash Manager</h1>
+      <h1>WSRC Squash Hub</h1>
       ${info  ? `<div class="info">${info}</div>` : '<p class="subtitle">Sign in to continue</p>'}
       ${body}
       ${error ? `<div class="error">${error}</div>` : ''}
@@ -185,11 +185,10 @@ function loginFormBody() {
   return `<form method="POST" action="/login">
     <label>Email</label>
     <input type="email" name="email" placeholder="your@email.com" autocomplete="email">
-    <label>Member Number</label>
-    <input type="password" name="password" placeholder="Member number" autofocus autocomplete="current-password">
+    <label>Password</label>
+    <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
     <button type="submit">Sign In</button>
-  </form>
-  <div class="link-row"><a href="/forgot-password">Forgot your member number?</a></div>`;
+  </form>`;
 }
 
 app.get('/logout', (req, res) => {
@@ -341,7 +340,7 @@ async function start() {
   await initDB(DB_PATH);
   app.listen(PORT, () => {
     console.log('');
-    console.log('  WSRC Squash Manager is running!');
+    console.log('  WSRC Squash Hub is running!');
     console.log(`  Open http://localhost:${PORT} in your browser`);
     console.log('');
     console.log('  Press Ctrl+C to stop.');

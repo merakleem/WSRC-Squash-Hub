@@ -131,7 +131,9 @@ function navigate(page, params = {}) {
   if (params.player) state.currentPlayer = params.player;
 
   // Sidebar active state
+  const isOwnProfile = page === 'playerProfile' && state.currentPlayer?.id === state.currentUser?.playerId;
   const navPage = (page === 'leagueDetail' || page === 'createLeague') ? 'leagues'
+    : isOwnProfile ? 'myProfile'
     : page === 'playerProfile' ? 'players'
     : page;
   document.querySelectorAll('.nav-item').forEach((el) => {
@@ -140,7 +142,7 @@ function navigate(page, params = {}) {
 
   // Back button
   const btnBack = document.getElementById('btnBack');
-  const showBack = page === 'leagueDetail' || page === 'createLeague' || page === 'playerProfile';
+  const showBack = !isOwnProfile && (page === 'leagueDetail' || page === 'createLeague' || page === 'playerProfile');
   btnBack.style.display = showBack ? 'inline-flex' : 'none';
 
   renderPage();
@@ -193,8 +195,9 @@ async function renderPlayers() {
 }
 
 function playerRowsHTML(players, filtered) {
+  const cols = isAdmin() ? 4 : 3;
   if (filtered.length === 0) {
-    return `<tr><td colspan="4">
+    return `<tr><td colspan="${cols}">
       <div class="empty-state">
         <strong>${players.length === 0 ? 'No players yet' : 'No results'}</strong>
         <p>${players.length === 0 ? 'Add your first player to get started.' : 'Try a different search term.'}</p>
@@ -204,13 +207,9 @@ function playerRowsHTML(players, filtered) {
   return filtered.map((p) => `
     <tr>
       <td><a class="player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a></td>
-      <td class="text-muted">${esc(p.email) || '—'}</td>
-      <td class="text-muted">${esc(p.phone) || '—'}</td>
-      <td>
-        <div class="td-actions">
-          ${isAdmin() ? `<button class="btn btn-outline btn-sm" data-action="edit" data-id="${p.id}">Edit</button>` : ''}
-        </div>
-      </td>
+      <td class="text-muted player-col-email">${esc(p.email) || '—'}</td>
+      <td class="text-muted player-col-phone">${esc(p.phone) || '—'}</td>
+      ${isAdmin() ? `<td><div class="td-actions"><button class="btn btn-outline btn-sm" data-action="edit" data-id="${p.id}">Edit</button></div></td>` : ''}
     </tr>`).join('');
 }
 
@@ -237,10 +236,10 @@ function renderPlayerTable(players) {
         <span class="text-muted" id="playerCount">${players.length} player${players.length !== 1 ? 's' : ''}</span>
         <input class="search-input" id="playerSearch" placeholder="Search players..." autocomplete="off">
       </div>
-      <table>
+      <table class="players-table">
         <thead>
           <tr>
-            <th>Name</th><th>Email</th><th>Phone</th><th style="text-align:right">Actions</th>
+            <th>Name</th><th class="player-col-email">Email</th><th class="player-col-phone">Phone</th>${isAdmin() ? '<th style="text-align:right">Actions</th>' : ''}
           </tr>
         </thead>
         <tbody id="playerTbody">${playerRowsHTML(players, filtered)}</tbody>
@@ -280,8 +279,8 @@ function playerFormHTML(player = {}) {
       <input class="form-control" id="fPhone" value="${esc(player.phone || '')}" placeholder="(optional)">
     </div>
     <div class="form-group">
-      <label>Member Number <span class="form-hint">(used as login password, e.g. X118)</span></label>
-      <input class="form-control" id="fMemberNumber" value="${esc(player.member_number || '')}" placeholder="e.g. X118">
+      <label>Member Number <span class="form-hint">(used as login password)</span></label>
+      <input class="form-control" id="fMemberNumber" value="${esc(player.member_number || '')}" placeholder="Member number" ${!isMember ? 'disabled' : ''}>
     </div>
     <div class="form-group">
       <label>Club Locker Rating <span class="form-hint">(1.0 – 7.0, optional)</span></label>
@@ -300,8 +299,18 @@ function playerFormHTML(player = {}) {
     </div>`;
 }
 
+function attachMemberNumberToggle() {
+  const cb = document.getElementById('fMember');
+  const inp = document.getElementById('fMemberNumber');
+  cb.addEventListener('change', () => {
+    inp.disabled = !cb.checked;
+    if (!cb.checked) inp.value = '';
+  });
+}
+
 function openAddPlayerModal() {
   modal.open('Add Player', playerFormHTML());
+  attachMemberNumberToggle();
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const name = document.getElementById('fName').value.trim();
@@ -325,6 +334,7 @@ function openAddPlayerModal() {
 
 function openEditPlayerModal(player) {
   modal.open('Edit Player', playerFormHTML(player));
+  attachMemberNumberToggle();
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const name = document.getElementById('fName').value.trim();
@@ -339,7 +349,12 @@ function openEditPlayerModal(player) {
       modal.close();
       toast('Player updated', 'success');
       state.players = await window.api.getPlayers();
-      renderPlayerTable(state.players);
+      // If we edited from a player profile, reload the profile with fresh data
+      if (state.page === 'playerProfile') {
+        await openPlayerProfile(player.id);
+      } else {
+        renderPlayerTable(state.players);
+      }
     } catch (e) {
       document.getElementById('fError').textContent = e.message || 'Failed to update player.';
     }
@@ -363,11 +378,12 @@ function confirmDeletePlayer(id, name) {
 }
 
 function exportPlayersCsv() {
-  const headers = ['name', 'email', 'phone', 'wsrc_member', 'club_locker_rating'];
+  const headers = ['name', 'email', 'phone', 'member_number', 'wsrc_member', 'club_locker_rating'];
   const rows = state.players.map((p) => [
     p.name,
     p.email || '',
     p.phone || '',
+    p.member_number || '',
     p.wsrc_member ? '1' : '0',
     p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : '',
   ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
@@ -387,7 +403,7 @@ function openImportModal() {
       Upload a CSV exported from this app. Existing players with the same name will be skipped.
     </p>
     <p class="text-muted" style="font-size:12px;margin-bottom:16px">
-      Expected columns: <code>name, email, phone, wsrc_member, club_locker_rating</code>
+      Expected columns: <code>name, email, phone, member_number, wsrc_member, club_locker_rating</code>
     </p>
     <input type="file" accept=".csv" id="fCsvFile" class="form-control" style="margin-bottom:0">
     <div id="fError" class="form-error" style="margin-top:8px"></div>
@@ -412,11 +428,12 @@ function openImportModal() {
         return;
       }
       const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
-      const nameIdx   = headers.indexOf('name');
-      const emailIdx  = headers.indexOf('email');
-      const phoneIdx  = headers.indexOf('phone');
-      const memberIdx = headers.indexOf('wsrc_member');
-      const ratingIdx = headers.indexOf('club_locker_rating');
+      const nameIdx       = headers.indexOf('name');
+      const emailIdx      = headers.indexOf('email');
+      const phoneIdx      = headers.indexOf('phone');
+      const memberNumIdx  = headers.indexOf('member_number');
+      const memberIdx     = headers.indexOf('wsrc_member');
+      const ratingIdx     = headers.indexOf('club_locker_rating');
       if (nameIdx === -1) {
         document.getElementById('fError').textContent = 'Missing required "name" column.';
         return;
@@ -428,18 +445,29 @@ function openImportModal() {
       parsed = [];
       const existingNames = new Set(state.players.map((p) => p.name.toLowerCase()));
       const skipped = [];
+      const conflicted = [];
       for (let i = 1; i < lines.length; i++) {
         const row = lines[i].match(/(".*?"|[^,]+|(?<=,)(?=,)|^(?=,)|(?<=,)$)/g) || lines[i].split(',');
         const name = parseCell(row, nameIdx).trim();
         if (!name) continue;
         if (existingNames.has(name.toLowerCase())) { skipped.push(name); continue; }
+        const wsrc_member = parseCell(row, memberIdx) === '1';
+        const member_number = parseCell(row, memberNumIdx);
+        if (member_number && !wsrc_member) { conflicted.push(name); continue; }
         parsed.push({
           name,
           email: parseCell(row, emailIdx),
           phone: parseCell(row, phoneIdx),
-          wsrc_member: parseCell(row, memberIdx) === '1',
+          member_number,
+          wsrc_member,
           club_locker_rating: parseCell(row, ratingIdx) || '',
         });
+      }
+      if (conflicted.length) {
+        document.getElementById('fError').textContent =
+          `Fix CSV before importing — these players have a member number but wsrc_member is not 1: ${conflicted.join(', ')}`;
+        document.getElementById('fSubmit').disabled = true;
+        return;
       }
       document.getElementById('fError').textContent = '';
       const preview = document.getElementById('importPreview');
@@ -483,6 +511,11 @@ function openBulkAddModal() {
       <input class="form-control bulk-name" placeholder="Name *" data-field="name" data-row="${i}">
       <input class="form-control bulk-email" placeholder="Email" data-field="email" data-row="${i}">
       <input class="form-control bulk-phone" placeholder="Phone" data-field="phone" data-row="${i}">
+      <label style="display:flex;align-items:center;justify-content:center;cursor:pointer;gap:4px;font-size:11px;color:var(--text-muted)">
+        <input type="checkbox" class="bulk-member-cb" data-row="${i}" checked>
+        Member
+      </label>
+      <input class="form-control bulk-member-number" placeholder="Member #" data-field="member_number" data-row="${i}">
       <button class="btn btn-ghost btn-sm bulk-remove" data-row="${i}" title="Remove row">&times;</button>
     </div>`).join('');
 
@@ -492,25 +525,39 @@ function openBulkAddModal() {
     document.getElementById('bulkRows').innerHTML = renderRows(rowCount);
     document.querySelectorAll('.bulk-remove').forEach((btn) => {
       btn.addEventListener('click', () => {
-        // Copy values from rows after the removed one up by one
         const idx = Number(btn.dataset.row);
-        const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
-        const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
-        const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
-        names.splice(idx, 1);  emails.splice(idx, 1);  phones.splice(idx, 1);
+        const names    = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
+        const emails   = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
+        const phones   = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
+        const cbs      = [...document.querySelectorAll('.bulk-member-cb')].map(el => el.checked);
+        const members  = [...document.querySelectorAll('.bulk-member-number')].map(el => el.value);
+        names.splice(idx, 1); emails.splice(idx, 1); phones.splice(idx, 1); cbs.splice(idx, 1); members.splice(idx, 1);
         rowCount = Math.max(1, rowCount - 1);
         rebuild();
-        document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
-        document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
-        document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
+        document.querySelectorAll('.bulk-name').forEach((el, i)          => { el.value   = names[i]   || ''; });
+        document.querySelectorAll('.bulk-email').forEach((el, i)         => { el.value   = emails[i]  || ''; });
+        document.querySelectorAll('.bulk-phone').forEach((el, i)         => { el.value   = phones[i]  || ''; });
+        document.querySelectorAll('.bulk-member-cb').forEach((el, i)     => { el.checked = cbs[i] !== undefined ? cbs[i] : true; });
+        document.querySelectorAll('.bulk-member-number').forEach((el, i) => { el.value   = members[i] || ''; });
+        // Re-run toggle for each row after restore
+        document.querySelectorAll('.bulk-member-cb').forEach((cb) => cb.dispatchEvent(new Event('change')));
       });
+    });
+
+    // Toggle member # based on WSRC member checkbox
+    document.querySelectorAll('.bulk-member-cb').forEach((cb) => {
+      const row = cb.closest('.bulk-row');
+      const inp = row.querySelector('.bulk-member-number');
+      const toggle = () => { inp.disabled = !cb.checked; if (!cb.checked) inp.value = ''; };
+      toggle();
+      cb.addEventListener('change', toggle);
     });
   };
 
   modal.open('Add Multiple Players', `
     <p class="text-muted" style="font-size:13px;margin-bottom:16px">Fill in each player's details. Rows without a name will be skipped.</p>
     <div class="bulk-header">
-      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span></span>
+      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span style="text-align:center">WSRC<br>Member</span><span>Member #</span><span></span>
     </div>
     <div id="bulkRows">${renderRows(rowCount)}</div>
     <button class="btn btn-outline btn-sm" id="bulkAddRow" style="margin-top:10px">+ Add Row</button>
@@ -523,24 +570,31 @@ function openBulkAddModal() {
   rebuild();
 
   document.getElementById('bulkAddRow').addEventListener('click', () => {
-    const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
-    const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
-    const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
+    const names   = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
+    const emails  = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
+    const phones  = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
+    const cbs     = [...document.querySelectorAll('.bulk-member-cb')].map(el => el.checked);
+    const members = [...document.querySelectorAll('.bulk-member-number')].map(el => el.value);
     rowCount++;
     rebuild();
-    document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
-    document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
-    document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
+    document.querySelectorAll('.bulk-name').forEach((el, i)          => { el.value   = names[i]   || ''; });
+    document.querySelectorAll('.bulk-email').forEach((el, i)         => { el.value   = emails[i]  || ''; });
+    document.querySelectorAll('.bulk-phone').forEach((el, i)         => { el.value   = phones[i]  || ''; });
+    document.querySelectorAll('.bulk-member-cb').forEach((el, i)     => { el.checked = cbs[i] !== undefined ? cbs[i] : true; });
+    document.querySelectorAll('.bulk-member-number').forEach((el, i) => { el.value   = members[i] || ''; });
+    document.querySelectorAll('.bulk-member-cb').forEach((cb) => cb.dispatchEvent(new Event('change')));
   });
 
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const rows = [];
     document.querySelectorAll('.bulk-row').forEach((row) => {
-      const name  = row.querySelector('.bulk-name').value.trim();
-      const email = row.querySelector('.bulk-email').value.trim();
-      const phone = row.querySelector('.bulk-phone').value.trim();
-      if (name) rows.push({ name, email, phone });
+      const name          = row.querySelector('.bulk-name').value.trim();
+      const email         = row.querySelector('.bulk-email').value.trim();
+      const phone         = row.querySelector('.bulk-phone').value.trim();
+      const wsrc_member   = row.querySelector('.bulk-member-cb').checked;
+      const member_number = wsrc_member ? row.querySelector('.bulk-member-number').value.trim() : '';
+      if (name) rows.push({ name, email, phone, wsrc_member, member_number });
     });
     if (rows.length === 0) {
       document.getElementById('fError').textContent = 'Enter at least one player name.';
@@ -580,6 +634,7 @@ function renderPlayerProfile() {
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
       <div class="options-dropdown" id="optionsDropdown">
+        <button class="options-item" data-action="edit-player" data-id="${p.id}">Edit Information</button>
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
       </div>
     </div>` : '';
@@ -592,7 +647,11 @@ function renderPlayerProfile() {
     document.getElementById('optionsDropdown').addEventListener('click', (e) => {
       const action = e.target.dataset.action;
       document.getElementById('optionsDropdown').classList.remove('open');
-      if (action === 'delete-player') {
+      if (action === 'edit-player') {
+        const player = state.players.find((pl) => pl.id === Number(e.target.dataset.id))
+          || state.currentPlayer;
+        openEditPlayerModal(player);
+      } else if (action === 'delete-player') {
         confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
       }
     });
@@ -689,7 +748,7 @@ function renderPlayerProfile() {
     <div class="section-title">Upcoming Matches <div class="divider"></div></div>
     <div class="table-card">${upcomingHTML}</div>
 
-    <div class="section-title">Match History <div class="divider"></div></div>
+    <div class="section-title" style="margin-top:32px">Match History <div class="divider"></div></div>
     <div class="table-card">${historyHTML}</div>`;
 }
 
@@ -720,37 +779,84 @@ async function renderLadder(showNonMembers = false) {
   const visible = showNonMembers ? state.ladder : state.ladder.filter((p) => p.wsrc_member);
 
   const adminMode = isAdmin();
-  content.innerHTML = `
-    <div class="table-card">
-      <div class="table-toolbar">
-        <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''}${adminMode ? ' &mdash; drag rows or use arrows to reorder' : ''}</span>
+
+  if (adminMode) {
+    content.innerHTML = `
+      <div class="table-card">
+        <div class="table-toolbar">
+          <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''} &mdash; drag rows or use arrows to reorder</span>
+          <label class="check-label check-label-inline">
+            <input type="checkbox" id="showNonMembers" ${showNonMembers ? 'checked' : ''}>
+            Show non-members
+          </label>
+        </div>
+        <div class="ladder-list" id="ladderList">
+          ${visible.map((p, i) => {
+            const rec = records[p.id] || { wins: 0, losses: 0 };
+            const rating = p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : null;
+            const nonMemberBadge = !p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : '';
+            const ratingBadge = rating ? `<span class="ladder-rating">${rating}</span>` : '';
+            return `
+            <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" draggable="true" data-id="${p.id}" data-idx="${i}">
+              <span class="ladder-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
+              <span class="ladder-rank">${i + 1}</span>
+              <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
+              ${ratingBadge}
+              ${nonMemberBadge}
+              <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
+              <div class="ladder-controls">
+                <button class="rank-btn" data-action="ladder-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
+                <button class="rank-btn" data-action="ladder-down" data-idx="${i}" ${i === visible.length - 1 ? 'disabled' : ''}>&#9660;</button>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  } else {
+    const top10 = visible.slice(0, 10);
+    const rest  = visible.slice(10);
+    const rowHTML = (p, i) => {
+      const rec = records[p.id] || { wins: 0, losses: 0 };
+      return `
+      <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" data-id="${p.id}" data-idx="${i}">
+        <span class="ladder-rank ladder-rank-top10">${i + 1}</span>
+        <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
+        ${!p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : ''}
+        <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
+      </div>`;
+    };
+    const restRowHTML = (p, i) => {
+      const rec = records[p.id] || { wins: 0, losses: 0 };
+      return `
+      <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" data-id="${p.id}" data-idx="${i}">
+        <span class="ladder-rank">${i + 1}</span>
+        <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
+        ${!p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : ''}
+        <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
+      </div>`;
+    };
+    content.innerHTML = `
+      <div class="table-toolbar" style="background:var(--surface);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:14px 18px;margin-bottom:12px">
+        <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''}</span>
         <label class="check-label check-label-inline">
           <input type="checkbox" id="showNonMembers" ${showNonMembers ? 'checked' : ''}>
           Show non-members
         </label>
       </div>
-      <div class="ladder-list" id="ladderList">
-        ${visible.map((p, i) => {
-          const rec = records[p.id] || { wins: 0, losses: 0 };
-          const rating = p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : null;
-          const nonMemberBadge = !p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : '';
-          const ratingBadge = adminMode && rating ? `<span class="ladder-rating">${rating}</span>` : '';
-          return `
-          <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" ${adminMode ? 'draggable="true"' : ''} data-id="${p.id}" data-idx="${i}">
-            ${adminMode ? `<span class="ladder-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>` : ''}
-            <span class="ladder-rank">${i + 1}</span>
-            <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
-            ${ratingBadge}
-            ${nonMemberBadge}
-            <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
-            ${adminMode ? `<div class="ladder-controls">
-              <button class="rank-btn" data-action="ladder-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
-              <button class="rank-btn" data-action="ladder-down" data-idx="${i}" ${i === visible.length - 1 ? 'disabled' : ''}>&#9660;</button>
-            </div>` : ''}
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
+      <div class="ladder-list ladder-list-readonly" id="ladderList">
+        <div class="ladder-top10-section">
+          <div class="ladder-top10-header">&#9733; Top 10</div>
+          ${top10.map((p, i) => rowHTML(p, i)).join('')}
+        </div>
+        ${rest.length > 0 ? `
+        <div style="margin-top:10px">
+          <div class="ladder-rest-section">
+            <div class="ladder-rest-header">All Members</div>
+            ${rest.map((p, i) => restRowHTML(p, i + 10)).join('')}
+          </div>
+        </div>` : ''}
+      </div>`;
+  }
 
   document.getElementById('showNonMembers').addEventListener('change', (e) => {
     renderLadder(e.target.checked);
@@ -2147,6 +2253,31 @@ async function submitCreateLeague() {
     btn.textContent = 'Create League';
   }
 }
+
+// ===== HAMBURGER MENU =====
+(function() {
+  const btn = document.getElementById('hamburgerBtn');
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (!btn) return;
+  function closeSidebar() {
+    btn.classList.remove('open');
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('open');
+  }
+  btn.addEventListener('click', () => {
+    const opening = !sidebar.classList.contains('mobile-open');
+    btn.classList.toggle('open', opening);
+    sidebar.classList.toggle('mobile-open', opening);
+    overlay.classList.toggle('open', opening);
+  });
+  overlay.addEventListener('click', closeSidebar);
+  // Close sidebar when a nav item is clicked (mobile UX)
+  document.querySelectorAll('.nav-item').forEach((el) => {
+    el.addEventListener('click', closeSidebar);
+  });
+  document.getElementById('navMyProfile')?.addEventListener('click', closeSidebar);
+})();
 
 // ===== INIT =====
 window.addEventListener('DOMContentLoaded', async () => {
