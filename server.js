@@ -8,7 +8,7 @@ const leagueModel = require('./models/leagueModel');
 const ladderModel = require('./models/ladderModel');
 const { getValidConfigurations } = require('./utils/helpers');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
 const ADMIN_PASSWORD = process.env.SITE_PASSWORD || 'wsrc2025';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'wsrc-dev-secret-change-in-production';
