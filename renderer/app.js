@@ -498,7 +498,9 @@ function openEditPlayerModal(player) {
       state.players = await window.api.getPlayers();
       // If we edited from a player profile, reload the profile with fresh data
       if (state.page === 'playerProfile') {
+        const savedPrevPage = state.prevPage;
         await openPlayerProfile(player.id);
+        state.prevPage = savedPrevPage;
       } else {
         renderPlayerTable(state.players);
       }
