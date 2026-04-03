@@ -1222,6 +1222,32 @@ function printBoxes(league) {
   });
 }
 
+function printQRCode(league) {
+  if (!league.public_token) {
+    alert('This league is missing a public token. Please reload the page and try again.');
+    return;
+  }
+  const publicUrl = window.location.origin + '/public/league/' + league.public_token;
+  const qrApiUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=' + encodeURIComponent(publicUrl);
+  const win2 = window.open('', '_blank');
+  if (!win2) { alert('Please allow popups for this page to print the QR code.'); return; }
+  win2.document.open();
+  win2.document.write('<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>QR Code</title><style>');
+  win2.document.write('* { box-sizing: border-box; margin: 0; padding: 0; }');
+  win2.document.write('body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 20px; }');
+  win2.document.write('.qr-league { font-size: 22pt; font-weight: 800; text-align: center; }');
+  win2.document.write('.qr-sub { font-size: 11pt; color: #555; text-align: center; }');
+  win2.document.write('img { width: 320px; height: 320px; }');
+  win2.document.write('@page { margin: 16mm 18mm; }');
+  win2.document.write('</style></head><body>');
+  win2.document.write('<div class="qr-league">' + esc(league.name) + '</div>');
+  win2.document.write('<img id="qr" src="' + qrApiUrl + '" alt="QR Code" crossorigin="anonymous">');
+  win2.document.write('<div class="qr-sub">Scan to view schedule &amp; scores</div>');
+  win2.document.write('<script>var img=document.getElementById("qr");function doPrint(){window.print();}if(img.complete&&img.naturalWidth>0){setTimeout(doPrint,300);}else{img.onload=function(){setTimeout(doPrint,300);};img.onerror=function(){doPrint();};}' + '<\/script>');
+  win2.document.write('</body></html>');
+  win2.document.close();
+}
+
 // ===== LEAGUE DETAIL =====
 function renderLeagueDetail() {
   const league = state.currentLeague;
@@ -1234,6 +1260,7 @@ function renderLeagueDetail() {
       <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="print-boxes">Print Boxes</button>
+        <button class="options-item" data-action="print-qr">Print QR Code</button>
         <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
       </div>
     </div>` : '';
@@ -1248,6 +1275,9 @@ function renderLeagueDetail() {
       if (action === 'print-boxes') {
         document.getElementById('optionsDropdown').classList.remove('open');
         printBoxes(league);
+      } else if (action === 'print-qr') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        printQRCode(league);
       } else if (action === 'delete-league') {
         document.getElementById('optionsDropdown').classList.remove('open');
         confirmDeleteLeague(Number(e.target.dataset.id), e.target.dataset.name);

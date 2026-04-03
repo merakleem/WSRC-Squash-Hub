@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 let db = null;
 
@@ -25,6 +26,8 @@ function initDB(dbPath) {
     `ALTER TABLE players ADD COLUMN member_number TEXT`,
     `ALTER TABLE matches ADD COLUMN court_number INTEGER`,
     `ALTER TABLE matches ADD COLUMN match_time TEXT`,
+    `ALTER TABLE leagues ADD COLUMN schedule_grouped INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE leagues ADD COLUMN public_token TEXT`,
     `CREATE TABLE IF NOT EXISTS user_accounts (player_id INTEGER PRIMARY KEY, password_hash TEXT, invite_token TEXT, invite_expires TEXT, reset_token TEXT, reset_expires TEXT, FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE)`,
   ];
   for (const sql of migrations) {
@@ -33,6 +36,12 @@ function initDB(dbPath) {
 
   // Backfill existing players: mark as WSRC members with rating 2.50
   db.prepare(`UPDATE players SET wsrc_member = 1, club_locker_rating = 2.50 WHERE club_locker_rating IS NULL`).run();
+
+  // Backfill leagues missing a public token
+  const leaguesWithoutToken = db.prepare(`SELECT id FROM leagues WHERE public_token IS NULL`).all();
+  for (const league of leaguesWithoutToken) {
+    db.prepare(`UPDATE leagues SET public_token = ? WHERE id = ?`).run(crypto.randomBytes(16).toString('hex'), league.id);
+  }
 
   return Promise.resolve(db);
 }

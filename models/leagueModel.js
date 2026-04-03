@@ -1,4 +1,5 @@
 const { run, all, get } = require('../database/db');
+const crypto = require('crypto');
 
 async function getAllLeagues() {
   return all('SELECT * FROM leagues ORDER BY created_at DESC');
@@ -9,12 +10,13 @@ async function getLeagueById(id) {
 }
 
 async function createLeagueRecord({ name, startDate, numTeams, numDivisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+  const publicToken = crypto.randomBytes(16).toString('hex');
   const result = await run(
     `INSERT INTO leagues (name, start_date, num_teams, num_divisions, num_rounds, blackout_dates,
-       match_start_time, num_courts, match_duration, match_buffer, schedule_courts)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [name, startDate, numTeams, numDivisions, numRounds, JSON.stringify(blackoutDates),
-     matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0]
+     matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken]
   );
   return result.lastID;
 }
