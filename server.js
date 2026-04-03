@@ -212,7 +212,8 @@ app.get('/health', (req, res) => res.sendStatus(200));
 
 // ===== PUBLIC LEAGUE PAGE =====
 
-app.get('/public/league/:token', (_req, res) => {
+app.get('/:slug/:token', (req, res, next) => {
+  if (!/^[0-9a-f]{4}$/i.test(req.params.token)) return next();
   res.send(buildPublicPage());
 });
 
@@ -288,13 +289,10 @@ function buildPublicPage() {
     var parts = location.pathname.split('/').filter(Boolean);
     var token = parts[parts.length - 1] || '';
     fetch('/api/public/league/' + token)
-      .then(function(r) {
-        if (!r.ok) return r.text().then(function(t) { throw new Error(r.status + ': ' + t.slice(0,200)); });
-        return r.json();
-      })
+      .then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
       .then(render)
-      .catch(function(err) {
-        document.getElementById('root').innerHTML = '<div class="error-msg">Error: ' + (err && err.message ? err.message : 'Unknown error') + '</div>';
+      .catch(function() {
+        document.getElementById('root').innerHTML = '<div class="error-msg">League not found.</div>';
       });
 
     function esc(s) {

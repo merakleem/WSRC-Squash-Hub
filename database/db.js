@@ -37,10 +37,10 @@ function initDB(dbPath) {
   // Backfill existing players: mark as WSRC members with rating 2.50
   db.prepare(`UPDATE players SET wsrc_member = 1, club_locker_rating = 2.50 WHERE club_locker_rating IS NULL`).run();
 
-  // Backfill leagues missing a public token
-  const leaguesWithoutToken = db.prepare(`SELECT id FROM leagues WHERE public_token IS NULL`).all();
-  for (const league of leaguesWithoutToken) {
-    db.prepare(`UPDATE leagues SET public_token = ? WHERE id = ?`).run(crypto.randomBytes(16).toString('hex'), league.id);
+  // Backfill/regenerate tokens to ensure they are 4-char hex
+  const leaguesNeedingToken = db.prepare(`SELECT id FROM leagues WHERE public_token IS NULL OR length(public_token) != 4`).all();
+  for (const league of leaguesNeedingToken) {
+    db.prepare(`UPDATE leagues SET public_token = ? WHERE id = ?`).run(crypto.randomBytes(2).toString('hex'), league.id);
   }
 
   return Promise.resolve(db);
