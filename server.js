@@ -295,6 +295,8 @@ function buildPublicPage() {
         document.getElementById('root').innerHTML = '<div class="error-msg">League not found.</div>';
       });
 
+    function toggleWeek(el) { el.parentElement.classList.toggle('open'); }
+
     function esc(s) {
       return String(s == null ? '' : s)
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -369,7 +371,7 @@ function buildPublicPage() {
             +matchesHTML+'</div>';
         }).join('');
         return '<div class="week-card open">'
-          +'<div class="week-header" onclick="this.closest(\'.week-card\').classList.toggle(\'open\')">'
+          +'<div class="week-header" onclick="toggleWeek(this)">'
           +'<span class="week-num">Week '+week.week_number+'</span>'
           +'<span class="week-date">'+fmtDate(week.date)+'</span>'
           +'</div>'
