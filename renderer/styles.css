@@ -988,6 +988,14 @@ tbody td {
   font-size: 13px;
 }
 .match-row:last-child { border-bottom: none; }
+.match-row-skipped { background: #fafafa; opacity: 0.65; }
+.match-skipped-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
 .match-meta {
   display: flex;

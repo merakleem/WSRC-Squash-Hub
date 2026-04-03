@@ -782,7 +782,7 @@ function renderPlayerProfile() {
   document.getElementById('pageTitle').textContent = p.name;
   document.getElementById('topbarActions').innerHTML = adminMode ? `
     <div class="options-menu" id="optionsMenu">
-      <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
+      <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="edit-player" data-id="${p.id}">Edit Information</button>
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
@@ -1402,6 +1402,26 @@ function copyPublicLink(league) {
 }
 
 // ===== LEAGUE DETAIL =====
+function getOpenWeekIds() {
+  return Array.from(document.querySelectorAll('.week-card.open'))
+    .map((el) => Number(el.dataset.weekId))
+    .filter(Boolean);
+}
+
+function restoreOpenWeeks(openIds) {
+  if (!openIds.length) return;
+  document.querySelectorAll('.week-card').forEach((el) => {
+    if (openIds.includes(Number(el.dataset.weekId))) el.classList.add('open');
+  });
+}
+
+async function reloadLeagueDetail() {
+  const openIds = getOpenWeekIds();
+  state.currentLeague = await window.api.getLeague(state.currentLeague.id);
+  renderLeagueDetail();
+  restoreOpenWeeks(openIds);
+}
+
 function renderLeagueDetail() {
   const league = state.currentLeague;
   if (!league) { navigate('leagues'); return; }
@@ -1410,7 +1430,7 @@ function renderLeagueDetail() {
   document.getElementById('pageTitle').textContent = league.name;
   document.getElementById('topbarActions').innerHTML = adminMode ? `
     <div class="options-menu" id="optionsMenu">
-      <button class="btn btn-outline" id="optionsBtn">Options &#9660;</button>
+      <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="print-boxes">Print Boxes</button>
         <button class="options-item" data-action="copy-link">Get Public Link</button>
@@ -1490,6 +1510,24 @@ function renderLeagueDetail() {
     content.querySelectorAll('.sub-btn').forEach((btn) => {
       btn.addEventListener('click', () => openSubModal(btn));
     });
+
+    // Skip buttons
+    content.querySelectorAll('.skip-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const matchId = Number(btn.dataset.matchId);
+        await fetch(`/api/matches/${matchId}/skip`, { method: 'PUT' });
+        reloadLeagueDetail();
+      });
+    });
+
+    // Unskip buttons
+    content.querySelectorAll('.unskip-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const matchId = Number(btn.dataset.matchId);
+        await fetch(`/api/matches/${matchId}/unskip`, { method: 'PUT' });
+        reloadLeagueDetail();
+      });
+    });
   }
 }
 
@@ -1531,7 +1569,7 @@ function renderWeekCard(week, league, adminMode = true) {
   }).join('');
 
   return `
-    <div class="week-card">
+    <div class="week-card" data-week-id="${week.id}">
       <div class="week-header">
         <div class="week-title">
           <span class="week-num">Week ${week.week_number}</span>
@@ -1573,6 +1611,27 @@ function renderMatchRow(match, league, adminMode = true) {
     ? `<span class="match-court-label">Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}</span>`
     : (match.match_time ? `<span class="match-court-label">${match.match_time}</span>` : '');
 
+  const isSkipped = !!match.skipped;
+  const leagueId = league ? league.id : '';
+
+  if (isSkipped) {
+    return `
+      <div class="match-row match-row-skipped" data-match-id="${match.id}">
+        <div class="match-meta">
+          <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
+        </div>
+        <div class="match-players" style="opacity:0.4">
+          <span class="match-player">${esc(eff1Name)}</span>
+          <span class="text-muted" style="font-size:11px">vs</span>
+          <span class="match-player">${esc(eff2Name)}</span>
+        </div>
+        <div class="match-actions">
+          <span class="match-skipped-label">Skipped</span>
+          ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn" style="font-size:11px" data-match-id="${match.id}">Undo</button>` : ''}
+        </div>
+      </div>`;
+  }
+
   let scoreSection;
   if (hasScore) {
     scoreSection = `<div class="match-score">
@@ -1589,8 +1648,6 @@ function renderMatchRow(match, league, adminMode = true) {
   } else {
     scoreSection = `<div class="match-score"><span class="text-muted" style="font-size:13px">—</span></div>`;
   }
-
-  const leagueId = league ? league.id : '';
 
   return `
     <div class="match-row" data-match-id="${match.id}">
@@ -1612,6 +1669,7 @@ function renderMatchRow(match, league, adminMode = true) {
           data-p2-id="${match.player2_id}" data-p2-name="${esc(match.player2_name)}"
           data-sub1-id="${match.sub1_id || ''}" data-sub1-name="${esc(match.sub1_name || '')}"
           data-sub2-id="${match.sub2_id || ''}" data-sub2-name="${esc(match.sub2_name || '')}">Sub</button>` : ''}
+        ${adminMode ? `<button class="btn btn-ghost btn-sm skip-btn" style="font-size:11px;color:var(--text-muted)" data-match-id="${match.id}">Skip</button>` : ''}
       </div>
     </div>`;
 }
@@ -1761,10 +1819,7 @@ async function openSubModal(btn) {
       await Promise.all(saves);
       modal.close();
       toast('Subs updated', 'success');
-      // Reload the league to reflect changes
-      const league = await window.api.getLeague(leagueId);
-      state.currentLeague = league;
-      renderLeagueDetail();
+      reloadLeagueDetail();
     } catch (e) {
       document.getElementById('fError').textContent = e.message || 'Failed to save subs.';
     }
@@ -2062,6 +2117,7 @@ async function renderStep3() {
     <div id="wError" class="form-error mt-4"></div>
     <div class="wizard-footer">
       <button class="btn btn-outline" id="wBack">&larr; Back</button>
+      <button class="btn btn-outline" id="wApply">Apply Settings</button>
       <button class="btn btn-primary" id="wNext" ${!isValid ? 'disabled' : ''}>Next &rarr;</button>
     </div>`;
 
@@ -2074,34 +2130,18 @@ async function renderStep3() {
     renderCreateLeague();
   });
 
-  document.getElementById('wTeams').addEventListener('input', (e) => {
-    state.wizard.numTeams = Number(e.target.value) || 0;
+  function applyStep3Settings() {
+    state.wizard.numTeams = Number(document.getElementById('wTeams').value) || 0;
+    state.wizard.numRounds = Math.max(1, Number(document.getElementById('wRounds').value) || 1);
+    state.wizard.matchStartTime = document.getElementById('wStartTime').value;
+    state.wizard.numCourts = Math.max(1, Number(document.getElementById('wCourts').value) || 1);
+    state.wizard.matchDuration = Math.max(1, Number(document.getElementById('wDuration').value) || 1);
+    state.wizard.matchBuffer = Math.max(0, Number(document.getElementById('wBuffer').value) || 0);
+    state.wizard.scheduleCourts = document.getElementById('wScheduleCourts').checked;
     renderCreateLeague();
-  });
-  document.getElementById('wRounds').addEventListener('input', (e) => {
-    state.wizard.numRounds = Math.max(1, Number(e.target.value) || 1);
-    renderCreateLeague();
-  });
-  document.getElementById('wStartTime').addEventListener('change', (e) => {
-    state.wizard.matchStartTime = e.target.value;
-    renderCreateLeague();
-  });
-  document.getElementById('wCourts').addEventListener('input', (e) => {
-    state.wizard.numCourts = Math.max(1, Number(e.target.value) || 1);
-    renderCreateLeague();
-  });
-  document.getElementById('wDuration').addEventListener('input', (e) => {
-    state.wizard.matchDuration = Math.max(1, Number(e.target.value) || 1);
-    renderCreateLeague();
-  });
-  document.getElementById('wBuffer').addEventListener('input', (e) => {
-    state.wizard.matchBuffer = Math.max(0, Number(e.target.value) || 0);
-    renderCreateLeague();
-  });
-  document.getElementById('wScheduleCourts').addEventListener('change', (e) => {
-    state.wizard.scheduleCourts = e.target.checked;
-    renderCreateLeague();
-  });
+  }
+
+  document.getElementById('wApply').addEventListener('click', applyStep3Settings);
 }
 
 function nearestConfigWarning(n, configs, mode, inputVal) {

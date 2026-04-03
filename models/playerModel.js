@@ -120,7 +120,7 @@ async function getPlayerMatchHistory(id) {
     JOIN weeks w          ON tm.week_id = w.id
     JOIN leagues l        ON w.league_id = l.id
     JOIN divisions d      ON m.division_id = d.id
-    WHERE m.player1_score IS NOT NULL
+    WHERE m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
     ORDER BY w.date DESC, w.week_number DESC
   `, [id, id, id, id]);
 }
@@ -144,7 +144,7 @@ async function getAllPlayerRecords() {
              1 AS played
       FROM matches m
       LEFT JOIN match_subs s ON s.match_id = m.id AND s.original_player_id = m.player1_id
-      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL
+      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
 
       UNION ALL
 
@@ -155,7 +155,7 @@ async function getAllPlayerRecords() {
              1 AS played
       FROM matches m
       LEFT JOIN match_subs s ON s.match_id = m.id AND s.original_player_id = m.player2_id
-      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL
+      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
 
       UNION ALL
 
@@ -165,7 +165,7 @@ async function getAllPlayerRecords() {
              (m.winner_id = s.original_player_id) AS won,
              1 AS played
       FROM match_subs s
-      JOIN matches m ON m.id = s.match_id AND m.player1_score IS NOT NULL
+      JOIN matches m ON m.id = s.match_id AND m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
     ) AS participation ON participation.player_id = p.id
     GROUP BY p.id
   `);
@@ -192,7 +192,7 @@ async function getPlayerUpcomingMatches(id) {
     JOIN leagues l        ON w.league_id = l.id
     JOIN divisions d      ON m.division_id = d.id
     WHERE (m.player1_id = ? OR m.player2_id = ?)
-      AND m.player1_score IS NULL
+      AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
     ORDER BY w.date ASC, m.match_time ASC
   `, [id, id, id]);
 }

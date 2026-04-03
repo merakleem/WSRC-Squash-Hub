@@ -491,7 +491,23 @@ app.get('/api/leagues', wrap(async (req, res) => {
     if (!memberMap[row.league_id]) memberMap[row.league_id] = [];
     memberMap[row.league_id].push(row.player_id);
   }
-  res.json(leagues.map((l) => ({ ...l, player_ids: memberMap[l.id] || [] })));
+  // Auto-compute completed status: all matches must be scored or skipped
+  const matchCounts = db.prepare(`
+    SELECT w.league_id,
+      COUNT(*) AS total,
+      SUM(CASE WHEN m.player1_score IS NOT NULL OR m.skipped = 1 THEN 1 ELSE 0 END) AS done
+    FROM matches m
+    JOIN team_matchups tm ON m.matchup_id = tm.id
+    JOIN weeks w ON tm.week_id = w.id
+    GROUP BY w.league_id
+  `).all();
+  const countMap = {};
+  for (const row of matchCounts) countMap[row.league_id] = row;
+  res.json(leagues.map((l) => {
+    const counts = countMap[l.id];
+    const status = counts && counts.total > 0 && counts.done === counts.total ? 'completed' : 'active';
+    return { ...l, player_ids: memberMap[l.id] || [], status };
+  }));
 }));
 
 app.get('/api/leagues/:id', wrap(async (req, res) => {
@@ -514,6 +530,16 @@ app.delete('/api/leagues/:id', requireAdmin, wrap(async (req, res) => {
 
 app.put('/api/matches/:id/score', requireAdmin, wrap(async (req, res) => {
   await leagueModel.updateMatchScore({ matchId: Number(req.params.id), ...req.body });
+  res.json({ ok: true });
+}));
+
+app.put('/api/matches/:id/skip', requireAdmin, wrap(async (req, res) => {
+  await leagueModel.skipMatch(Number(req.params.id));
+  res.json({ ok: true });
+}));
+
+app.put('/api/matches/:id/unskip', requireAdmin, wrap(async (req, res) => {
+  await leagueModel.unskipMatch(Number(req.params.id));
   res.json({ ok: true });
 }));
 

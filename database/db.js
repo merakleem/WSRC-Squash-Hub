@@ -28,6 +28,7 @@ function initDB(dbPath) {
     `ALTER TABLE matches ADD COLUMN match_time TEXT`,
     `ALTER TABLE leagues ADD COLUMN schedule_grouped INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE leagues ADD COLUMN public_token TEXT`,
+    `ALTER TABLE matches ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS user_accounts (player_id INTEGER PRIMARY KEY, password_hash TEXT, invite_token TEXT, invite_expires TEXT, reset_token TEXT, reset_expires TEXT, FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE)`,
   ];
   for (const sql of migrations) {

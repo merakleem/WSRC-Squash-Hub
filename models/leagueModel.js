@@ -123,6 +123,17 @@ async function removeMatchSub(matchId, originalPlayerId) {
   );
 }
 
+async function skipMatch(matchId) {
+  return run(
+    'UPDATE matches SET skipped = 1, player1_score = NULL, player2_score = NULL, winner_id = NULL WHERE id = ?',
+    [matchId]
+  );
+}
+
+async function unskipMatch(matchId) {
+  return run('UPDATE matches SET skipped = 0 WHERE id = ?', [matchId]);
+}
+
 async function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
   // Find all unscored matches in this league where the original player is involved
   const remaining = await all(
@@ -154,5 +165,7 @@ module.exports = {
   updateMatchScore,
   setMatchSub,
   removeMatchSub,
+  skipMatch,
+  unskipMatch,
   setSubForRemaining,
 };
