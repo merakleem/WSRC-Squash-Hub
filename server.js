@@ -285,12 +285,16 @@ function buildPublicPage() {
 <body>
   <div id="root"><div class="loading">Loading schedule…</div></div>
   <script>
-    const token = location.pathname.split('/').pop();
+    var parts = location.pathname.split('/').filter(Boolean);
+    var token = parts[parts.length - 1] || '';
     fetch('/api/public/league/' + token)
-      .then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
+      .then(function(r) {
+        if (!r.ok) return r.text().then(function(t) { throw new Error(r.status + ': ' + t.slice(0,200)); });
+        return r.json();
+      })
       .then(render)
-      .catch(function() {
-        document.getElementById('root').innerHTML = '<div class="error-msg">League not found.</div>';
+      .catch(function(err) {
+        document.getElementById('root').innerHTML = '<div class="error-msg">Error: ' + (err && err.message ? err.message : 'Unknown error') + '</div>';
       });
 
     function esc(s) {
