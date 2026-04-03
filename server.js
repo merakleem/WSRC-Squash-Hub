@@ -241,46 +241,59 @@ function buildPublicPage() {
   <style>
     :root { --primary:#1e2758; --accent:#3a4db5; --border:#e2e8f0; --muted:#64748b; --bg:#f4f6fb; }
     * { box-sizing:border-box; margin:0; padding:0; }
-    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:#1e293b; font-size:14px; }
-    .header { background:var(--primary); color:#fff; padding:20px 16px 18px; }
-    .header-logo { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-    .header-logo img { width:36px; height:36px; object-fit:contain; }
-    .header-logo-text { font-size:12px; opacity:0.7; font-weight:500; }
-    .header-title { font-size:22px; font-weight:800; line-height:1.2; }
-    .content { max-width:820px; margin:0 auto; padding:16px; }
-    .stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
-    .stat { background:#fff; border-radius:8px; padding:10px 14px; flex:1; min-width:72px; border:1px solid var(--border); }
-    .stat-val { font-size:19px; font-weight:700; color:var(--primary); }
-    .stat-label { font-size:11px; color:var(--muted); margin-top:1px; }
-    .section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:20px 0 8px; }
-    .roster-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; margin-bottom:4px; }
-    .roster-card { background:#fff; border-radius:10px; border:1px solid var(--border); overflow:hidden; }
-    .roster-team { font-weight:700; font-size:13px; padding:8px 12px; border-bottom:1px solid var(--border); background:#f8fafc; }
-    .roster-player { font-size:13px; padding:5px 12px; border-bottom:1px solid #f1f5f9; }
-    .roster-player:last-child { border-bottom:none; }
-    .div-chip { font-size:10px; font-weight:600; background:var(--primary); color:#fff; border-radius:4px; padding:1px 5px; margin-right:6px; }
-    .week-card { background:#fff; border-radius:10px; border:1px solid var(--border); overflow:hidden; margin-bottom:10px; }
-    .week-header { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--primary); color:#fff; cursor:pointer; user-select:none; }
-    .week-num { font-weight:700; font-size:14px; }
-    .week-date { font-size:12px; opacity:.75; }
-    .week-body { display:none; }
-    .week-card.open .week-body { display:block; }
-    .matchup-block { padding:8px 14px; border-bottom:1px solid var(--border); }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:#1e293b; font-size:15px; line-height:1.5; }
+
+    .header { background:var(--primary); color:#fff; padding:28px 20px 24px; }
+    .header-brand { display:flex; align-items:center; gap:8px; margin-bottom:14px; opacity:0.65; }
+    .header-brand img { width:20px; height:20px; object-fit:contain; }
+    .header-brand-text { font-size:12px; font-weight:500; letter-spacing:0.03em; }
+    .header-title { font-size:28px; font-weight:800; line-height:1.15; }
+
+    .content { max-width:660px; margin:0 auto; padding:28px 16px 56px; }
+    .section { margin-bottom:36px; }
+    .section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:12px; padding-left:2px; }
+
+    .card { background:#fff; border-radius:12px; border:1px solid var(--border); margin-bottom:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+    .card-header { display:flex; justify-content:space-between; align-items:center; padding:16px 18px; cursor:pointer; user-select:none; gap:12px; }
+    .card-header:active { background:#f8fafc; }
+    .card-title { font-weight:700; font-size:15px; }
+    .card-sub { font-size:13px; color:var(--muted); margin-top:2px; }
+    .card-toggle { font-size:22px; font-weight:300; color:#94a3b8; line-height:1; flex-shrink:0; transition:transform 0.2s; }
+    .card.open .card-toggle { transform:rotate(45deg); }
+    .card-body { display:none; border-top:1px solid var(--border); }
+    .card.open .card-body { display:block; }
+
+    .roster-row { display:flex; align-items:center; gap:10px; padding:12px 18px; border-bottom:1px solid #f1f5f9; font-size:14px; }
+    .roster-row:last-child { border-bottom:none; }
+    .div-chip { font-size:10px; font-weight:700; background:var(--primary); color:#fff; border-radius:4px; padding:2px 7px; white-space:nowrap; flex-shrink:0; }
+
+    .matchup-block { padding:16px 18px; border-bottom:1px solid var(--border); }
     .matchup-block:last-child { border-bottom:none; }
-    .matchup-title { font-size:12px; font-weight:700; color:var(--muted); margin-bottom:5px; }
-    .vs-badge { font-weight:400; margin:0 4px; }
-    .bye-badge { font-size:11px; background:#f1f5f9; border-radius:4px; padding:1px 6px; margin-left:4px; }
-    .match-row { display:flex; align-items:center; gap:6px; padding:5px 0; border-bottom:1px solid #f8fafc; font-size:13px; flex-wrap:wrap; }
+    .matchup-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); margin-bottom:10px; }
+
+    .match-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; column-gap:12px; padding:9px 0; border-bottom:1px solid #f8fafc; font-size:14px; }
     .match-row:last-child { border-bottom:none; }
-    .match-div { font-size:10px; font-weight:700; background:var(--accent); color:#fff; border-radius:4px; padding:1px 5px; white-space:nowrap; }
-    .match-players { flex:1; font-weight:500; min-width:160px; }
-    .match-vs { color:#94a3b8; font-size:11px; }
+    .match-div { font-size:10px; font-weight:700; background:var(--accent); color:#fff; border-radius:4px; padding:2px 7px; white-space:nowrap; }
+    .match-players { font-weight:500; }
+    .match-vs { color:#94a3b8; font-size:12px; margin:0 4px; font-weight:400; }
     .match-win { color:var(--accent); font-weight:700; }
-    .match-score { font-weight:700; font-size:13px; white-space:nowrap; }
+    .match-right { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+    .match-score { font-weight:700; font-size:14px; white-space:nowrap; }
     .match-meta { font-size:11px; color:var(--muted); white-space:nowrap; }
-    .loading { text-align:center; padding:60px 16px; color:var(--muted); font-size:15px; }
-    .error-msg { text-align:center; padding:60px 16px; color:#ef4444; }
-    @media(max-width:600px) { .header-title{font-size:18px;} .stats .stat{min-width:60px;} }
+    .bye-label { font-size:13px; color:var(--muted); font-style:italic; padding:14px 18px; }
+
+    .loading { text-align:center; padding:80px 16px; color:var(--muted); font-size:15px; }
+    .error-msg { text-align:center; padding:80px 16px; color:#ef4444; }
+
+    @media(max-width:480px) {
+      .header { padding:22px 16px 20px; }
+      .header-title { font-size:23px; }
+      .content { padding:20px 12px 48px; }
+      .card-header { padding:14px 14px; }
+      .matchup-block { padding:14px 14px; }
+      .roster-row { padding:11px 14px; }
+      .match-row { column-gap:8px; }
+    }
   </style>
 </head>
 <body>
@@ -295,7 +308,9 @@ function buildPublicPage() {
         document.getElementById('root').innerHTML = '<div class="error-msg">League not found.</div>';
       });
 
-    function toggleWeek(el) { el.parentElement.classList.toggle('open'); }
+    function toggleCard(el) {
+      el.closest('.card').classList.toggle('open');
+    }
 
     function esc(s) {
       return String(s == null ? '' : s)
@@ -304,9 +319,14 @@ function buildPublicPage() {
 
     function fmtDate(d) {
       if (!d) return '';
-      var parts = d.split('-').map(Number);
-      return new Date(parts[0], parts[1]-1, parts[2])
-        .toLocaleDateString('en-US', {weekday:'short',month:'short',day:'numeric',year:'numeric'});
+      var p = d.split('-').map(Number);
+      return new Date(p[0], p[1]-1, p[2]).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+    }
+
+    function fmtTime(t) {
+      if (!t) return '';
+      var p = t.split(':').map(Number);
+      return (p[0]%12||12)+':'+(p[1]<10?'0':'')+p[1]+(p[0]>=12?'pm':'am');
     }
 
     function render(league) {
@@ -315,81 +335,82 @@ function buildPublicPage() {
         playerDiv[p.player_id] = { name: p.division_name, level: p.division_level };
       });
 
-      var statsHTML = [
-        {val: league.num_teams, label:'Teams'},
-        {val: league.num_divisions, label:'Divisions'},
-        {val: league.num_teams * league.num_divisions, label:'Players'},
-        {val: (league.weeks||[]).length, label:'Weeks'},
-        {val: fmtDate(league.start_date), label:'Start'},
-      ].map(function(s) {
-        return '<div class="stat"><div class="stat-val">'+esc(s.val)+'</div><div class="stat-label">'+s.label+'</div></div>';
-      }).join('');
-
       var rostersHTML = (league.teams||[]).map(function(team) {
-        var members = (league.players||[]).filter(function(p){ return p.team_id===team.id; })
-          .sort(function(a,b){ return a.division_level-b.division_level; });
-        return '<div class="roster-card">'
-          +'<div class="roster-team">'+esc(team.name)+'</div>'
-          +members.map(function(m){
-            return '<div class="roster-player"><span class="div-chip">'+esc(m.division_name)+'</span>'+esc(m.player_name)+'</div>';
-          }).join('')
+        var members = (league.players||[])
+          .filter(function(p){ return p.team_id === team.id; })
+          .sort(function(a,b){ return a.division_level - b.division_level; });
+        var rows = members.map(function(m) {
+          return '<div class="roster-row">'
+            +'<span class="div-chip">'+esc(m.division_name)+'</span>'
+            +'<span>'+esc(m.player_name)+'</span>'
+            +'</div>';
+        }).join('');
+        return '<div class="card">'
+          +'<div class="card-header" onclick="toggleCard(this)">'
+          +'<div class="card-title">'+esc(team.name)+'</div>'
+          +'<span class="card-toggle">+</span>'
+          +'</div>'
+          +'<div class="card-body">'+rows+'</div>'
           +'</div>';
       }).join('');
 
       var scheduleHTML = (league.weeks||[]).map(function(week) {
         var muHTML = week.matchups.map(function(mu) {
           if (mu.bye_team_id) {
-            return '<div class="matchup-block"><div class="matchup-title">'+esc(mu.bye_team_name)+' <span class="bye-badge">BYE</span></div></div>';
+            return '<div class="bye-label">'+esc(mu.bye_team_name)+' \u2014 Bye week</div>';
           }
           var matchesHTML = (mu.matches||[]).map(function(m) {
             var div = playerDiv[m.player1_id] || {};
             var p1 = m.sub1_name || m.player1_name;
             var p2 = m.sub2_name || m.player2_name;
-            var p1win = m.winner_id && m.winner_id===m.player1_id;
-            var p2win = m.winner_id && m.winner_id===m.player2_id;
+            var p1win = m.winner_id && m.winner_id === m.player1_id;
+            var p2win = m.winner_id && m.winner_id === m.player2_id;
             var hasScore = m.player1_score != null && m.player2_score != null;
-            var scoreHTML = hasScore ? '<span class="match-score">'+m.player1_score+'&ndash;'+m.player2_score+'</span>' : '';
+            var scoreHTML = hasScore ? '<div class="match-score">'+m.player1_score+'&ndash;'+m.player2_score+'</div>' : '';
             var meta = '';
             if (league.schedule_courts && m.court_number) {
-              meta = 'Court '+m.court_number+(m.match_time ? ' &middot; '+m.match_time : '');
+              meta = 'Court '+m.court_number+(m.match_time ? ' &middot; '+fmtTime(m.match_time) : '');
             } else if (m.match_time) {
-              meta = m.match_time;
+              meta = fmtTime(m.match_time);
             }
             return '<div class="match-row">'
               +'<span class="match-div">'+esc(div.name||'')+'</span>'
-              +'<span class="match-players">'
+              +'<div class="match-players">'
               +'<span class="'+(p1win?'match-win':'')+'">'+esc(p1)+'</span>'
               +' <span class="match-vs">vs</span> '
               +'<span class="'+(p2win?'match-win':'')+'">'+esc(p2)+'</span>'
-              +'</span>'
+              +'</div>'
+              +'<div class="match-right">'
               +scoreHTML
-              +(meta ? '<span class="match-meta">'+meta+'</span>' : '')
+              +(meta ? '<div class="match-meta">'+meta+'</div>' : '')
+              +'</div>'
               +'</div>';
           }).join('');
           return '<div class="matchup-block">'
-            +'<div class="matchup-title">'+esc(mu.team1_name)+' <span class="vs-badge">vs</span> '+esc(mu.team2_name)+'</div>'
-            +matchesHTML+'</div>';
+            +'<div class="matchup-title">'+esc(mu.team1_name)+' vs '+esc(mu.team2_name)+'</div>'
+            +matchesHTML
+            +'</div>';
         }).join('');
-        return '<div class="week-card open">'
-          +'<div class="week-header" onclick="toggleWeek(this)">'
-          +'<span class="week-num">Week '+week.week_number+'</span>'
-          +'<span class="week-date">'+fmtDate(week.date)+'</span>'
+        return '<div class="card">'
+          +'<div class="card-header" onclick="toggleCard(this)">'
+          +'<div>'
+          +'<div class="card-title">Week '+week.week_number+'</div>'
+          +'<div class="card-sub">'+fmtDate(week.date)+'</div>'
           +'</div>'
-          +'<div class="week-body">'+muHTML+'</div>'
+          +'<span class="card-toggle">+</span>'
+          +'</div>'
+          +'<div class="card-body">'+muHTML+'</div>'
           +'</div>';
       }).join('');
 
       document.getElementById('root').innerHTML =
         '<div class="header">'
-        +'<div class="header-logo"><img src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC"><span class="header-logo-text">WSRC Squash Hub</span></div>'
+        +'<div class="header-brand"><img src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC"><span class="header-brand-text">WSRC Squash Hub</span></div>'
         +'<div class="header-title">'+esc(league.name)+'</div>'
         +'</div>'
         +'<div class="content">'
-        +'<div class="stats">'+statsHTML+'</div>'
-        +'<div class="section-title">Rosters</div>'
-        +'<div class="roster-grid">'+rostersHTML+'</div>'
-        +'<div class="section-title">Schedule</div>'
-        +scheduleHTML
+        +'<div class="section"><div class="section-label">Rosters</div>'+rostersHTML+'</div>'
+        +'<div class="section"><div class="section-label">Schedule</div>'+scheduleHTML+'</div>'
         +'</div>';
     }
   </script>
