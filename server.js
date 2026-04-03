@@ -206,6 +206,10 @@ app.get('/forgot-password', (req, res) => {
   }));
 });
 
+// ===== HEALTH CHECK =====
+
+app.get('/health', (req, res) => res.sendStatus(200));
+
 // ===== PROTECT ALL OTHER ROUTES =====
 
 app.use((req, res, next) => {
@@ -220,10 +224,6 @@ app.use(express.static(path.join(__dirname, 'renderer')));
 // Wrap async route handlers
 const wrap = (fn) => (req, res) =>
   fn(req, res).catch((err) => res.status(500).json({ error: err.message || String(err) }));
-
-// ===== HEALTH CHECK =====
-
-app.get('/health', (req, res) => res.sendStatus(200));
 
 // ===== API: WHO AM I =====
 
