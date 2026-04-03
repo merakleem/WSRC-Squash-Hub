@@ -31,6 +31,7 @@ body {
   color: var(--text);
   background: var(--bg);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -38,6 +39,7 @@ body {
 .app-container {
   display: flex;
   height: 100vh;
+  height: 100dvh;
 }
 
 .main-wrapper {
@@ -1385,11 +1387,8 @@ tbody td {
   .profile-stats { gap: 16px; }
   .stat-val { font-size: 18px; }
 
-  /* Profile tables — hide Week and Division columns */
-  .profile-header-card ~ .table-card table thead th:nth-child(3),
-  .profile-header-card ~ .table-card table tbody td:nth-child(3),
-  .profile-header-card ~ .table-card table thead th:nth-child(4),
-  .profile-header-card ~ .table-card table tbody td:nth-child(4) { display: none; }
+  /* Profile tables — horizontal scroll instead of hiding columns */
+  .profile-header-card ~ .table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
   /* Ladder */
   .ladder-record { min-width: 60px; font-size: 11px; }
