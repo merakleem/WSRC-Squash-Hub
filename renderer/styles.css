@@ -123,14 +123,13 @@ body {
 .hamburger-btn {
   display: none;
   position: fixed;
-  top: 50%;
+  top: calc((var(--topbar-h) - 36px) / 2);
   right: 12px;
-  transform: translateY(-50%);
   width: 36px;
   height: 36px;
   z-index: 300;
-  background: transparent;
-  border: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   align-items: center;
   justify-content: center;
@@ -138,9 +137,7 @@ body {
   flex-direction: column;
   gap: 5px;
   padding: 0;
-  transition: background 0.15s;
 }
-.hamburger-btn:hover { background: var(--hover-bg, rgba(30,39,88,0.07)); }
 .hamburger-btn .bar {
   display: block;
   width: 20px;

@@ -221,6 +221,10 @@ app.use(express.static(path.join(__dirname, 'renderer')));
 const wrap = (fn) => (req, res) =>
   fn(req, res).catch((err) => res.status(500).json({ error: err.message || String(err) }));
 
+// ===== HEALTH CHECK =====
+
+app.get('/health', (req, res) => res.sendStatus(200));
+
 // ===== API: WHO AM I =====
 
 app.get('/api/me', (req, res) => {
