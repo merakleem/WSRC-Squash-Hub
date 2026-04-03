@@ -1489,28 +1489,33 @@ tbody td {
 /* Player dashboard */
 .dash-player {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto;
-  gap: 20px;
+  grid-template-columns: 1.4fr 1fr;
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "next    upcoming"
+    "rank    quick";
+  gap: 24px;
   padding-top: 4px;
-  max-width: 900px;
   align-items: start;
 }
-.dash-col {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
+.dash-area-next     { grid-area: next; }
+.dash-area-upcoming { grid-area: upcoming; }
+.dash-area-rank     { grid-area: rank; }
+.dash-area-quick    { grid-area: quick; }
 
 /* Next match card */
 .dash-next-card {
   background: var(--primary);
   border-radius: 18px;
-  padding: 28px 26px 26px;
+  padding: 32px 28px 30px;
   color: #fff;
   position: relative;
   overflow: hidden;
   box-shadow: 0 8px 28px rgba(30,39,88,.28);
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 .dash-next-card::before {
   content: '';
@@ -1534,19 +1539,13 @@ tbody td {
   color: var(--text-muted);
   margin-top: 8px;
 }
-.dash-next-eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  opacity: 0.7;
-  margin-bottom: 6px;
-}
 .dash-next-date {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   margin-bottom: 20px;
-  opacity: 0.95;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .dash-next-matchup {
   display: flex;
@@ -1555,7 +1554,7 @@ tbody td {
   margin-bottom: 18px;
 }
 .dash-next-you {
-  font-size: 21px;
+  font-size: 24px;
   font-weight: 800;
   flex: 1;
   min-width: 0;
@@ -1570,7 +1569,7 @@ tbody td {
   flex-shrink: 0;
 }
 .dash-next-opp {
-  font-size: 21px;
+  font-size: 24px;
   font-weight: 800;
   flex: 1;
   min-width: 0;
@@ -1737,9 +1736,9 @@ tbody td {
   .dash-admin-grid { grid-template-columns: 1fr; gap: 10px; }
   .dash-admin-card { flex-direction: row; align-items: center; padding: 18px 16px; gap: 14px; }
   .dash-admin-card-icon img { width: 28px; height: 28px; }
-  .dash-player { grid-template-columns: 1fr; }
-  .dash-next-card { padding: 22px 20px 20px; border-radius: 14px; }
-  .dash-next-you, .dash-next-opp { font-size: 18px; }
-  .dash-next-date { font-size: 16px; margin-bottom: 16px; }
+  .dash-player { grid-template-columns: 1fr; grid-template-areas: "next" "upcoming" "rank" "quick"; }
+  .dash-next-card { padding: 22px 20px 20px; border-radius: 14px; min-height: unset; }
+  .dash-next-you, .dash-next-opp { font-size: 19px; }
+  .dash-next-date { font-size: 12px; margin-bottom: 14px; }
   .dash-rank-num { font-size: 40px; }
 }

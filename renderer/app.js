@@ -248,7 +248,6 @@ async function renderDashboard() {
     const divLabel = nextMatch.division_name ? nextMatch.division_name.replace(/^Division\s*/i, 'D') : '';
     return `
       <div class="dash-next-card">
-        <div class="dash-next-eyebrow">Next Match</div>
         <div class="dash-next-date">${fmtMatchDate(nextMatch.week_date)}</div>
         <div class="dash-next-matchup">
           <div class="dash-next-you">${esc(playerData.name)}</div>
@@ -263,12 +262,11 @@ async function renderDashboard() {
       </div>`;
   })() : `
       <div class="dash-next-card dash-next-empty">
-        <div class="dash-next-eyebrow">Next Match</div>
         <div class="dash-empty-msg">No upcoming matches scheduled</div>
       </div>`;
 
-  const upcomingHTML = restUpcoming.length === 0 ? '' : `
-    <div class="dash-section">
+  const upcomingSection = restUpcoming.length === 0 ? '' : `
+    <div class="dash-section dash-area-upcoming">
       <div class="dash-section-label">Upcoming</div>
       <div class="dash-upcoming-list">
         ${restUpcoming.map((m) => `
@@ -282,18 +280,18 @@ async function renderDashboard() {
       </div>
     </div>`;
 
-  const rankHTML = rank !== null ? `
-    <div class="dash-section">
+  const rankSection = rank !== null ? `
+    <div class="dash-section dash-area-rank">
       <div class="dash-section-label">Your Ranking</div>
       <div class="dash-rank-card">
         <div class="dash-rank-num">#${rank}</div>
-        <div class="dash-rank-sub">of ${totalPlayers} players</div>
+        <div class="dash-rank-sub">of ${totalPlayers} members</div>
         <button class="dash-rank-link" onclick="navigate('ladder')">See full ladder</button>
       </div>
     </div>` : '';
 
-  const quickHTML = `
-    <div class="dash-section">
+  const quickSection = `
+    <div class="dash-section dash-area-quick">
       <div class="dash-section-label">Quick Actions</div>
       <div class="dash-quick-grid">
         <button class="dash-quick-btn" onclick="navigate('players')">
@@ -310,14 +308,13 @@ async function renderDashboard() {
 
   content.innerHTML = `
     <div class="dash-player">
-      <div class="dash-col dash-col-left">
+      <div class="dash-section dash-area-next">
+        <div class="dash-section-label">Next Match</div>
         ${nextMatchHTML}
-        ${rankHTML}
       </div>
-      <div class="dash-col dash-col-right">
-        ${upcomingHTML}
-        ${quickHTML}
-      </div>
+      ${upcomingSection}
+      ${rankSection}
+      ${quickSection}
     </div>`;
 }
 
