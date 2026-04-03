@@ -4,7 +4,8 @@
   "main": "main/main.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build": "npm rebuild --force better-sqlite3"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
