@@ -905,6 +905,15 @@ async function renderLadder(showNonMembers = false) {
       e.dataTransfer.dropEffect = 'move';
       list.querySelectorAll('.ladder-row').forEach((r) => r.classList.remove('drag-over'));
       row.classList.add('drag-over');
+
+      // Auto-scroll while dragging near viewport edges
+      const zone = 80, speed = 10;
+      const scrollEl = document.querySelector('.content');
+      if (scrollEl) {
+        const { top, bottom } = scrollEl.getBoundingClientRect();
+        if (e.clientY < top + zone) scrollEl.scrollBy(0, -speed);
+        else if (e.clientY > bottom - zone) scrollEl.scrollBy(0, speed);
+      }
     });
     row.addEventListener('drop', async (e) => {
       e.preventDefault();
