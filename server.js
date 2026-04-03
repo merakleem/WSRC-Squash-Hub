@@ -483,7 +483,15 @@ app.get('/api/players/:id/history', wrap(async (req, res) => {
 // ===== LEAGUES =====
 
 app.get('/api/leagues', wrap(async (req, res) => {
-  res.json(await leagueModel.getAllLeagues());
+  const leagues = await leagueModel.getAllLeagues();
+  const db = getDB();
+  const memberships = db.prepare('SELECT league_id, player_id FROM league_players').all();
+  const memberMap = {};
+  for (const row of memberships) {
+    if (!memberMap[row.league_id]) memberMap[row.league_id] = [];
+    memberMap[row.league_id].push(row.player_id);
+  }
+  res.json(leagues.map((l) => ({ ...l, player_ids: memberMap[l.id] || [] })));
 }));
 
 app.get('/api/leagues/:id', wrap(async (req, res) => {

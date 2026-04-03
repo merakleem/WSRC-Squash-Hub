@@ -135,6 +135,7 @@ function navigate(page, params = {}) {
   const navPage = (page === 'leagueDetail' || page === 'createLeague') ? 'leagues'
     : isOwnProfile ? 'myProfile'
     : page === 'playerProfile' ? 'players'
+    : page === 'myProfile' ? 'myProfile'
     : page;
   document.querySelectorAll('.nav-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.page === navPage);
@@ -162,6 +163,7 @@ document.querySelectorAll('.nav-item').forEach((el) => {
 
 function renderPage() {
   switch (state.page) {
+    case 'dashboard':     renderDashboard(); break;
     case 'players':       renderPlayers(); break;
     case 'ladder':        renderLadder(); break;
     case 'leagues':       renderLeagues(); break;
@@ -169,6 +171,154 @@ function renderPage() {
     case 'createLeague':  renderCreateLeague(); break;
     case 'playerProfile': renderPlayerProfile(); break;
   }
+}
+
+// ===== DASHBOARD =====
+async function renderDashboard() {
+  document.getElementById('pageTitle').textContent = 'Dashboard';
+  document.getElementById('topbarActions').innerHTML = '';
+  const content = document.getElementById('mainContent');
+  content.innerHTML = `<div class="dashboard-loading">Loading…</div>`;
+
+  const user = state.currentUser;
+
+  if (!user || user.role === 'admin') {
+    content.innerHTML = `
+      <div class="dash-admin">
+        <div class="dash-admin-hero">
+          <div class="dash-greeting">Welcome Back.</div>
+          <div class="dash-greeting-sub">Manage players, leagues, and schedules from here.</div>
+        </div>
+        <div class="dash-admin-grid">
+          <button class="dash-admin-card" onclick="navigate('players')">
+            <div class="dash-admin-card-icon"><img src="/assets/players-icon-blue.png" alt=""></div>
+            <div class="dash-admin-card-label">Manage Players</div>
+            <div class="dash-admin-card-sub">View, add, and edit players</div>
+          </button>
+          <button class="dash-admin-card" onclick="navigate('leagues')">
+            <div class="dash-admin-card-icon"><img src="/assets/leagues-icon-blue.png" alt=""></div>
+            <div class="dash-admin-card-label">Manage Leagues</div>
+            <div class="dash-admin-card-sub">Create leagues and enter scores</div>
+          </button>
+          <button class="dash-admin-card" onclick="navigate('ladder')">
+            <div class="dash-admin-card-icon"><img src="/assets/ladder-icon-blue.png" alt=""></div>
+            <div class="dash-admin-card-label">Player Rankings</div>
+            <div class="dash-admin-card-sub">Manage the club ladder</div>
+          </button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Player dashboard — fetch data in parallel
+  const playerId = user.playerId;
+  const [playerData, ladder] = await Promise.all([
+    fetch(`/api/players/${playerId}/history`).then((r) => r.json()),
+    window.api.getLadder(),
+  ]);
+
+  const upcoming = playerData.upcoming || [];
+  const membersOnly = ladder.filter((p) => p.wsrc_member);
+  const ladderPos = membersOnly.findIndex((p) => p.id === playerId);
+  const rank = ladderPos >= 0 ? ladderPos + 1 : null;
+  const totalPlayers = membersOnly.length;
+
+  const nextMatch = upcoming[0] || null;
+  const restUpcoming = upcoming.slice(1, 5);
+
+  function fmtMatchDate(d) {
+    if (!d) return '';
+    const parts = d.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2])
+      .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+
+  function fmtShortDate(d) {
+    if (!d) return '';
+    const parts = d.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2])
+      .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  const nextMatchHTML = nextMatch ? (() => {
+    const showCourt = nextMatch.schedule_courts && nextMatch.court_number;
+    const timeStr = showCourt
+      ? `Court ${nextMatch.court_number}${nextMatch.match_time ? ' · ' + nextMatch.match_time : ''}`
+      : (nextMatch.match_time || null);
+    const divLabel = nextMatch.division_name ? nextMatch.division_name.replace(/^Division\s*/i, 'D') : '';
+    return `
+      <div class="dash-next-card">
+        <div class="dash-next-eyebrow">Next Match</div>
+        <div class="dash-next-date">${fmtMatchDate(nextMatch.week_date)}</div>
+        <div class="dash-next-matchup">
+          <div class="dash-next-you">${esc(playerData.name)}</div>
+          <div class="dash-next-vs">vs</div>
+          <div class="dash-next-opp">${esc(nextMatch.opponent_name)}</div>
+        </div>
+        <div class="dash-next-meta">
+          ${divLabel ? `<span class="dash-next-chip">${esc(divLabel)}</span>` : ''}
+          ${nextMatch.league_name ? `<span class="dash-next-league">${esc(nextMatch.league_name)}</span>` : ''}
+          ${timeStr ? `<span class="dash-next-time">${esc(timeStr)}</span>` : ''}
+        </div>
+      </div>`;
+  })() : `
+      <div class="dash-next-card dash-next-empty">
+        <div class="dash-next-eyebrow">Next Match</div>
+        <div class="dash-empty-msg">No upcoming matches scheduled</div>
+      </div>`;
+
+  const upcomingHTML = restUpcoming.length === 0 ? '' : `
+    <div class="dash-section">
+      <div class="dash-section-label">Upcoming</div>
+      <div class="dash-upcoming-list">
+        ${restUpcoming.map((m) => `
+          <div class="dash-upcoming-row">
+            <div class="dash-upcoming-opp">${esc(m.opponent_name)}</div>
+            <div class="dash-upcoming-date">${fmtShortDate(m.week_date)}</div>
+          </div>`).join('')}
+        <div class="dash-upcoming-footer">
+          <button class="dash-more-link" onclick="openPlayerProfile(${playerId})">More details</button>
+        </div>
+      </div>
+    </div>`;
+
+  const rankHTML = rank !== null ? `
+    <div class="dash-section">
+      <div class="dash-section-label">Your Ranking</div>
+      <div class="dash-rank-card">
+        <div class="dash-rank-num">#${rank}</div>
+        <div class="dash-rank-sub">of ${totalPlayers} players</div>
+        <button class="dash-rank-link" onclick="navigate('ladder')">See full ladder</button>
+      </div>
+    </div>` : '';
+
+  const quickHTML = `
+    <div class="dash-section">
+      <div class="dash-section-label">Quick Actions</div>
+      <div class="dash-quick-grid">
+        <button class="dash-quick-btn" onclick="navigate('players')">
+          <img src="/assets/players-icon-blue.png" alt="">Player List
+        </button>
+        <button class="dash-quick-btn" onclick="navigate('leagues')">
+          <img src="/assets/leagues-icon-blue.png" alt="">Leagues
+        </button>
+        <button class="dash-quick-btn" onclick="openPlayerProfile(${playerId})">
+          <img src="/assets/profile-icon-blue.png" alt="">My Profile
+        </button>
+      </div>
+    </div>`;
+
+  content.innerHTML = `
+    <div class="dash-player">
+      <div class="dash-col dash-col-left">
+        ${nextMatchHTML}
+        ${rankHTML}
+      </div>
+      <div class="dash-col dash-col-right">
+        ${upcomingHTML}
+        ${quickHTML}
+      </div>
+    </div>`;
 }
 
 // ===== PLAYERS PAGE =====
@@ -956,18 +1106,31 @@ async function renderLeagues() {
           <p>${isAdmin() ? 'Create your first league to get started.' : 'No leagues have been created yet.'}</p>
         </div>
       </div>`;
-  } else {
+  } else if (isAdmin()) {
     content.innerHTML = `<div class="league-grid">${state.leagues.map(leagueCardHTML).join('')}</div>`;
-    content.querySelectorAll('[data-action="view"]').forEach((btn) => {
-      btn.addEventListener('click', (e) => { e.stopPropagation(); openLeague(Number(btn.dataset.id)); });
-    });
-    content.querySelectorAll('.league-card').forEach((card) => {
-      card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
-    });
+  } else {
+    const playerId = state.currentUser?.playerId;
+    const mine = state.leagues.filter((l) => (l.player_ids || []).includes(playerId));
+    const other = state.leagues.filter((l) => !(l.player_ids || []).includes(playerId));
+    let html = '';
+    if (mine.length > 0) {
+      html += `<div class="leagues-section-label">My Leagues</div><div class="league-grid">${mine.map(leagueCardHTML).join('')}</div>`;
+    }
+    if (other.length > 0) {
+      html += `<div class="leagues-section-label${mine.length > 0 ? ' leagues-section-label--gap' : ''}">Other Leagues</div><div class="league-grid">${other.map(leagueCardHTML).join('')}</div>`;
+    }
+    content.innerHTML = html;
   }
 
+  content.querySelectorAll('[data-action="view"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); openLeague(Number(btn.dataset.id)); });
+  });
+  content.querySelectorAll('.league-card').forEach((card) => {
+    card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
+  });
+
   if (isAdmin()) {
-    document.getElementById('btnCreateLeague').addEventListener('click', startCreateLeague);
+    document.getElementById('btnCreateLeague')?.addEventListener('click', startCreateLeague);
   }
 }
 
@@ -2330,5 +2493,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   state.players = await window.api.getPlayers();
-  navigate('players');
+  navigate('dashboard');
 });
