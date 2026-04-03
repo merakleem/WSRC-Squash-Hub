@@ -91,7 +91,7 @@ async function getPlayerMatchHistory(id) {
 
       -- Player subbed in on the player1 side
       SELECT m.id, 1 AS played_as_p1,
-             ? AS eff_winner,
+             m.player1_id AS eff_winner,
              COALESCE(s2.sub_player_id, m.player2_id) AS opp_id,
              COALESCE(sp2.name, p2.name)               AS opp_name
       FROM match_subs sub_in
@@ -105,7 +105,7 @@ async function getPlayerMatchHistory(id) {
 
       -- Player subbed in on the player2 side
       SELECT m.id, 0 AS played_as_p1,
-             ? AS eff_winner,
+             m.player2_id AS eff_winner,
              COALESCE(s1.sub_player_id, m.player1_id) AS opp_id,
              COALESCE(sp1.name, p1.name)               AS opp_name
       FROM match_subs sub_in
@@ -122,7 +122,7 @@ async function getPlayerMatchHistory(id) {
     JOIN divisions d      ON m.division_id = d.id
     WHERE m.player1_score IS NOT NULL
     ORDER BY w.date DESC, w.week_number DESC
-  `, [id, id, id, id, id, id]);
+  `, [id, id, id, id]);
 }
 
 /**

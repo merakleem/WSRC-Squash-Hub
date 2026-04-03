@@ -278,6 +278,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
 }
 
 /* ===== BUTTONS ===== */
@@ -1093,6 +1094,8 @@ tbody td {
   gap: 8px;
 }
 .roster-player:last-child { border-bottom: none; }
+.player-link { color: inherit; text-decoration: none; }
+.player-link:hover { color: var(--primary); text-decoration: underline; }
 .div-chip {
   font-size: 11px;
   background: var(--surface-2);
@@ -1351,7 +1354,7 @@ tbody td {
   .topbar-actions .btn span,
   .topbar-actions .btn svg + * { display: none; }
 
-  .content { padding: 16px; }
+  .content { padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 
   /* Players table — mobile: name only */
   .players-table .player-col-email,

@@ -684,7 +684,7 @@ function renderPlayerProfile() {
               <td class="text-muted">${formatShortDate(m.week_date)}</td>
               <td>${esc(m.league_name)}</td>
               <td class="text-muted">Wk ${m.week_number}</td>
-              <td class="text-muted">${esc(m.division_name)}</td>
+              <td class="text-muted">${esc(m.division_name.replace(/^Division\s*/i, 'D'))}</td>
               <td>${esc(m.opponent_name)}</td>
               <td style="text-align:center;font-weight:600">${m.my_score} – ${m.their_score}</td>
               <td style="text-align:center">
@@ -718,7 +718,7 @@ function renderPlayerProfile() {
               <td class="text-muted">${formatShortDate(m.week_date)}</td>
               <td>${esc(m.league_name)}</td>
               <td class="text-muted">Wk ${m.week_number}</td>
-              <td class="text-muted">${esc(m.division_name)}</td>
+              <td class="text-muted">${esc(m.division_name.replace(/^Division\s*/i, 'D'))}</td>
               <td>${esc(m.opponent_name)}</td>
               <td class="text-muted">${esc(timeInfo)}</td>
             </tr>`;
@@ -1309,6 +1309,14 @@ function renderLeagueDetail() {
     });
   });
 
+  // Roster player links
+  content.querySelectorAll('.player-link').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      openPlayerProfile(Number(a.dataset.playerId));
+    });
+  });
+
   // Score forms (admin only)
   if (adminMode) {
     content.querySelectorAll('.score-save-btn').forEach((btn) => {
@@ -1334,8 +1342,8 @@ function renderRosters(league) {
           <div class="roster-team-title">${esc(team.name)}</div>
           ${members.map((m) => `
             <div class="roster-player">
-              <span class="div-chip">${esc(m.division_name)}</span>
-              ${esc(m.player_name)}
+              <span class="div-chip">${esc(m.division_name.replace(/^Division\s*/i, 'D'))}</span>
+              <a class="player-link" data-player-id="${m.player_id}" href="#">${esc(m.player_name)}</a>
             </div>`).join('')}
         </div>`;
     }).join('')}
@@ -1424,7 +1432,7 @@ function renderMatchRow(match, league, adminMode = true) {
   return `
     <div class="match-row" data-match-id="${match.id}">
       <div class="match-meta">
-        <span class="match-div-label">${esc(match.division_name)}</span>
+        <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
         ${courtInfo}
       </div>
       <div class="match-players">
@@ -1434,7 +1442,7 @@ function renderMatchRow(match, league, adminMode = true) {
       </div>
       <div class="match-actions">
         ${scoreSection}
-        ${adminMode && !hasScore ? `<button class="btn btn-ghost btn-sm sub-btn" style="font-size:11px"
+        ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn" style="font-size:11px"
           data-match-id="${match.id}"
           data-league-id="${leagueId}"
           data-p1-id="${match.player1_id}" data-p1-name="${esc(match.player1_name)}"

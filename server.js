@@ -235,7 +235,7 @@ function buildPublicPage() {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>League Schedule — WSRC Squash Hub</title>
   <link rel="icon" type="image/png" href="/assets/logo-blue.png">
   <style>
@@ -249,7 +249,7 @@ function buildPublicPage() {
     .header-brand-text { font-size:12px; font-weight:500; letter-spacing:0.03em; }
     .header-title { font-size:28px; font-weight:800; line-height:1.15; }
 
-    .content { max-width:660px; margin:0 auto; padding:28px 16px 56px; }
+    .content { max-width:660px; margin:0 auto; padding:28px 16px calc(56px + env(safe-area-inset-bottom)); }
     .section { margin-bottom:36px; }
     .section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:12px; padding-left:2px; }
 
@@ -341,7 +341,7 @@ function buildPublicPage() {
           .sort(function(a,b){ return a.division_level - b.division_level; });
         var rows = members.map(function(m) {
           return '<div class="roster-row">'
-            +'<span class="div-chip">'+esc(m.division_name)+'</span>'
+            +'<span class="div-chip">'+esc(m.division_name.replace(/^Division\s*/i,'D'))+'</span>'
             +'<span>'+esc(m.player_name)+'</span>'
             +'</div>';
         }).join('');
@@ -374,7 +374,7 @@ function buildPublicPage() {
               meta = fmtTime(m.match_time);
             }
             return '<div class="match-row">'
-              +'<span class="match-div">'+esc(div.name||'')+'</span>'
+              +'<span class="match-div">'+esc((div.name||'').replace(/^Division\s*/i,'D'))+'</span>'
               +'<div class="match-players">'
               +'<span class="'+(p1win?'match-win':'')+'">'+esc(p1)+'</span>'
               +' <span class="match-vs">vs</span> '
