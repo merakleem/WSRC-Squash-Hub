@@ -2127,16 +2127,46 @@ async function renderStep2() {
   const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
   state.players = allPlayers;
 
-  const selectedIds = new Set(state.wizard.rankedPlayers.map((p) => p.id));
+  // Build full available list in ladder order, unranked players appended alphabetically
+  function buildAvailable() {
+    const selectedIds = new Set(state.wizard.rankedPlayers.map((p) => p.id));
+    const list = ladderOrder
+      .map((id) => allPlayers.find((p) => p.id === id))
+      .filter((p) => p && !selectedIds.has(p.id));
+    allPlayers.forEach((p) => {
+      if (!selectedIds.has(p.id) && !ladderOrder.includes(p.id)) list.push(p);
+    });
+    return list;
+  }
 
-  // Available list shown in ladder order (unranked players appended alphabetically)
-  const available = ladderOrder
-    .map((id) => allPlayers.find((p) => p.id === id))
-    .filter((p) => p && !selectedIds.has(p.id));
-  // Also include any players not on the ladder yet
-  allPlayers.forEach((p) => {
-    if (!selectedIds.has(p.id) && !ladderOrder.includes(p.id)) available.push(p);
-  });
+  function renderAvailableList(query) {
+    const q = query.trim().toLowerCase();
+    const filtered = buildAvailable().filter((p) => !q || p.name.toLowerCase().includes(q));
+    const el = document.getElementById('availableList');
+    if (!el) return;
+    el.innerHTML = filtered.length === 0
+      ? `<div class="empty-state"><strong>${buildAvailable().length === 0 ? 'All players added' : 'No players match'}</strong></div>`
+      : filtered.map((p) => `
+          <div class="picker-item" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
+            <span style="flex:1">${esc(p.name)}</span>
+            <span style="color:var(--accent);font-size:18px">+</span>
+          </div>`).join('');
+  }
+
+  function renderSelectedList() {
+    const el = document.getElementById('rankedList');
+    const hdr = document.getElementById('selectedHeader');
+    if (!el) return;
+    if (hdr) hdr.textContent = `Selected (${state.wizard.rankedPlayers.length}) — ladder order`;
+    el.innerHTML = state.wizard.rankedPlayers.length === 0
+      ? '<div class="empty-state" style="padding:40px 20px"><strong>No players selected</strong><p>Click players on the left to add them.</p></div>'
+      : state.wizard.rankedPlayers.map((p, i) => `
+          <div class="picker-item">
+            <div class="rank-badge">${i + 1}</div>
+            <span style="flex:1">${esc(p.name)}</span>
+            <button class="remove-btn" data-action="remove-player" data-idx="${i}">&times;</button>
+          </div>`).join('');
+  }
 
   document.getElementById('wizardCard').innerHTML = `
     <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">Select Players</h3>
@@ -2146,28 +2176,12 @@ async function renderStep2() {
     <div class="player-picker">
       <div class="picker-col">
         <h4>Club Players</h4>
-        <div class="picker-list" id="availableList">
-          ${available.length === 0
-            ? '<div class="empty-state"><strong>All players added</strong></div>'
-            : available.map((p) => `
-                <div class="picker-item" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
-                  <span style="flex:1">${esc(p.name)}</span>
-                  <span style="color:var(--accent);font-size:18px">+</span>
-                </div>`).join('')}
-        </div>
+        <input class="form-control" id="playerSearch" placeholder="Search players…" style="margin-bottom:8px" autocomplete="off">
+        <div class="picker-list" id="availableList"></div>
       </div>
       <div class="picker-col">
-        <h4>Selected (${state.wizard.rankedPlayers.length}) &mdash; ladder order</h4>
-        <div class="picker-list" id="rankedList">
-          ${state.wizard.rankedPlayers.length === 0
-            ? '<div class="empty-state" style="padding:40px 20px"><strong>No players selected</strong><p>Click players on the left to add them.</p></div>'
-            : state.wizard.rankedPlayers.map((p, i) => `
-                <div class="picker-item">
-                  <div class="rank-badge">${i + 1}</div>
-                  <span style="flex:1">${esc(p.name)}</span>
-                  <button class="remove-btn" data-action="remove-player" data-idx="${i}">&times;</button>
-                </div>`).join('')}
-        </div>
+        <h4 id="selectedHeader">Selected (${state.wizard.rankedPlayers.length}) &mdash; ladder order</h4>
+        <div class="picker-list" id="rankedList"></div>
       </div>
     </div>
     <div id="wError" class="form-error mt-4"></div>
@@ -2175,6 +2189,13 @@ async function renderStep2() {
       <button class="btn btn-outline" id="wBack">&larr; Back</button>
       <button class="btn btn-primary" id="wNext">Next &rarr;</button>
     </div>`;
+
+  renderAvailableList('');
+  renderSelectedList();
+
+  document.getElementById('playerSearch').addEventListener('input', (e) => {
+    renderAvailableList(e.target.value);
+  });
 
   document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 1; renderCreateLeague(); });
   document.getElementById('wNext').addEventListener('click', () => {
@@ -2193,17 +2214,20 @@ async function renderStep2() {
     if (action === 'add-player') {
       const el = e.target.closest('[data-action]');
       state.wizard.rankedPlayers.push({ id: Number(el.dataset.id), name: el.dataset.name });
-      // Re-sort by ladder order
       state.wizard.rankedPlayers.sort((a, b) => {
         const ai = ladderOrder.indexOf(a.id);
         const bi = ladderOrder.indexOf(b.id);
         return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
       });
-      renderCreateLeague();
+      const query = document.getElementById('playerSearch')?.value || '';
+      renderAvailableList(query);
+      renderSelectedList();
     } else if (action === 'remove-player') {
       const idx = Number(e.target.closest('[data-action]').dataset.idx);
       state.wizard.rankedPlayers.splice(idx, 1);
-      renderCreateLeague();
+      const query = document.getElementById('playerSearch')?.value || '';
+      renderAvailableList(query);
+      renderSelectedList();
     }
   });
 }
