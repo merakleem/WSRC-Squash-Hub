@@ -884,7 +884,6 @@ function renderPlayerProfile() {
           <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">${esc(p.name)}</h2>
           ${p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
           ${p.phone ? `<div class="text-muted" style="font-size:13px">${esc(p.phone)}</div>` : ''}
-          ${adminMode && p.member_number ? `<div class="text-muted" style="font-size:13px">Member #: <strong>${esc(p.member_number)}</strong></div>` : ''}
         </div>
       </div>
       <div class="profile-stats">
@@ -1401,6 +1400,57 @@ function copyPublicLink(league) {
   });
 }
 
+function openMessagePlayersModal(league) {
+  const players = (league.players || []).filter((p) => p.player_email);
+  const noEmailPlayers = (league.players || []).filter((p) => !p.player_email);
+
+  modal.open('Message Players', `
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+      Sending to <strong>${players.length}</strong> player${players.length !== 1 ? 's' : ''} with an email address on file.
+      ${noEmailPlayers.length ? `<span style="color:var(--warning)"> ${noEmailPlayers.length} player${noEmailPlayers.length !== 1 ? 's have' : ' has'} no email and will be skipped.</span>` : ''}
+    </p>
+    <div class="form-group">
+      <label>Subject</label>
+      <input class="form-control" id="fMsgSubject" type="text" placeholder="e.g. League night this week">
+    </div>
+    <div class="form-group">
+      <label>Message</label>
+      <textarea class="form-control" id="fMsgBody" rows="6" placeholder="Write your message here…" style="resize:vertical"></textarea>
+    </div>
+    <div id="fMsgError" class="form-error"></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSend">Send Email</button>
+    </div>`);
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSend').addEventListener('click', async () => {
+    const subject = document.getElementById('fMsgSubject').value.trim();
+    const body = document.getElementById('fMsgBody').value.trim();
+    const errEl = document.getElementById('fMsgError');
+    if (!subject) { errEl.textContent = 'Subject is required.'; return; }
+    if (!body) { errEl.textContent = 'Message is required.'; return; }
+    errEl.textContent = '';
+    document.getElementById('fSend').disabled = true;
+    document.getElementById('fSend').textContent = 'Sending…';
+    try {
+      const res = await fetch(`/api/leagues/${league.id}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, body }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send');
+      modal.close();
+      toast(`Email sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}`, 'success');
+    } catch (e) {
+      errEl.textContent = e.message;
+      document.getElementById('fSend').disabled = false;
+      document.getElementById('fSend').textContent = 'Send Email';
+    }
+  });
+}
+
 // ===== LEAGUE DETAIL =====
 function getOpenWeekIds() {
   return Array.from(document.querySelectorAll('.week-card.open'))
@@ -1434,6 +1484,7 @@ function renderLeagueDetail() {
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="print-boxes">Print Boxes</button>
         <button class="options-item" data-action="copy-link">Get Public Link</button>
+        <button class="options-item" data-action="message-players">Message Players</button>
         <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
       </div>
     </div>` : '';
@@ -1451,6 +1502,9 @@ function renderLeagueDetail() {
       } else if (action === 'copy-link') {
         document.getElementById('optionsDropdown').classList.remove('open');
         copyPublicLink(league);
+      } else if (action === 'message-players') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        openMessagePlayersModal(league);
       } else if (action === 'delete-league') {
         document.getElementById('optionsDropdown').classList.remove('open');
         confirmDeleteLeague(Number(e.target.dataset.id), e.target.dataset.name);

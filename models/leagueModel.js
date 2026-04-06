@@ -41,7 +41,7 @@ async function getDivisions(leagueId) {
 
 async function getLeaguePlayers(leagueId) {
   return all(
-    `SELECT lp.*, p.name AS player_name,
+    `SELECT lp.*, p.name AS player_name, p.email AS player_email,
             t.name AS team_name, t.team_order,
             d.name AS division_name, d.level AS division_level
      FROM league_players lp

@@ -561,6 +561,47 @@ app.put('/api/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) =>
   res.json({ ok: true, count });
 }));
 
+// ===== MESSAGE PLAYERS =====
+
+app.post('/api/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
+  const { subject, body } = req.body;
+  if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required' });
+
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+
+  const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
+  const recipients = players.filter((p) => p.player_email);
+
+  if (recipients.length === 0) return res.json({ sent: 0 });
+
+  const league = await leagueModel.getLeagueById(Number(req.params.id));
+  const leagueName = league ? league.name : 'League';
+
+  let sent = 0;
+  for (const player of recipients) {
+    const htmlBody = body
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: `WSRC Squash Hub <no-reply@playwsrc.ca>`,
+        to: [player.player_email],
+        subject,
+        html: `<p>Hi ${player.player_name},</p><br><p>${htmlBody}</p><br><p style="color:#888;font-size:12px">Sent from WSRC Squash Hub — ${leagueName}</p>`,
+      }),
+    });
+    if (response.ok) sent++;
+  }
+
+  res.json({ sent });
+}));
+
 // ===== LADDER =====
 
 app.get('/api/ladder', wrap(async (req, res) => {
