@@ -180,21 +180,55 @@ async function getPlayerUpcomingMatches(id) {
       l.id          AS league_id,
       l.name        AS league_name,
       d.name        AS division_name,
-      CASE WHEN m.player1_id = ? THEN p2.name ELSE p1.name END AS opponent_name,
+      CASE WHEN m.player1_id = ? THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
       m.court_number,
       m.match_time,
       l.schedule_courts
     FROM matches m
     JOIN players p1 ON p1.id = m.player1_id
     JOIN players p2 ON p2.id = m.player2_id
+    LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
+    LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+    LEFT JOIN players sp1 ON sp1.id = s1.sub_player_id
+    LEFT JOIN players sp2 ON sp2.id = s2.sub_player_id
     JOIN team_matchups tm ON m.matchup_id = tm.id
     JOIN weeks w          ON tm.week_id = w.id
     JOIN leagues l        ON w.league_id = l.id
     JOIN divisions d      ON m.division_id = d.id
-    WHERE (m.player1_id = ? OR m.player2_id = ?)
+    WHERE ((m.player1_id = ? AND s1.sub_player_id IS NULL)
+       OR  (m.player2_id = ? AND s2.sub_player_id IS NULL))
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-    ORDER BY w.date ASC, m.match_time ASC
-  `, [id, id, id]);
+
+    UNION
+
+    SELECT
+      m.id,
+      w.date        AS week_date,
+      w.week_number,
+      l.id          AS league_id,
+      l.name        AS league_name,
+      d.name        AS division_name,
+      CASE WHEN s.original_player_id = m.player1_id THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
+      m.court_number,
+      m.match_time,
+      l.schedule_courts
+    FROM match_subs s
+    JOIN matches m ON m.id = s.match_id
+    JOIN players p1 ON p1.id = m.player1_id
+    JOIN players p2 ON p2.id = m.player2_id
+    LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
+    LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+    LEFT JOIN players sp1 ON sp1.id = s1.sub_player_id
+    LEFT JOIN players sp2 ON sp2.id = s2.sub_player_id
+    JOIN team_matchups tm ON m.matchup_id = tm.id
+    JOIN weeks w          ON tm.week_id = w.id
+    JOIN leagues l        ON w.league_id = l.id
+    JOIN divisions d      ON m.division_id = d.id
+    WHERE s.sub_player_id = ?
+      AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+
+    ORDER BY week_date ASC, match_time ASC
+  `, [id, id, id, id]);
 }
 
 module.exports = { getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, getPlayerMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords };
