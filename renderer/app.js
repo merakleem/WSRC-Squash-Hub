@@ -1417,6 +1417,10 @@ function openMessagePlayersModal(league) {
       <label>Message</label>
       <textarea class="form-control" id="fMsgBody" rows="6" placeholder="Write your message here…" style="resize:vertical"></textarea>
     </div>
+    <div class="form-group">
+      <label>Attachment <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+      <input class="form-control" id="fMsgFile" type="file">
+    </div>
     <div id="fMsgError" class="form-error"></div>
     <div class="form-actions">
       <button class="btn btn-outline" id="fCancel">Cancel</button>
@@ -1427,17 +1431,31 @@ function openMessagePlayersModal(league) {
   document.getElementById('fSend').addEventListener('click', async () => {
     const subject = document.getElementById('fMsgSubject').value.trim();
     const body = document.getElementById('fMsgBody').value.trim();
+    const fileInput = document.getElementById('fMsgFile');
     const errEl = document.getElementById('fMsgError');
     if (!subject) { errEl.textContent = 'Subject is required.'; return; }
     if (!body) { errEl.textContent = 'Message is required.'; return; }
     errEl.textContent = '';
     document.getElementById('fSend').disabled = true;
     document.getElementById('fSend').textContent = 'Sending…';
+
+    let attachment = null;
+    if (fileInput.files.length > 0) {
+      const file = fileInput.files[0];
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      attachment = { filename: file.name, content: base64 };
+    }
+
     try {
       const res = await fetch(`/api/leagues/${league.id}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, body }),
+        body: JSON.stringify({ subject, body, attachment }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to send');
