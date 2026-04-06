@@ -564,7 +564,7 @@ app.put('/api/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) =>
 // ===== MESSAGE PLAYERS =====
 
 app.post('/api/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
-  const { subject, body, attachment } = req.body;
+  const { subject, body, attachments } = req.body;
   if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required' });
 
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -594,7 +594,7 @@ app.post('/api/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
         to: [player.player_email],
         subject,
         html: `<p>Hi ${player.player_name},</p><br><p>${htmlBody}</p><br><p style="color:#888;font-size:12px">Sent from WSRC Squash Hub — ${leagueName}</p>`,
-        ...(attachment ? { attachments: [{ filename: attachment.filename, content: attachment.content }] } : {}),
+        ...(attachments && attachments.length ? { attachments } : {}),
       }),
     });
     if (response.ok) sent++;

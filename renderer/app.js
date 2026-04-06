@@ -1418,8 +1418,12 @@ function openMessagePlayersModal(league) {
       <textarea class="form-control" id="fMsgBody" rows="6" placeholder="Write your message here…" style="resize:vertical"></textarea>
     </div>
     <div class="form-group">
-      <label>Attachment <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
-      <input class="form-control" id="fMsgFile" type="file">
+      <label>Attachments <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-control" id="fMsgFile" type="file" style="flex:1">
+        <button class="btn btn-outline" id="fAddFile" type="button" style="white-space:nowrap;flex-shrink:0">Add</button>
+      </div>
+      <div id="fAttachmentList" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
     </div>
     <div id="fMsgError" class="form-error"></div>
     <div class="form-actions">
@@ -1427,35 +1431,53 @@ function openMessagePlayersModal(league) {
       <button class="btn btn-primary" id="fSend">Send Email</button>
     </div>`);
 
+  const attachments = [];
+
+  function renderAttachmentList() {
+    const list = document.getElementById('fAttachmentList');
+    list.innerHTML = attachments.map((a, i) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-subtle,#f4f6fb);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename)}</span>
+        <button class="btn btn-ghost btn-sm" data-remove="${i}" style="flex-shrink:0;margin-left:8px;color:var(--danger,#e74c3c)">Remove</button>
+      </div>`).join('');
+    list.querySelectorAll('[data-remove]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        attachments.splice(Number(btn.dataset.remove), 1);
+        renderAttachmentList();
+      });
+    });
+  }
+
+  document.getElementById('fAddFile').addEventListener('click', async () => {
+    const fileInput = document.getElementById('fMsgFile');
+    if (!fileInput.files.length) return;
+    const file = fileInput.files[0];
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    attachments.push({ filename: file.name, content: base64 });
+    fileInput.value = '';
+    renderAttachmentList();
+  });
+
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSend').addEventListener('click', async () => {
     const subject = document.getElementById('fMsgSubject').value.trim();
     const body = document.getElementById('fMsgBody').value.trim();
-    const fileInput = document.getElementById('fMsgFile');
     const errEl = document.getElementById('fMsgError');
     if (!subject) { errEl.textContent = 'Subject is required.'; return; }
     if (!body) { errEl.textContent = 'Message is required.'; return; }
     errEl.textContent = '';
     document.getElementById('fSend').disabled = true;
     document.getElementById('fSend').textContent = 'Sending…';
-
-    let attachment = null;
-    if (fileInput.files.length > 0) {
-      const file = fileInput.files[0];
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      attachment = { filename: file.name, content: base64 };
-    }
-
     try {
       const res = await fetch(`/api/leagues/${league.id}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, body, attachment }),
+        body: JSON.stringify({ subject, body, attachments }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to send');
