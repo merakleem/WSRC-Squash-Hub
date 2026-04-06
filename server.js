@@ -15,7 +15,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'wsrc-dev-secret-change-in-
 const COOKIE_NAME = 'wsrc_session';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 // ===== SESSION TOKENS =====
