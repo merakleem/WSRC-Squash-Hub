@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS leagues (
     match_duration INTEGER NOT NULL DEFAULT 45,
     match_buffer INTEGER NOT NULL DEFAULT 15,
     schedule_courts INTEGER NOT NULL DEFAULT 0,
+    setup_type TEXT NOT NULL DEFAULT 'traditional',
     status TEXT NOT NULL DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -51,7 +52,7 @@ CREATE TABLE IF NOT EXISTS league_players (
     league_id INTEGER NOT NULL,
     player_id INTEGER NOT NULL,
     skill_rank INTEGER NOT NULL,
-    team_id INTEGER NOT NULL,
+    team_id INTEGER,
     division_id INTEGER NOT NULL,
     FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE,
     FOREIGN KEY (player_id) REFERENCES players(id),
@@ -73,10 +74,12 @@ CREATE TABLE IF NOT EXISTS team_matchups (
     team1_id INTEGER,
     team2_id INTEGER,
     bye_team_id INTEGER,
+    division_id INTEGER,
     FOREIGN KEY (week_id) REFERENCES weeks(id) ON DELETE CASCADE,
     FOREIGN KEY (team1_id) REFERENCES teams(id),
     FOREIGN KEY (team2_id) REFERENCES teams(id),
-    FOREIGN KEY (bye_team_id) REFERENCES teams(id)
+    FOREIGN KEY (bye_team_id) REFERENCES teams(id),
+    FOREIGN KEY (division_id) REFERENCES divisions(id)
 );
 
 CREATE TABLE IF NOT EXISTS matches (
@@ -94,6 +97,16 @@ CREATE TABLE IF NOT EXISTS matches (
     FOREIGN KEY (division_id) REFERENCES divisions(id),
     FOREIGN KEY (player1_id) REFERENCES players(id),
     FOREIGN KEY (player2_id) REFERENCES players(id)
+);
+
+CREATE TABLE IF NOT EXISTS week_byes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    division_id INTEGER NOT NULL,
+    FOREIGN KEY (week_id) REFERENCES weeks(id) ON DELETE CASCADE,
+    FOREIGN KEY (player_id) REFERENCES players(id),
+    FOREIGN KEY (division_id) REFERENCES divisions(id)
 );
 
 CREATE TABLE IF NOT EXISTS user_accounts (

@@ -49,14 +49,20 @@ const state = {
   currentUser: null,      // { role: 'admin'|'player', playerId: number|null }
   wizard: {
     step: 1,
+    setupType: 'traditional',
     leagueName: '',
     startDate: '',
     rankedPlayers: [],    // [{ id, name }] ordered best → worst
+    // Traditional
     numTeams: 3,
     numDivisions: 1,
+    teamNames: [],        // custom names; index matches team slot
+    // Modern
+    modernNumDivisions: 2,
+    modernDivisionPlayers: null,
+    // Shared
     numRounds: 1,
     blackoutDates: [],
-    teamNames: [],        // custom names; index matches team slot
     matchStartTime: '19:00',
     numCourts: 2,
     matchDuration: 45,
@@ -1185,6 +1191,7 @@ function confirmDeleteLeague(id, name) {
 
 // ===== PRINT BOXES =====
 function printBoxes(league) {
+  const isModern = league.setup_type === 'modern';
   const numRounds = league.num_rounds || 1;
   const weeks = league.weeks || [];
   const weeksPerRound = Math.round(weeks.length / numRounds);
@@ -1195,7 +1202,7 @@ function printBoxes(league) {
     rounds.push(weeks.slice(r * weeksPerRound, (r + 1) * weeksPerRound));
   }
 
-  // Group players by division (sorted by team_order within each division)
+  // Group players by division
   const divMap = {};
   (league.players || []).forEach((p) => {
     if (!divMap[p.division_level]) {
@@ -1205,7 +1212,12 @@ function printBoxes(league) {
   });
   const divisions = Object.values(divMap)
     .sort((a, b) => a.level - b.level)
-    .map((d) => ({ ...d, players: d.players.slice().sort((a, b) => a.team_order - b.team_order) }));
+    .map((d) => ({
+      ...d,
+      players: d.players.slice().sort((a, b) =>
+        isModern ? (a.skill_rank - b.skill_rank) : (a.team_order - b.team_order)
+      ),
+    }));
 
   let pagesHTML = '';
 
@@ -1229,7 +1241,7 @@ function printBoxes(league) {
       const colHeaders = players.map((p) => `
         <th class="box-col-header">
           <div class="box-col-player">${esc(p.player_name)}</div>
-          <div class="box-col-team">${esc(p.team_name)}</div>
+          ${!isModern ? `<div class="box-col-team">${esc(p.team_name)}</div>` : ''}
         </th>`).join('');
 
       // Rows
@@ -1243,7 +1255,7 @@ function printBoxes(league) {
         return `<tr>
           <td class="box-row-header">
             <div class="box-row-player">${esc(rowP.player_name)}</div>
-            <div class="box-row-team">${esc(rowP.team_name)}</div>
+            ${!isModern ? `<div class="box-row-team">${esc(rowP.team_name)}</div>` : ''}
           </td>${cells}</tr>`;
       }).join('');
 
@@ -1557,22 +1569,28 @@ function renderLeagueDetail() {
   }
 
   const content = document.getElementById('mainContent');
-  const numPlayers = league.num_teams * league.num_divisions;
+  const isModern = league.setup_type === 'modern';
+  const numPlayers = isModern ? (league.players || []).length : league.num_teams * league.num_divisions;
+
+  const statsHTML = isModern ? `
+    <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
+    <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
+    <div class="stat"><span class="stat-val">${league.weeks ? league.weeks.length : 0}</span><span class="stat-label">Weeks</span></div>
+    <div class="stat"><span class="stat-val">${formatShortDate(league.start_date)}</span><span class="stat-label">Start Date</span></div>` : `
+    <div class="stat"><span class="stat-val">${league.num_teams}</span><span class="stat-label">Teams</span></div>
+    <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
+    <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
+    <div class="stat"><span class="stat-val">${league.weeks ? league.weeks.length : 0}</span><span class="stat-label">Weeks</span></div>
+    <div class="stat"><span class="stat-val">${formatShortDate(league.start_date)}</span><span class="stat-label">Start Date</span></div>`;
 
   content.innerHTML = `
     <div class="league-header-card">
       <h2>${esc(league.name)}</h2>
-      <div class="league-stats">
-        <div class="stat"><span class="stat-val">${league.num_teams}</span><span class="stat-label">Teams</span></div>
-        <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
-        <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
-        <div class="stat"><span class="stat-val">${league.weeks ? league.weeks.length : 0}</span><span class="stat-label">Weeks</span></div>
-        <div class="stat"><span class="stat-val">${formatShortDate(league.start_date)}</span><span class="stat-label">Start Date</span></div>
-      </div>
+      <div class="league-stats">${statsHTML}</div>
     </div>
 
-    <div class="section-title">Rosters <div class="divider"></div></div>
-    ${renderRosters(league)}
+    <div class="section-title">${isModern ? 'Divisions' : 'Rosters'} <div class="divider"></div></div>
+    ${isModern ? renderRostersModern(league) : renderRosters(league)}
 
     <div class="section-title">Schedule <div class="divider"></div></div>
     <div class="schedule-list" id="scheduleList">
@@ -1645,7 +1663,28 @@ function renderRosters(league) {
   </div>`;
 }
 
+function renderRostersModern(league) {
+  if (!league.divisions || league.divisions.length === 0) return '';
+  return `<div class="roster-grid">
+    ${league.divisions.map((div) => {
+      const members = (league.players || [])
+        .filter((p) => p.division_id === div.id)
+        .sort((a, b) => a.skill_rank - b.skill_rank);
+      return `
+        <div class="roster-team-card">
+          <div class="roster-team-title">${esc(div.name)}</div>
+          ${members.map((m) => `
+            <div class="roster-player">
+              <a class="player-link" data-player-id="${m.player_id}" href="#">${esc(m.player_name)}</a>
+            </div>`).join('')}
+        </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderWeekCard(week, league, adminMode = true) {
+  if (league.setup_type === 'modern') return renderWeekCardModern(week, league, adminMode);
+
   const matchupsHTML = week.matchups.map((mu) => {
     if (mu.bye_team_id) {
       return `
@@ -1659,6 +1698,35 @@ function renderWeekCard(week, league, adminMode = true) {
           ${esc(mu.team1_name)} <span class="vs-badge">VS</span> ${esc(mu.team2_name)}
         </div>
         ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="week-card" data-week-id="${week.id}">
+      <div class="week-header">
+        <div class="week-title">
+          <span class="week-num">Week ${week.week_number}</span>
+          <span class="week-date">${formatDate(week.date)}</span>
+        </div>
+        <svg class="week-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </div>
+      <div class="week-body">${matchupsHTML}</div>
+    </div>`;
+}
+
+function renderWeekCardModern(week, league, adminMode = true) {
+  const byes = week.byes || [];
+  const matchupsHTML = week.matchups.map((mu) => {
+    const divByes = byes.filter((b) => b.division_id === mu.division_id);
+    const byesHTML = divByes.length
+      ? `<div class="matchup-byes">Bye: ${divByes.map((b) => esc(b.player_name)).join(', ')}</div>` : '';
+    return `
+      <div class="matchup-block">
+        <div class="matchup-title">${esc(mu.division_name)}</div>
+        ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
+        ${byesHTML}
       </div>`;
   }).join('');
 
@@ -1924,14 +1992,20 @@ async function openSubModal(btn) {
 function startCreateLeague() {
   state.wizard = {
     step: 1,
+    setupType: 'traditional',
     leagueName: '',
     startDate: defaultStartDate(),
     rankedPlayers: [],
+    // Traditional
     numTeams: 3,
     numDivisions: 1,
+    teamNames: [],
+    // Modern
+    modernNumDivisions: 2,
+    modernDivisionPlayers: null,
+    // Shared
     numRounds: 1,
     blackoutDates: [],
-    teamNames: [],
     matchStartTime: '19:00',
     numCourts: 2,
     matchDuration: 45,
@@ -1992,8 +2066,9 @@ function renderWizardStep() {
   }
 }
 
-// Step 1 — League Info
+// Step 1 — League Info + Setup Type
 function renderStep1() {
+  const { setupType } = state.wizard;
   document.getElementById('wizardCard').innerHTML = `
     <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">League Information</h3>
     <div class="form-group">
@@ -2004,11 +2079,32 @@ function renderStep1() {
       <label>Start Date *</label>
       <input class="form-control" id="wDate" type="date" value="${esc(state.wizard.startDate)}">
     </div>
+    <div class="form-group">
+      <label>League Format</label>
+      <div class="setup-type-grid">
+        <div class="setup-type-card ${setupType === 'traditional' ? 'selected' : ''}" data-type="traditional">
+          <div class="setup-type-title">Traditional</div>
+          <div class="setup-type-desc">Players are grouped into teams. Teams play each other each week, with one match per division.</div>
+        </div>
+        <div class="setup-type-card ${setupType === 'modern' ? 'selected' : ''}" data-type="modern">
+          <div class="setup-type-title">Modern</div>
+          <div class="setup-type-desc">No teams. Players are grouped into divisions and play everyone in their division (round robin).</div>
+        </div>
+      </div>
+    </div>
     <div id="wError" class="form-error"></div>
     <div class="wizard-footer">
       <button class="btn btn-outline" onclick="navigate('leagues')">Cancel</button>
       <button class="btn btn-primary" id="wNext">Next &rarr;</button>
     </div>`;
+
+  document.getElementById('wizardCard').querySelectorAll('.setup-type-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.setup-type-card').forEach((c) => c.classList.remove('selected'));
+      card.classList.add('selected');
+      state.wizard.setupType = card.dataset.type;
+    });
+  });
 
   document.getElementById('wNext').addEventListener('click', () => {
     const name = document.getElementById('wName').value.trim();
@@ -2112,8 +2208,117 @@ async function renderStep2() {
   });
 }
 
-// Step 3 — Structure
+// Step 3 — Structure (dispatches based on setupType)
 async function renderStep3() {
+  if (state.wizard.setupType === 'modern') return renderStep3Modern();
+  return renderStep3Traditional();
+}
+
+async function renderStep3Modern() {
+  const n = state.wizard.rankedPlayers.length;
+  const { modernNumDivisions, numRounds, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
+  const maxDivs = Math.floor(n / 2);
+  const isValid = modernNumDivisions >= 1 && modernNumDivisions <= maxDivs;
+
+  // Compute estimated total weeks based on even distribution
+  let totalWeeks = null;
+  if (isValid) {
+    const maxDivSize = Math.ceil(n / modernNumDivisions);
+    const singleRound = maxDivSize % 2 === 0 ? maxDivSize - 1 : maxDivSize;
+    totalWeeks = singleRound * numRounds;
+  }
+
+  // Preview distribution
+  let distPreview = '';
+  if (isValid) {
+    const sizes = Array.from({ length: modernNumDivisions }, (_, i) =>
+      Math.floor(n / modernNumDivisions) + (i < n % modernNumDivisions ? 1 : 0)
+    );
+    distPreview = sizes.map((s, i) => `Div ${i + 1}: ${s} player${s !== 1 ? 's' : ''}`).join(' &nbsp;&middot;&nbsp; ');
+  }
+
+  document.getElementById('wizardCard').innerHTML = `
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">League Structure</h3>
+    <p class="text-muted" style="font-size:13px;margin-bottom:20px">
+      You have <strong>${n} players</strong>. Set the number of divisions (minimum 2 players per division).
+    </p>
+
+    <div class="step3-grid">
+      <div>
+        <div class="form-group">
+          <label>Number of Divisions</label>
+          <input class="form-control" id="wModernDivs" type="number" min="1" max="${maxDivs}" value="${modernNumDivisions}" style="font-size:16px;font-weight:600">
+          <p class="text-muted" style="font-size:12px;margin-top:6px">Min 1 &nbsp;&middot;&nbsp; Max ${maxDivs} (at least 2 players per division)</p>
+        </div>
+
+        ${isValid ? `<div class="structure-calc" style="font-size:13px">${distPreview}</div>` : ''}
+        ${!isValid && modernNumDivisions >= 1 ? `<div class="struct-warning">Can't create ${modernNumDivisions} divisions with ${n} players — each division needs at least 2 players.</div>` : ''}
+
+        <div class="form-group" style="margin-top:20px">
+          <label>Rounds through the schedule</label>
+          <input class="form-control" id="wRounds" type="number" min="1" value="${numRounds}">
+          ${isValid ? `<p class="text-muted" style="font-size:12px;margin-top:6px">~${totalWeeks} total weeks (based on largest division)</p>` : ''}
+        </div>
+      </div>
+
+      <div>
+        <div class="form-group">
+          <label>Match Start Time</label>
+          <input class="form-control" id="wStartTime" type="time" value="${matchStartTime}">
+        </div>
+        <div class="form-group">
+          <label># of Courts</label>
+          <input class="form-control" id="wCourts" type="number" min="1" value="${numCourts}">
+        </div>
+        <div class="form-group">
+          <label>Match Duration <span class="form-hint">(minutes)</span></label>
+          <input class="form-control" id="wDuration" type="number" min="1" value="${matchDuration}">
+        </div>
+        <div class="form-group">
+          <label>Buffer Between Matches <span class="form-hint">(minutes)</span></label>
+          <input class="form-control" id="wBuffer" type="number" min="0" value="${matchBuffer}">
+        </div>
+        <div class="form-group form-group-check">
+          <label class="check-label">
+            <input type="checkbox" id="wScheduleCourts" ${scheduleCourts ? 'checked' : ''}>
+            Display court assignments on schedule
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div id="wError" class="form-error mt-4"></div>
+    <div class="wizard-footer">
+      <button class="btn btn-outline" id="wBack">&larr; Back</button>
+      <button class="btn btn-outline" id="wApply">Apply Settings</button>
+      <button class="btn btn-primary" id="wNext" ${!isValid ? 'disabled' : ''}>Next &rarr;</button>
+    </div>`;
+
+  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 2; renderCreateLeague(); });
+  document.getElementById('wNext').addEventListener('click', () => {
+    if (!isValid) return;
+    state.wizard.modernNumDivisions = modernNumDivisions;
+    state.wizard.modernDivisionPlayers = null; // reset so step 5 re-distributes
+    state.wizard.step = 4;
+    renderCreateLeague();
+  });
+
+  function applyModernSettings() {
+    state.wizard.modernNumDivisions = Math.max(1, Number(document.getElementById('wModernDivs').value) || 1);
+    state.wizard.numRounds = Math.max(1, Number(document.getElementById('wRounds').value) || 1);
+    state.wizard.matchStartTime = document.getElementById('wStartTime').value;
+    state.wizard.numCourts = Math.max(1, Number(document.getElementById('wCourts').value) || 1);
+    state.wizard.matchDuration = Math.max(1, Number(document.getElementById('wDuration').value) || 1);
+    state.wizard.matchBuffer = Math.max(0, Number(document.getElementById('wBuffer').value) || 0);
+    state.wizard.scheduleCourts = document.getElementById('wScheduleCourts').checked;
+    state.wizard.modernDivisionPlayers = null; // reset distribution
+    renderCreateLeague();
+  }
+
+  document.getElementById('wApply').addEventListener('click', applyModernSettings);
+}
+
+async function renderStep3Traditional() {
   const n = state.wizard.rankedPlayers.length;
   const { numTeams, numRounds, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
   const configs = await window.api.getValidConfigs(n);
@@ -2253,9 +2458,16 @@ function nearestConfigWarning(n, configs, mode, inputVal) {
 
 // Step 4 — Blackout Dates
 function renderStep4() {
-  const { blackoutDates, startDate, numTeams, numRounds } = state.wizard;
-  const baseWeeks = numTeams % 2 === 0 ? numTeams - 1 : numTeams;
-  const totalWeeks = baseWeeks * numRounds;
+  const { blackoutDates, startDate, numTeams, numRounds, setupType, modernNumDivisions, rankedPlayers } = state.wizard;
+  let totalWeeks;
+  if (setupType === 'modern') {
+    const maxDivSize = Math.ceil(rankedPlayers.length / modernNumDivisions);
+    const singleRound = maxDivSize % 2 === 0 ? maxDivSize - 1 : maxDivSize;
+    totalWeeks = singleRound * numRounds;
+  } else {
+    const baseWeeks = numTeams % 2 === 0 ? numTeams - 1 : numTeams;
+    totalWeeks = baseWeeks * numRounds;
+  }
 
   document.getElementById('wizardCard').innerHTML = `
     <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">Blackout Dates</h3>
@@ -2314,6 +2526,202 @@ function renderStep4() {
 
 // Step 5 — Preview & Confirm
 function renderStep5() {
+  if (state.wizard.setupType === 'modern') return renderStep5Modern();
+  return renderStep5Traditional();
+}
+
+function distributePlayersEvenly(players, numDivisions) {
+  const n = players.length;
+  const divs = [];
+  let start = 0;
+  for (let i = 0; i < numDivisions; i++) {
+    const size = Math.floor(n / numDivisions) + (i < n % numDivisions ? 1 : 0);
+    divs.push(players.slice(start, start + size));
+    start += size;
+  }
+  return divs;
+}
+
+function previewModernRoundRobin(players) {
+  const list = [...players];
+  if (list.length % 2 === 1) list.push(null);
+  const numRounds = list.length - 1;
+  const half = list.length / 2;
+  const fixed = list[0];
+  let rotating = list.slice(1);
+  const rounds = [];
+  for (let r = 0; r < numRounds; r++) {
+    const current = [fixed, ...rotating];
+    const matches = [], byes = [];
+    for (let i = 0; i < half; i++) {
+      const p1 = current[i], p2 = current[current.length - 1 - i];
+      if (!p1) byes.push(p2);
+      else if (!p2) byes.push(p1);
+      else matches.push([p1, p2]);
+    }
+    rounds.push({ matches, byes });
+    rotating = [rotating[rotating.length - 1], ...rotating.slice(0, -1)];
+  }
+  return rounds;
+}
+
+function renderStep5Modern() {
+  const { leagueName, startDate, rankedPlayers, modernNumDivisions, numRounds, blackoutDates } = state.wizard;
+
+  // Initialize or re-initialize division players if needed
+  if (!state.wizard.modernDivisionPlayers ||
+      state.wizard.modernDivisionPlayers.length !== modernNumDivisions ||
+      state.wizard.modernDivisionPlayers.flat().length !== rankedPlayers.length) {
+    state.wizard.modernDivisionPlayers = distributePlayersEvenly(rankedPlayers, modernNumDivisions);
+  }
+  const divPlayers = state.wizard.modernDivisionPlayers;
+
+  // Compute actual total weeks from division sizes
+  const divRounds = divPlayers.map((div) => {
+    const oneRound = previewModernRoundRobin(div);
+    const all = [];
+    for (let rep = 0; rep < numRounds; rep++) all.push(...oneRound);
+    return all;
+  });
+  const totalWeeks = Math.max(...divRounds.map((d) => d.length), 0);
+
+  // Assign dates skipping blackouts
+  const blackoutSet = new Set(blackoutDates);
+  const weekDates = [];
+  let cur = startDate;
+  for (let i = 0; i < totalWeeks; i++) {
+    while (blackoutSet.has(cur)) cur = addDaysPreview(cur, 7);
+    weekDates.push(cur);
+    cur = addDaysPreview(cur, 7);
+  }
+
+  const previewCount = Math.min(3, totalWeeks);
+  const blackoutNote = blackoutDates.length > 0
+    ? ` (${blackoutDates.length} blackout date${blackoutDates.length !== 1 ? 's' : ''} skipped)` : '';
+
+  const weeksHTML = Array.from({ length: previewCount }, (_, w) => {
+    const dateStr = new Date(weekDates[w] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const divsHTML = divRounds.map((rounds, dIdx) => {
+      if (w >= rounds.length) return '';
+      const round = rounds[w];
+      const matchLines = round.matches.map(([p1, p2]) =>
+        `<div style="font-size:12px;padding:2px 0">${esc(p1.name)} vs ${esc(p2.name)}</div>`
+      ).join('');
+      const byeLines = round.byes.length
+        ? `<div style="font-size:12px;color:var(--text-muted);padding:2px 0">Bye: ${round.byes.map((p) => esc(p.name)).join(', ')}</div>` : '';
+      return `<div style="margin-bottom:6px"><span style="font-size:11px;font-weight:700;color:var(--text-muted)">DIV ${dIdx + 1}</span>${matchLines}${byeLines}</div>`;
+    }).join('');
+    return `<div style="margin-bottom:14px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:6px">Week ${w + 1}: ${dateStr}</div>
+      ${divsHTML}
+    </div>`;
+  }).join('');
+
+  const rostersHTML = divPlayers.map((div, i) =>
+    `<div style="margin-bottom:6px"><strong>Division ${i + 1}</strong> (${div.length}): ${div.map((p) => esc(p.name)).join(', ')}</div>`
+  ).join('');
+
+  document.getElementById('wizardCard').innerHTML = `
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">Preview &amp; Confirm</h3>
+
+    <div class="info-banner">
+      <strong>${esc(leagueName)}</strong> &mdash; starts ${formatDate(startDate)} &mdash;
+      ${modernNumDivisions} division${modernNumDivisions !== 1 ? 's' : ''} &mdash; ${rankedPlayers.length} players &mdash; ${totalWeeks} weeks${blackoutNote}
+    </div>
+
+    <div class="preview-grid">
+      <div class="preview-section">
+        <h4 style="display:flex;align-items:center;justify-content:space-between">
+          Division Rosters
+          <button class="btn btn-outline btn-sm" id="btnEditDivisions">Edit Divisions</button>
+        </h4>
+        <div style="font-size:13px">${rostersHTML}</div>
+      </div>
+      <div class="preview-section">
+        <h4>Schedule Preview (first ${previewCount} week${previewCount !== 1 ? 's' : ''})</h4>
+        ${weeksHTML}
+        ${totalWeeks > previewCount ? `<p class="text-muted" style="font-size:12px;margin-top:4px">+ ${totalWeeks - previewCount} more weeks…</p>` : ''}
+      </div>
+    </div>
+
+    <div id="wError" class="form-error"></div>
+    <div class="wizard-footer">
+      <button class="btn btn-outline" id="wBack">&larr; Back</button>
+      <button class="btn btn-success btn-lg" id="wCreate">Create League</button>
+    </div>`;
+
+  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 4; renderCreateLeague(); });
+  document.getElementById('wCreate').addEventListener('click', submitCreateLeague);
+  document.getElementById('btnEditDivisions').addEventListener('click', openEditDivisionsModal);
+}
+
+function openEditDivisionsModal() {
+  let workingDivs = state.wizard.modernDivisionPlayers.map((d) => [...d]);
+  let dragSource = null;
+
+  modal.open('Edit Divisions', `
+    <p class="text-muted" style="font-size:13px;margin-bottom:16px">
+      Drag players between divisions to reassign them. Each division needs at least 2 players.
+    </p>
+    <div id="edColumns" class="ed-columns"></div>
+    <div id="edError" class="form-error" style="margin-top:8px"></div>
+    <div class="form-actions" style="margin-top:20px">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit">Save</button>
+    </div>`, { wide: true });
+
+  function renderColumns() {
+    document.getElementById('edColumns').innerHTML = workingDivs.map((div, dIdx) => `
+      <div class="ed-column" data-div="${dIdx}">
+        <div class="ed-column-title">Division ${dIdx + 1} <span class="ed-count">(${div.length})</span></div>
+        ${div.map((p, pIdx) => `
+          <div class="ed-player" draggable="true" data-div="${dIdx}" data-idx="${pIdx}">
+            ${esc(p.name)}
+          </div>`).join('')}
+      </div>`).join('');
+
+    document.getElementById('edColumns').querySelectorAll('.ed-player').forEach((el) => {
+      el.addEventListener('dragstart', (e) => {
+        dragSource = { divIdx: Number(el.dataset.div), playerIdx: Number(el.dataset.idx) };
+        el.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+    });
+
+    document.getElementById('edColumns').querySelectorAll('.ed-column').forEach((col) => {
+      col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drag-over'); });
+      col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+      col.addEventListener('drop', (e) => {
+        e.preventDefault();
+        col.classList.remove('drag-over');
+        if (!dragSource) return;
+        const targetDiv = Number(col.dataset.div);
+        if (targetDiv === dragSource.divIdx) { dragSource = null; return; }
+        const [player] = workingDivs[dragSource.divIdx].splice(dragSource.playerIdx, 1);
+        workingDivs[targetDiv].push(player);
+        dragSource = null;
+        renderColumns();
+      });
+    });
+  }
+
+  renderColumns();
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSubmit').addEventListener('click', () => {
+    const invalid = workingDivs.find((d) => d.length < 2);
+    if (invalid) {
+      document.getElementById('edError').textContent = 'Each division must have at least 2 players.';
+      return;
+    }
+    state.wizard.modernDivisionPlayers = workingDivs;
+    modal.close();
+    renderStep5();
+  });
+}
+
+function renderStep5Traditional() {
   const { leagueName, startDate, rankedPlayers, numTeams, numDivisions, numRounds, blackoutDates } = state.wizard;
   const LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -2558,23 +2966,27 @@ async function submitCreateLeague() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Creating…';
 
-  const { leagueName, startDate, rankedPlayers, numTeams, numDivisions, numRounds, blackoutDates, teamNames,
+  const { leagueName, startDate, setupType, numRounds, blackoutDates,
           matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
-  const payload = {
-    name: leagueName,
-    startDate,
-    numTeams,
-    numDivisions,
-    numRounds,
-    blackoutDates,
-    teamNames,
-    matchStartTime,
-    numCourts,
-    matchDuration,
-    matchBuffer,
-    scheduleCourts,
-    rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
-  };
+
+  let payload;
+  if (setupType === 'modern') {
+    payload = {
+      name: leagueName, startDate, setup_type: 'modern',
+      numRounds, blackoutDates, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts,
+      divisions: state.wizard.modernDivisionPlayers.map((divPlayers, dIdx) =>
+        divPlayers.map((p, pIdx) => ({ playerId: p.id, rank: dIdx * 1000 + pIdx + 1 }))
+      ),
+    };
+  } else {
+    const { rankedPlayers, numTeams, numDivisions, teamNames } = state.wizard;
+    payload = {
+      name: leagueName, startDate, setup_type: 'traditional',
+      numTeams, numDivisions, numRounds, blackoutDates, teamNames,
+      matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts,
+      rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
+    };
+  }
 
   try {
     const leagueId = await window.api.createLeague(payload);

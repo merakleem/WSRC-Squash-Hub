@@ -9,13 +9,13 @@ async function getLeagueById(id) {
   return get('SELECT * FROM leagues WHERE id = ?', [id]);
 }
 
-async function createLeagueRecord({ name, startDate, numTeams, numDivisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+async function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_type = 'traditional', numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
   const publicToken = crypto.randomBytes(2).toString('hex');
   const result = await run(
-    `INSERT INTO leagues (name, start_date, num_teams, num_divisions, num_rounds, blackout_dates,
+    `INSERT INTO leagues (name, start_date, num_teams, num_divisions, setup_type, num_rounds, blackout_dates,
        match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [name, startDate, numTeams, numDivisions, numRounds, JSON.stringify(blackoutDates),
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name, startDate, numTeams, numDivisions, setup_type, numRounds, JSON.stringify(blackoutDates),
      matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken]
   );
   return result.lastID;
@@ -45,9 +45,9 @@ async function getLeaguePlayers(leagueId) {
             t.name AS team_name, t.team_order,
             d.name AS division_name, d.level AS division_level
      FROM league_players lp
-     JOIN players p ON lp.player_id = p.id
-     JOIN teams t   ON lp.team_id = t.id
-     JOIN divisions d ON lp.division_id = d.id
+     JOIN players p      ON lp.player_id = p.id
+     LEFT JOIN teams t   ON lp.team_id = t.id
+     JOIN divisions d    ON lp.division_id = d.id
      WHERE lp.league_id = ?
      ORDER BY lp.skill_rank ASC`,
     [leagueId]
@@ -66,12 +66,28 @@ async function getMatchups(weekId) {
     `SELECT tm.*,
             t1.name AS team1_name,
             t2.name AS team2_name,
-            tb.name AS bye_team_name
+            tb.name AS bye_team_name,
+            d.name  AS division_name,
+            d.level AS division_level
      FROM team_matchups tm
      LEFT JOIN teams t1 ON tm.team1_id = t1.id
      LEFT JOIN teams t2 ON tm.team2_id = t2.id
      LEFT JOIN teams tb ON tm.bye_team_id = tb.id
-     WHERE tm.week_id = ?`,
+     LEFT JOIN divisions d ON tm.division_id = d.id
+     WHERE tm.week_id = ?
+     ORDER BY d.level ASC`,
+    [weekId]
+  );
+}
+
+async function getWeekByes(weekId) {
+  return all(
+    `SELECT wb.*, p.name AS player_name, d.name AS division_name, d.level AS division_level
+     FROM week_byes wb
+     JOIN players p ON wb.player_id = p.id
+     JOIN divisions d ON wb.division_id = d.id
+     WHERE wb.week_id = ?
+     ORDER BY d.level ASC`,
     [weekId]
   );
 }
@@ -168,4 +184,5 @@ module.exports = {
   skipMatch,
   unskipMatch,
   setSubForRemaining,
+  getWeekByes,
 };

@@ -330,33 +330,53 @@ function buildPublicPage() {
     }
 
     function render(league) {
+      var isModern = league.setup_type === 'modern';
       var playerDiv = {};
       (league.players||[]).forEach(function(p) {
         playerDiv[p.player_id] = { name: p.division_name, level: p.division_level };
       });
 
-      var rostersHTML = (league.teams||[]).map(function(team) {
-        var members = (league.players||[])
-          .filter(function(p){ return p.team_id === team.id; })
-          .sort(function(a,b){ return a.division_level - b.division_level; });
-        var rows = members.map(function(m) {
-          return '<div class="roster-row">'
-            +'<span class="div-chip">'+esc(m.division_name.replace(/^Division\s*/i,'D'))+'</span>'
-            +'<span>'+esc(m.player_name)+'</span>'
+      var rostersHTML;
+      if (isModern) {
+        rostersHTML = (league.divisions||[]).map(function(div) {
+          var members = (league.players||[])
+            .filter(function(p){ return p.division_id === div.id; })
+            .sort(function(a,b){ return a.skill_rank - b.skill_rank; });
+          var rows = members.map(function(m) {
+            return '<div class="roster-row"><span>'+esc(m.player_name)+'</span></div>';
+          }).join('');
+          return '<div class="card">'
+            +'<div class="card-header" onclick="toggleCard(this)">'
+            +'<div class="card-title">'+esc(div.name)+'</div>'
+            +'<span class="card-toggle">+</span>'
+            +'</div>'
+            +'<div class="card-body">'+rows+'</div>'
             +'</div>';
         }).join('');
-        return '<div class="card">'
-          +'<div class="card-header" onclick="toggleCard(this)">'
-          +'<div class="card-title">'+esc(team.name)+'</div>'
-          +'<span class="card-toggle">+</span>'
-          +'</div>'
-          +'<div class="card-body">'+rows+'</div>'
-          +'</div>';
-      }).join('');
+      } else {
+        rostersHTML = (league.teams||[]).map(function(team) {
+          var members = (league.players||[])
+            .filter(function(p){ return p.team_id === team.id; })
+            .sort(function(a,b){ return a.division_level - b.division_level; });
+          var rows = members.map(function(m) {
+            return '<div class="roster-row">'
+              +'<span class="div-chip">'+esc(m.division_name.replace(/^Division\s*/i,'D'))+'</span>'
+              +'<span>'+esc(m.player_name)+'</span>'
+              +'</div>';
+          }).join('');
+          return '<div class="card">'
+            +'<div class="card-header" onclick="toggleCard(this)">'
+            +'<div class="card-title">'+esc(team.name)+'</div>'
+            +'<span class="card-toggle">+</span>'
+            +'</div>'
+            +'<div class="card-body">'+rows+'</div>'
+            +'</div>';
+        }).join('');
+      }
 
       var scheduleHTML = (league.weeks||[]).map(function(week) {
         var muHTML = week.matchups.map(function(mu) {
-          if (mu.bye_team_id) {
+          if (!isModern && mu.bye_team_id) {
             return '<div class="bye-label">'+esc(mu.bye_team_name)+' \u2014 Bye week</div>';
           }
           var matchesHTML = (mu.matches||[]).map(function(m) {
@@ -374,7 +394,7 @@ function buildPublicPage() {
               meta = fmtTime(m.match_time);
             }
             return '<div class="match-row">'
-              +'<span class="match-div">'+esc((div.name||'').replace(/^Division\s*/i,'D'))+'</span>'
+              +(!isModern ? '<span class="match-div">'+esc((div.name||'').replace(/^Division\s*/i,'D'))+'</span>' : '')
               +'<div class="match-players">'
               +'<span class="'+(p1win?'match-win':'')+'">'+esc(p1)+'</span>'
               +' <span class="match-vs">vs</span> '
@@ -386,9 +406,21 @@ function buildPublicPage() {
               +'</div>'
               +'</div>';
           }).join('');
+          var muTitle = isModern
+            ? esc(mu.division_name||'')
+            : esc(mu.team1_name)+' vs '+esc(mu.team2_name);
+          var byesHTML = '';
+          if (isModern) {
+            var divByes = (week.byes||[]).filter(function(b){ return b.division_id === mu.division_id; });
+            if (divByes.length) {
+              byesHTML = '<div class="bye-label" style="font-size:12px;padding:6px 0 2px">Bye: '
+                +divByes.map(function(b){ return esc(b.player_name); }).join(', ')+'</div>';
+            }
+          }
           return '<div class="matchup-block">'
-            +'<div class="matchup-title">'+esc(mu.team1_name)+' vs '+esc(mu.team2_name)+'</div>'
+            +'<div class="matchup-title">'+muTitle+'</div>'
             +matchesHTML
+            +byesHTML
             +'</div>';
         }).join('');
         return '<div class="card">'

@@ -1348,6 +1348,86 @@ tbody td {
   margin-bottom: 20px;
 }
 
+/* ===== SETUP TYPE CARDS (Step 1) ===== */
+.setup-type-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.setup-type-card {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  background: var(--surface);
+}
+.setup-type-card:hover { border-color: var(--accent); }
+.setup-type-card.selected {
+  border-color: var(--accent);
+  background: rgba(58,77,181,0.05);
+}
+.setup-type-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+.setup-type-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ===== DIVISION EDITOR (Step 5 Modern) ===== */
+.ed-columns {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.ed-column {
+  flex: 1;
+  min-width: 140px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--surface-2);
+  transition: border-color 0.15s, background 0.15s;
+}
+.ed-column.drag-over {
+  border-color: var(--accent);
+  background: rgba(58,77,181,0.06);
+}
+.ed-column-title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.ed-count { font-weight: 400; color: var(--text-muted); }
+.ed-player {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: grab;
+  user-select: none;
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+.ed-player:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.ed-player.dragging { opacity: 0.4; cursor: grabbing; }
+
+/* ===== BYE ROW (Modern schedule) ===== */
+.matchup-byes {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 0 2px;
+}
+
 /* ===== MOBILE ===== */
 @media (max-width: 768px) {
   :root { --topbar-h: 56px; }

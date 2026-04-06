@@ -30,9 +30,37 @@ function initDB(dbPath) {
     `ALTER TABLE leagues ADD COLUMN public_token TEXT`,
     `ALTER TABLE matches ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS user_accounts (player_id INTEGER PRIMARY KEY, password_hash TEXT, invite_token TEXT, invite_expires TEXT, reset_token TEXT, reset_expires TEXT, FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE)`,
+    `ALTER TABLE leagues ADD COLUMN setup_type TEXT NOT NULL DEFAULT 'traditional'`,
+    `ALTER TABLE team_matchups ADD COLUMN division_id INTEGER`,
+    `CREATE TABLE IF NOT EXISTS week_byes (id INTEGER PRIMARY KEY AUTOINCREMENT, week_id INTEGER NOT NULL, player_id INTEGER NOT NULL, division_id INTEGER NOT NULL, FOREIGN KEY (week_id) REFERENCES weeks(id) ON DELETE CASCADE, FOREIGN KEY (player_id) REFERENCES players(id), FOREIGN KEY (division_id) REFERENCES divisions(id))`,
   ];
   for (const sql of migrations) {
     try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }
+  }
+
+  // Make league_players.team_id nullable for modern leagues (SQLite requires table recreation)
+  const lpCols = db.prepare(`PRAGMA table_info(league_players)`).all();
+  const teamIdCol = lpCols.find((c) => c.name === 'team_id');
+  if (teamIdCol && teamIdCol.notnull === 1) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE league_players_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        league_id INTEGER NOT NULL,
+        player_id INTEGER NOT NULL,
+        skill_rank INTEGER NOT NULL,
+        team_id INTEGER,
+        division_id INTEGER NOT NULL,
+        FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE,
+        FOREIGN KEY (player_id) REFERENCES players(id),
+        FOREIGN KEY (team_id) REFERENCES teams(id),
+        FOREIGN KEY (division_id) REFERENCES divisions(id)
+      );
+      INSERT INTO league_players_new SELECT * FROM league_players;
+      DROP TABLE league_players;
+      ALTER TABLE league_players_new RENAME TO league_players;
+    `);
+    db.pragma('foreign_keys = ON');
   }
 
   // Backfill existing players: mark as WSRC members with rating 2.50

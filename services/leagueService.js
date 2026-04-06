@@ -1,6 +1,6 @@
 const { run, get } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
-const { generateRoundRobin, addDays } = require('../utils/helpers');
+const { generateRoundRobin, generateModernRoundRobin, addDays } = require('../utils/helpers');
 
 /**
  * Create a full league: teams, divisions, player assignments, and schedule.
@@ -21,7 +21,92 @@ function addMinutes(timeStr, minutes) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-async function createLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+async function createModernLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+  const numDivisions = divisions.length;
+  const leagueId = await leagueModel.createLeagueRecord({
+    name, startDate, numTeams: 0, numDivisions, setup_type: 'modern',
+    numRounds, blackoutDates, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts,
+  });
+
+  // Create divisions
+  const divisionIds = [];
+  for (let i = 0; i < numDivisions; i++) {
+    const result = await run('INSERT INTO divisions (league_id, name, level) VALUES (?, ?, ?)', [leagueId, `Division ${i + 1}`, i + 1]);
+    divisionIds.push(result.lastID);
+  }
+
+  // Assign players to divisions (no team_id)
+  for (let d = 0; d < divisions.length; d++) {
+    for (const { playerId, rank } of divisions[d]) {
+      await run(
+        'INSERT INTO league_players (league_id, player_id, skill_rank, team_id, division_id) VALUES (?, ?, ?, NULL, ?)',
+        [leagueId, playerId, rank, divisionIds[d]]
+      );
+    }
+  }
+
+  // Generate per-division round-robin schedules
+  const divSchedules = divisions.map((divPlayers, d) => {
+    const playerIds = divPlayers.map((p) => p.playerId);
+    const oneRound = generateModernRoundRobin(playerIds);
+    const allRounds = [];
+    for (let rep = 0; rep < numRounds; rep++) allRounds.push(...oneRound);
+    return { divisionId: divisionIds[d], rounds: allRounds };
+  });
+
+  const totalWeeks = Math.max(...divSchedules.map((d) => d.rounds.length));
+  const blackoutSet = new Set(blackoutDates);
+  const slotMinutes = matchDuration + matchBuffer;
+  let currentDate = startDate;
+
+  for (let w = 0; w < totalWeeks; w++) {
+    while (blackoutSet.has(currentDate)) currentDate = addDays(currentDate, 7);
+    const weekDate = currentDate;
+    currentDate = addDays(currentDate, 7);
+
+    const weekResult = await run('INSERT INTO weeks (league_id, week_number, date) VALUES (?, ?, ?)', [leagueId, w + 1, weekDate]);
+    const weekId = weekResult.lastID;
+
+    const weekMatches = [];
+
+    for (const { divisionId, rounds } of divSchedules) {
+      if (w >= rounds.length) continue;
+      const round = rounds[w];
+
+      const matchupResult = await run('INSERT INTO team_matchups (week_id, division_id) VALUES (?, ?)', [weekId, divisionId]);
+      const matchupId = matchupResult.lastID;
+
+      for (const playerId of round.byes) {
+        await run('INSERT INTO week_byes (week_id, player_id, division_id) VALUES (?, ?, ?)', [weekId, playerId, divisionId]);
+      }
+      for (const [p1Id, p2Id] of round.matches) {
+        weekMatches.push({ matchupId, divId: divisionId, p1Id, p2Id });
+      }
+    }
+
+    // Shuffle then assign courts/times
+    for (let i = weekMatches.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
+    }
+    for (let i = 0; i < weekMatches.length; i++) {
+      const time = addMinutes(matchStartTime, Math.floor(i / numCourts) * slotMinutes);
+      await run(
+        'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
+        [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, (i % numCourts) + 1, time]
+      );
+    }
+  }
+
+  return leagueId;
+}
+
+async function createLeague(data) {
+  if (data.setup_type === 'modern') return createModernLeague(data);
+  return createTraditionalLeague(data);
+}
+
+async function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
   const total = numTeams * numDivisions;
   if (total !== rankedPlayers.length) {
     throw new Error(
@@ -156,6 +241,8 @@ async function getFullLeague(leagueId) {
   const league = await leagueModel.getLeagueById(leagueId);
   if (!league) return null;
 
+  const isModern = league.setup_type === 'modern';
+
   const [teams, divisions, players, weeks] = await Promise.all([
     leagueModel.getTeams(leagueId),
     leagueModel.getDivisions(leagueId),
@@ -166,6 +253,7 @@ async function getFullLeague(leagueId) {
   const weeksWithData = await Promise.all(
     weeks.map(async (week) => {
       const matchups = await leagueModel.getMatchups(week.id);
+      const byes = isModern ? await leagueModel.getWeekByes(week.id) : [];
       const matchupsWithMatches = await Promise.all(
         matchups.map(async (matchup) => {
           const matches = matchup.bye_team_id
@@ -174,7 +262,7 @@ async function getFullLeague(leagueId) {
           return { ...matchup, matches };
         })
       );
-      return { ...week, matchups: matchupsWithMatches };
+      return { ...week, matchups: matchupsWithMatches, byes };
     })
   );
 
