@@ -1562,15 +1562,15 @@ function printSchedule(league) {
     .sched-week-date { font-size: 9pt; color: #555; }
 
     .sched-divs { padding-left: 2mm; }
-    .sched-div { margin-bottom: 5px; }
-    .sched-div-name { font-size: 8.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #222; margin-bottom: 3px; }
+    .sched-div { margin-bottom: 9px; }
+    .sched-div-name { font-size: 8.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #222; margin-bottom: 4px; }
 
-    .sched-match { font-size: 9.5pt; padding: 2.5px 0; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; border-bottom: 0.5px solid #eee; }
+    .sched-match { font-size: 9.5pt; padding: 4px 0; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; border-bottom: 0.5px solid #eee; }
     .sched-match:last-of-type { border-bottom: none; }
     .sched-vs { color: #888; font-size: 8.5pt; }
     .sched-score { font-weight: 700; font-size: 9pt; margin-left: 2px; }
     .sched-meta { font-size: 8pt; color: #777; }
-    .sched-bye { font-size: 8.5pt; color: #777; font-style: italic; padding: 3px 0 1px; }
+    .sched-bye { font-size: 8.5pt; color: #777; font-style: italic; padding: 4px 0 1px; }
 
     @page { size: A4 portrait; margin: 14mm 12mm; }
     @media print {
