@@ -230,7 +230,7 @@ async function renderDashboard() {
   const totalPlayers = ladderVisible.length;
 
   const nextMatch = upcoming[0] || null;
-  const restUpcoming = upcoming.slice(1, 5);
+  const restUpcoming = upcoming.slice(0, 5);
 
   function fmtMatchDate(d) {
     if (!d) return '';
@@ -1506,7 +1506,7 @@ function printSchedule(league) {
         const p2 = m.sub2_name || m.player2_name;
         const score = (m.player1_score != null && m.player2_score != null)
           ? `<span class="sched-score">${m.player1_score}–${m.player2_score}</span>` : '';
-        const court = m.court_number ? `<span class="sched-meta">Ct ${m.court_number}</span>` : '';
+        const court = league.schedule_courts && m.court_number ? `<span class="sched-meta">Ct ${m.court_number}</span>` : '';
         const time = m.match_time ? `<span class="sched-meta">${m.match_time}</span>` : '';
         return `<div class="sched-match">${esc(p1)} <span class="sched-vs">vs</span> ${esc(p2)}${score}${court}${time}</div>`;
       }).join('');
