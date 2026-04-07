@@ -607,8 +607,6 @@ app.post('/api/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
 
   if (recipients.length === 0) return res.json({ sent: 0 });
 
-  const league = await leagueModel.getLeagueById(Number(req.params.id));
-  const leagueName = league ? league.name : 'League';
 
   let sent = 0;
   for (const player of recipients) {
@@ -625,7 +623,7 @@ app.post('/api/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
         from: `WSRC Squash Hub <no-reply@playwsrc.ca>`,
         to: [player.player_email],
         subject,
-        html: `<p>Hi ${player.player_name},</p><br><p>${htmlBody}</p><br><p style="color:#888;font-size:12px">Sent from WSRC Squash Hub — ${leagueName}</p>`,
+        html: `<p>${htmlBody}</p>`,
         ...(attachments && attachments.length ? { attachments } : {}),
       }),
     });
