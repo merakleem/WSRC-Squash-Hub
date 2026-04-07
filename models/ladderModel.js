@@ -16,7 +16,7 @@ async function getLadder() {
     await appendToLadder(p.id);
   }
   return all(`
-    SELECT l.position, p.id, p.name, p.email, p.phone, p.wsrc_member, p.club_locker_rating
+    SELECT l.position, p.id, p.name, p.email, p.phone, p.wsrc_member, p.club_locker_rating, p.exclude_from_ladder
     FROM ladder l
     JOIN players p ON l.player_id = p.id
     ORDER BY l.position ASC

@@ -16,20 +16,20 @@ function parseRating(val) {
   return Math.round(n * 100) / 100;
 }
 
-async function addPlayer({ name, email, phone, wsrc_member, club_locker_rating, member_number }) {
+async function addPlayer({ name, email, phone, wsrc_member, club_locker_rating, member_number, exclude_from_ladder }) {
   const rating = parseRating(club_locker_rating);
   const result = await run(
-    'INSERT INTO players (name, email, phone, wsrc_member, club_locker_rating, member_number) VALUES (?, ?, ?, ?, ?, ?)',
-    [name, email || null, phone || null, wsrc_member ? 1 : 0, rating, member_number || null]
+    'INSERT INTO players (name, email, phone, wsrc_member, club_locker_rating, member_number, exclude_from_ladder) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [name, email || null, phone || null, wsrc_member ? 1 : 0, rating, member_number || null, exclude_from_ladder ? 1 : 0]
   );
   return getPlayerById(result.lastID);
 }
 
-async function updatePlayer({ id, name, email, phone, wsrc_member, club_locker_rating, member_number }) {
+async function updatePlayer({ id, name, email, phone, wsrc_member, club_locker_rating, member_number, exclude_from_ladder }) {
   const rating = parseRating(club_locker_rating);
   await run(
-    'UPDATE players SET name = ?, email = ?, phone = ?, wsrc_member = ?, club_locker_rating = ?, member_number = ? WHERE id = ?',
-    [name, email || null, phone || null, wsrc_member ? 1 : 0, rating, member_number || null, id]
+    'UPDATE players SET name = ?, email = ?, phone = ?, wsrc_member = ?, club_locker_rating = ?, member_number = ?, exclude_from_ladder = ? WHERE id = ?',
+    [name, email || null, phone || null, wsrc_member ? 1 : 0, rating, member_number || null, exclude_from_ladder ? 1 : 0, id]
   );
   return getPlayerById(id);
 }

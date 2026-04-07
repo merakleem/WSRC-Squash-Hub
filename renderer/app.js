@@ -224,10 +224,10 @@ async function renderDashboard() {
   ]);
 
   const upcoming = playerData.upcoming || [];
-  const membersOnly = ladder.filter((p) => p.wsrc_member);
-  const ladderPos = membersOnly.findIndex((p) => p.id === playerId);
+  const ladderVisible = ladder.filter((p) => !p.exclude_from_ladder);
+  const ladderPos = ladderVisible.findIndex((p) => p.id === playerId);
   const rank = ladderPos >= 0 ? ladderPos + 1 : null;
-  const totalPlayers = membersOnly.length;
+  const totalPlayers = ladderVisible.length;
 
   const nextMatch = upcoming[0] || null;
   const restUpcoming = upcoming.slice(1, 5);
@@ -417,8 +417,8 @@ function renderPlayerTable(players) {
 }
 
 function playerFormHTML(player = {}) {
-  const isMember = player.id ? player.wsrc_member : true;
   const rating = player.club_locker_rating != null ? Number(player.club_locker_rating).toFixed(2) : '';
+  const excluded = player.id ? !!player.exclude_from_ladder : false;
   return `
     <div class="form-group">
       <label>Name *</label>
@@ -434,7 +434,7 @@ function playerFormHTML(player = {}) {
     </div>
     <div class="form-group">
       <label>Member Number <span class="form-hint">(used as login password)</span></label>
-      <input class="form-control" id="fMemberNumber" value="${esc(player.member_number || '')}" placeholder="Member number" ${!isMember ? 'disabled' : ''}>
+      <input class="form-control" id="fMemberNumber" value="${esc(player.member_number || '')}" placeholder="Member number">
     </div>
     <div class="form-group">
       <label>Club Locker Rating <span class="form-hint">(1.0 – 7.0, optional)</span></label>
@@ -442,8 +442,8 @@ function playerFormHTML(player = {}) {
     </div>
     <div class="form-group form-group-check">
       <label class="check-label">
-        <input type="checkbox" id="fMember" ${isMember ? 'checked' : ''}>
-        WSRC Member
+        <input type="checkbox" id="fExclude" ${excluded ? 'checked' : ''}>
+        Exclude from ladder
       </label>
     </div>
     <div id="fError" class="form-error"></div>
@@ -453,18 +453,8 @@ function playerFormHTML(player = {}) {
     </div>`;
 }
 
-function attachMemberNumberToggle() {
-  const cb = document.getElementById('fMember');
-  const inp = document.getElementById('fMemberNumber');
-  cb.addEventListener('change', () => {
-    inp.disabled = !cb.checked;
-    if (!cb.checked) inp.value = '';
-  });
-}
-
 function openAddPlayerModal() {
   modal.open('Add Player', playerFormHTML());
-  attachMemberNumberToggle();
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const name = document.getElementById('fName').value.trim();
@@ -472,10 +462,10 @@ function openAddPlayerModal() {
     const phone = document.getElementById('fPhone').value.trim();
     const member_number = document.getElementById('fMemberNumber').value.trim();
     const club_locker_rating = document.getElementById('fRating').value.trim();
-    const wsrc_member = document.getElementById('fMember').checked;
+    const exclude_from_ladder = document.getElementById('fExclude').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.addPlayer({ name, email, phone, member_number, wsrc_member, club_locker_rating });
+      await window.api.addPlayer({ name, email, phone, member_number, wsrc_member: 1, club_locker_rating, exclude_from_ladder });
       modal.close();
       toast('Player added', 'success');
       state.players = await window.api.getPlayers();
@@ -488,7 +478,6 @@ function openAddPlayerModal() {
 
 function openEditPlayerModal(player) {
   modal.open('Edit Player', playerFormHTML(player));
-  attachMemberNumberToggle();
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const name = document.getElementById('fName').value.trim();
@@ -496,10 +485,10 @@ function openEditPlayerModal(player) {
     const phone = document.getElementById('fPhone').value.trim();
     const member_number = document.getElementById('fMemberNumber').value.trim();
     const club_locker_rating = document.getElementById('fRating').value.trim();
-    const wsrc_member = document.getElementById('fMember').checked;
+    const exclude_from_ladder = document.getElementById('fExclude').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.updatePlayer({ id: player.id, name, email, phone, member_number, wsrc_member, club_locker_rating });
+      await window.api.updatePlayer({ id: player.id, name, email, phone, member_number, wsrc_member: 1, club_locker_rating, exclude_from_ladder });
       modal.close();
       toast('Player updated', 'success');
       state.players = await window.api.getPlayers();
@@ -908,7 +897,7 @@ function renderPlayerProfile() {
 }
 
 // ===== LADDER PAGE =====
-async function renderLadder(showNonMembers = false) {
+async function renderLadder() {
   document.getElementById('pageTitle').textContent = 'Ladder';
   document.getElementById('topbarActions').innerHTML = '';
 
@@ -920,7 +909,9 @@ async function renderLadder(showNonMembers = false) {
 
   const content = document.getElementById('mainContent');
 
-  if (state.ladder.length === 0) {
+  const visible = state.ladder.filter((p) => !p.exclude_from_ladder);
+
+  if (visible.length === 0) {
     content.innerHTML = `
       <div class="table-card">
         <div class="empty-state">
@@ -931,8 +922,6 @@ async function renderLadder(showNonMembers = false) {
     return;
   }
 
-  const visible = showNonMembers ? state.ladder : state.ladder.filter((p) => p.wsrc_member);
-
   const adminMode = isAdmin();
 
   if (adminMode) {
@@ -940,24 +929,18 @@ async function renderLadder(showNonMembers = false) {
       <div class="table-card">
         <div class="table-toolbar">
           <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''} &mdash; drag rows or use arrows to reorder</span>
-          <label class="check-label check-label-inline">
-            <input type="checkbox" id="showNonMembers" ${showNonMembers ? 'checked' : ''}>
-            Show non-members
-          </label>
         </div>
         <div class="ladder-list" id="ladderList">
           ${visible.map((p, i) => {
             const rec = records[p.id] || { wins: 0, losses: 0 };
             const rating = p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : null;
-            const nonMemberBadge = !p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : '';
             const ratingBadge = rating ? `<span class="ladder-rating">${rating}</span>` : '';
             return `
-            <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" draggable="true" data-id="${p.id}" data-idx="${i}">
+            <div class="ladder-row" draggable="true" data-id="${p.id}" data-idx="${i}">
               <span class="ladder-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
               <span class="ladder-rank">${i + 1}</span>
               <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
               ${ratingBadge}
-              ${nonMemberBadge}
               <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
               <div class="ladder-controls">
                 <button class="rank-btn" data-action="ladder-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
@@ -970,52 +953,30 @@ async function renderLadder(showNonMembers = false) {
   } else {
     const top10 = visible.slice(0, 10);
     const rest  = visible.slice(10);
-    const rowHTML = (p, i) => {
+    const rowHTML = (p, i, topStyle) => {
       const rec = records[p.id] || { wins: 0, losses: 0 };
       return `
-      <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" data-id="${p.id}" data-idx="${i}">
-        <span class="ladder-rank ladder-rank-top10">${i + 1}</span>
+      <div class="ladder-row" data-id="${p.id}" data-idx="${i}">
+        <span class="ladder-rank${topStyle ? ' ladder-rank-top10' : ''}">${i + 1}</span>
         <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
-        ${!p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : ''}
-        <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
-      </div>`;
-    };
-    const restRowHTML = (p, i) => {
-      const rec = records[p.id] || { wins: 0, losses: 0 };
-      return `
-      <div class="ladder-row${!p.wsrc_member ? ' ladder-row-nonmember' : ''}" data-id="${p.id}" data-idx="${i}">
-        <span class="ladder-rank">${i + 1}</span>
-        <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
-        ${!p.wsrc_member ? `<span class="non-member-badge">Non-member</span>` : ''}
         <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
       </div>`;
     };
     content.innerHTML = `
-      <div class="table-toolbar" style="background:var(--surface);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:14px 18px;margin-bottom:12px">
-        <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''}</span>
-        <label class="check-label check-label-inline">
-          <input type="checkbox" id="showNonMembers" ${showNonMembers ? 'checked' : ''}>
-          Show non-members
-        </label>
-      </div>
       <div class="ladder-list ladder-list-readonly" id="ladderList">
         <div class="ladder-top10-section">
           <div class="ladder-top10-header">&#9733; Top 10</div>
-          ${top10.map((p, i) => rowHTML(p, i)).join('')}
+          ${top10.map((p, i) => rowHTML(p, i, true)).join('')}
         </div>
         ${rest.length > 0 ? `
         <div style="margin-top:10px">
           <div class="ladder-rest-section">
-            <div class="ladder-rest-header">All Members</div>
-            ${rest.map((p, i) => restRowHTML(p, i + 10)).join('')}
+            <div class="ladder-rest-header">All Players</div>
+            ${rest.map((p, i) => rowHTML(p, i + 10, false)).join('')}
           </div>
         </div>` : ''}
       </div>`;
   }
-
-  document.getElementById('showNonMembers').addEventListener('change', (e) => {
-    renderLadder(e.target.checked);
-  });
 
   // Arrow buttons + player profile links
   // data-idx is the index within `visible`; map back to state.ladder via player id
@@ -1159,7 +1120,9 @@ function leagueCardHTML(league) {
             <circle cx="9" cy="7" r="4"/>
             <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
           </svg>
-          ${league.num_teams} teams &times; ${league.num_divisions} divisions &mdash; ${league.num_teams * league.num_divisions} players
+          ${league.setup_type === 'modern'
+            ? `${league.num_divisions} Division${league.num_divisions !== 1 ? 's' : ''}`
+            : `${league.num_teams} teams &times; ${league.num_divisions} divisions &mdash; ${league.num_teams * league.num_divisions} players`}
         </div>
       </div>
       <div class="league-card-footer">
@@ -1503,6 +1466,135 @@ function openMessagePlayersModal(league) {
   });
 }
 
+// ===== PRINT SCHEDULE (Modern leagues) =====
+function printSchedule(league) {
+  const weeks = league.weeks || [];
+  const divisions = (league.divisions || []).slice().sort((a, b) => a.level - b.level);
+
+  // Build player name lookup
+  const playerName = {};
+  (league.players || []).forEach((p) => { playerName[p.player_id] = p.player_name; });
+
+  const fmtDate = (d) => {
+    if (!d) return '';
+    const [y, m, day] = d.split('-').map(Number);
+    return new Date(y, m - 1, day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+
+  const weeksHTML = weeks.map((week) => {
+    // Build a map of division_id -> { matches, byes }
+    const divData = {};
+    divisions.forEach((d) => { divData[d.id] = { name: d.name, matches: [], byes: [] }; });
+
+    (week.matchups || []).forEach((mu) => {
+      if (!mu.division_id || !divData[mu.division_id]) return;
+      (mu.matches || []).forEach((m) => {
+        if (m.skipped) return;
+        divData[mu.division_id].matches.push(m);
+      });
+    });
+    (week.byes || []).forEach((b) => {
+      if (divData[b.division_id]) divData[b.division_id].byes.push(b.player_name);
+    });
+
+    const divsHTML = divisions.map((div) => {
+      const { matches, byes } = divData[div.id];
+      if (matches.length === 0 && byes.length === 0) return '';
+
+      const matchRows = matches.map((m) => {
+        const p1 = m.sub1_name || m.player1_name;
+        const p2 = m.sub2_name || m.player2_name;
+        const score = (m.player1_score != null && m.player2_score != null)
+          ? `<span class="sched-score">${m.player1_score}–${m.player2_score}</span>` : '';
+        const court = m.court_number ? `<span class="sched-meta">Ct ${m.court_number}</span>` : '';
+        const time = m.match_time ? `<span class="sched-meta">${m.match_time}</span>` : '';
+        return `<div class="sched-match">${esc(p1)} <span class="sched-vs">vs</span> ${esc(p2)}${score}${court}${time}</div>`;
+      }).join('');
+
+      const byeRow = byes.length
+        ? `<div class="sched-bye">Bye: ${byes.map(esc).join(', ')}</div>` : '';
+
+      return `<div class="sched-div">
+        <div class="sched-div-name">${esc(div.name)}</div>
+        ${matchRows}${byeRow}
+      </div>`;
+    }).join('');
+
+    if (!divsHTML.trim()) return '';
+
+    return `<div class="sched-week">
+      <div class="sched-week-header">
+        <span class="sched-week-num">Week ${week.week_number}</span>
+        <span class="sched-week-date">${fmtDate(week.date)}</span>
+      </div>
+      <div class="sched-divs">${divsHTML}</div>
+    </div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Schedule — ${esc(league.name)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; color: #000; font-size: 10pt; }
+
+    .page-header { padding: 8mm 12mm 4mm; border-bottom: 2px solid #000; margin-bottom: 6mm; }
+    .page-title { font-size: 18pt; font-weight: 800; }
+    .page-sub { font-size: 10pt; color: #555; margin-top: 2px; }
+
+    .schedule { padding: 0 12mm 10mm; columns: 2; column-gap: 8mm; }
+
+    .sched-week {
+      break-inside: avoid;
+      margin-bottom: 6mm;
+    }
+    .sched-week-header {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      border-bottom: 1.5px solid #000;
+      padding-bottom: 2px;
+      margin-bottom: 3px;
+    }
+    .sched-week-num { font-size: 11pt; font-weight: 800; }
+    .sched-week-date { font-size: 9pt; color: #555; }
+
+    .sched-divs { padding-left: 2mm; }
+    .sched-div { margin-bottom: 5px; }
+    .sched-div-name { font-size: 8.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #222; margin-bottom: 3px; }
+
+    .sched-match { font-size: 9.5pt; padding: 2.5px 0; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; border-bottom: 0.5px solid #eee; }
+    .sched-match:last-of-type { border-bottom: none; }
+    .sched-vs { color: #888; font-size: 8.5pt; }
+    .sched-score { font-weight: 700; font-size: 9pt; margin-left: 2px; }
+    .sched-meta { font-size: 8pt; color: #777; }
+    .sched-bye { font-size: 8.5pt; color: #777; font-style: italic; padding: 3px 0 1px; }
+
+    @page { size: A4 portrait; margin: 14mm 12mm; }
+    @media print {
+      body { background: #fff; }
+      .page-header { padding: 0 0 4mm; }
+      .schedule { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <div class="page-title">${esc(league.name)}</div>
+    <div class="page-sub">Schedule</div>
+  </div>
+  <div class="schedule">${weeksHTML}</div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win2 = window.open(url, '_blank');
+  win2.addEventListener('load', () => { win2.print(); URL.revokeObjectURL(url); });
+}
+
 // ===== LEAGUE DETAIL =====
 function getOpenWeekIds() {
   return Array.from(document.querySelectorAll('.week-card.open'))
@@ -1535,6 +1627,7 @@ function renderLeagueDetail() {
       <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="print-boxes">Print Boxes</button>
+        ${league.setup_type === 'modern' ? `<button class="options-item" data-action="print-schedule">Print Schedule</button>` : ''}
         <button class="options-item" data-action="copy-link">Get Public Link</button>
         <button class="options-item" data-action="message-players">Message Players</button>
         <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
@@ -1551,6 +1644,9 @@ function renderLeagueDetail() {
       if (action === 'print-boxes') {
         document.getElementById('optionsDropdown').classList.remove('open');
         printBoxes(league);
+      } else if (action === 'print-schedule') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        printSchedule(league);
       } else if (action === 'copy-link') {
         document.getElementById('optionsDropdown').classList.remove('open');
         copyPublicLink(league);
@@ -1572,16 +1668,22 @@ function renderLeagueDetail() {
   const isModern = league.setup_type === 'modern';
   const numPlayers = isModern ? (league.players || []).length : league.num_teams * league.num_divisions;
 
+  const weeks = league.weeks || [];
+  const endDate = weeks.length > 0 ? weeks[weeks.length - 1].date : null;
+  const dateRange = endDate
+    ? `${formatShortDate(league.start_date)} – ${formatShortDate(endDate)}`
+    : formatShortDate(league.start_date);
+
   const statsHTML = isModern ? `
     <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
     <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
-    <div class="stat"><span class="stat-val">${league.weeks ? league.weeks.length : 0}</span><span class="stat-label">Weeks</span></div>
-    <div class="stat"><span class="stat-val">${formatShortDate(league.start_date)}</span><span class="stat-label">Start Date</span></div>` : `
+    <div class="stat"><span class="stat-val">${weeks.length}</span><span class="stat-label">Weeks</span></div>
+    <div class="stat"><span class="stat-val">${dateRange}</span><span class="stat-label">Dates</span></div>` : `
     <div class="stat"><span class="stat-val">${league.num_teams}</span><span class="stat-label">Teams</span></div>
     <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
     <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
-    <div class="stat"><span class="stat-val">${league.weeks ? league.weeks.length : 0}</span><span class="stat-label">Weeks</span></div>
-    <div class="stat"><span class="stat-val">${formatShortDate(league.start_date)}</span><span class="stat-label">Start Date</span></div>`;
+    <div class="stat"><span class="stat-val">${weeks.length}</span><span class="stat-label">Weeks</span></div>
+    <div class="stat"><span class="stat-val">${dateRange}</span><span class="stat-label">Dates</span></div>`;
 
   content.innerHTML = `
     <div class="league-header-card">

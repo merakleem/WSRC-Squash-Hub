@@ -31,6 +31,7 @@ function initDB(dbPath) {
     `ALTER TABLE matches ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS user_accounts (player_id INTEGER PRIMARY KEY, password_hash TEXT, invite_token TEXT, invite_expires TEXT, reset_token TEXT, reset_expires TEXT, FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE)`,
     `ALTER TABLE leagues ADD COLUMN setup_type TEXT NOT NULL DEFAULT 'traditional'`,
+    `ALTER TABLE players ADD COLUMN exclude_from_ladder INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE team_matchups ADD COLUMN division_id INTEGER`,
     `CREATE TABLE IF NOT EXISTS week_byes (id INTEGER PRIMARY KEY AUTOINCREMENT, week_id INTEGER NOT NULL, player_id INTEGER NOT NULL, division_id INTEGER NOT NULL, FOREIGN KEY (week_id) REFERENCES weeks(id) ON DELETE CASCADE, FOREIGN KEY (player_id) REFERENCES players(id), FOREIGN KEY (division_id) REFERENCES divisions(id))`,
   ];
