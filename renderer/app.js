@@ -2185,11 +2185,11 @@ function renderStep1() {
       <label>League Format</label>
       <div class="setup-type-grid">
         <div class="setup-type-card ${setupType === 'traditional' ? 'selected' : ''}" data-type="traditional">
-          <div class="setup-type-title">Traditional</div>
+          <div class="setup-type-title">Teams</div>
           <div class="setup-type-desc">Players are grouped into teams. Teams play each other each week, with one match per division.</div>
         </div>
         <div class="setup-type-card ${setupType === 'modern' ? 'selected' : ''}" data-type="modern">
-          <div class="setup-type-title">Modern</div>
+          <div class="setup-type-title">No Teams</div>
           <div class="setup-type-desc">No teams. Players are grouped into divisions and play everyone in their division (round robin).</div>
         </div>
       </div>
