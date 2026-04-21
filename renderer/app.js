@@ -35,8 +35,9 @@ if (typeof window !== 'undefined' && !window.api) {
     getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
     replacePlayer:    (d)   => _apiFetch('POST', `/api/leagues/${d.leagueId}/replace-player`, d),
     updateMatchTiming:(d)   => _apiFetch('PUT',  `/api/matches/${d.matchId}/timing`, d),
-    sendInvite:       (id)  => _apiFetch('POST', `/api/players/${id}/send-invite`),
-    sendReset:        (id)  => _apiFetch('POST', `/api/players/${id}/send-reset`),
+    sendInvite:        (id) => _apiFetch('POST', `/api/players/${id}/send-invite`),
+    sendReset:         (id) => _apiFetch('POST', `/api/players/${id}/send-reset`),
+    reportPlayerScore: (d)  => _apiFetch('PUT',  `/api/matches/${d.matchId}/player-score`, d),
 
   };
 }
@@ -231,13 +232,26 @@ async function renderDashboard() {
   ]);
 
   const upcoming = playerData.upcoming || [];
+  const history = (playerData.history || []).slice(0, 8);
   const ladderVisible = ladder.filter((p) => !p.exclude_from_ladder);
   const ladderPos = ladderVisible.findIndex((p) => p.id === playerId);
   const rank = ladderPos >= 0 ? ladderPos + 1 : null;
   const totalPlayers = ladderVisible.length;
-
   const nextMatch = upcoming[0] || null;
-  const restUpcoming = upcoming.slice(0, 5);
+  const wins = playerData.wins || 0;
+  const losses = playerData.losses || 0;
+  const total = wins + losses;
+  const winPct = total > 0 ? Math.round((wins / total) * 100) : 0;
+  const firstName = (playerData.name || '').split(' ')[0];
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : hour < 21 ? 'Good evening' : 'Good night';
+  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+  // Update topbar with greeting + date
+  document.getElementById('pageTitle').innerHTML =
+    `<div class="dp-topbar-greeting">${esc(greeting)}, ${esc(firstName)}.</div>` +
+    `<div class="dp-topbar-date">${esc(dateStr)}</div>`;
 
   function fmtMatchDate(d) {
     if (!d) return '';
@@ -253,82 +267,193 @@ async function renderDashboard() {
       .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
-  const nextMatchHTML = nextMatch ? (() => {
-    const showCourt = nextMatch.schedule_courts && nextMatch.court_number;
-    const timeStr = showCourt
-      ? `Court ${nextMatch.court_number}${nextMatch.match_time ? ' · ' + nextMatch.match_time : ''}`
-      : (nextMatch.match_time || null);
-    const divLabel = nextMatch.division_name ? nextMatch.division_name.replace(/^Division\s*/i, 'D') : '';
-    return `
-      <div class="dash-next-card">
-        <div class="dash-next-date">${fmtMatchDate(nextMatch.week_date)}</div>
-        <div class="dash-next-matchup">
-          <div class="dash-next-you">${esc(playerData.name)}</div>
-          <div class="dash-next-vs">vs</div>
-          <div class="dash-next-opp">${esc(nextMatch.opponent_name)}</div>
-        </div>
-        <div class="dash-next-meta">
-          ${divLabel ? `<span class="dash-next-chip">${esc(divLabel)}</span>` : ''}
-          ${nextMatch.league_name ? `<span class="dash-next-league">${esc(nextMatch.league_name)}</span>` : ''}
-          ${timeStr ? `<span class="dash-next-time">${esc(timeStr)}</span>` : ''}
-        </div>
-      </div>`;
-  })() : `
-      <div class="dash-next-card dash-next-empty">
-        <div class="dash-empty-msg">No upcoming matches scheduled</div>
-      </div>`;
+  function countdownLabel(dStr, tStr) {
+    if (!dStr) return null;
+    const base = new Date(dStr + 'T' + (tStr || '12:00') + ':00');
+    const diff = base - new Date();
+    if (diff <= 0) return 'Today';
+    const days = Math.floor(diff / 86400000);
+    const hrs = Math.floor((diff % 86400000) / 3600000);
+    if (days > 0) return `In ${days}d ${hrs}h`;
+    const mins = Math.floor((diff % 3600000) / 60000);
+    return `In ${hrs}h ${mins}m`;
+  }
 
-  const upcomingSection = restUpcoming.length === 0 ? '' : `
-    <div class="dash-section dash-area-upcoming">
-      <div class="dash-section-label">Upcoming</div>
-      <div class="dash-upcoming-list">
-        ${restUpcoming.map((m) => `
-          <div class="dash-upcoming-row">
-            <div class="dash-upcoming-opp">${esc(m.opponent_name)}</div>
-            <div class="dash-upcoming-date">${fmtShortDate(m.week_date)}</div>
-          </div>`).join('')}
-        <div class="dash-upcoming-footer">
-          <button class="dash-more-link" onclick="openPlayerProfile(${playerId})">More details</button>
+  // Hero card (full-width, card-styled, left/right layout)
+  const heroHTML = (() => {
+    const leagueLabel = ['NEXT MATCH', nextMatch?.league_name || null].filter(Boolean).join(' · ');
+    const pills = nextMatch ? [
+      `<span class="dh-pill">${fmtMatchDate(nextMatch.week_date)}</span>`,
+      nextMatch.match_time ? `<span class="dh-pill">${esc(nextMatch.match_time)}</span>` : '',
+      nextMatch.schedule_courts && nextMatch.court_number ? `<span class="dh-pill">Court ${nextMatch.court_number}</span>` : '',
+      nextMatch.division_name ? `<span class="dh-pill">${esc(nextMatch.division_name)}</span>` : '',
+    ].filter(Boolean).join('') : '';
+    const countdownInnerHTML = (() => {
+      if (!nextMatch?.week_date) return '';
+      const base = new Date(nextMatch.week_date + 'T' + (nextMatch.match_time || '12:00') + ':00');
+      const diff = base - new Date();
+      if (diff <= 0) return '<span class="dh-time-now">Today</span>';
+      const days = Math.floor(diff / 86400000);
+      const hrs  = Math.floor((diff % 86400000) / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      if (days > 0) return `<span class="dh-tn">${days}</span><span class="dh-tu">d</span>&nbsp;<span class="dh-tn">${hrs}</span><span class="dh-tu">h</span>`;
+      return `<span class="dh-tn">${hrs}</span><span class="dh-tu">h</span>&nbsp;<span class="dh-tn">${mins}</span><span class="dh-tu">m</span>`;
+    })();
+    return `
+      <div class="dh-hero">
+        <div class="dh-hero-bg" style="background-image:url('/assets/WSRC-EXTERIOR-ANGLE.jpg')"></div>
+        <div class="dh-hero-overlay">
+          ${nextMatch ? `
+            <div class="dh-hero-left">
+              <div class="dh-match-label">${esc(leagueLabel)}</div>
+              <div class="dh-matchup">${esc(playerData.name)} <span class="dh-vs">vs</span> ${esc(nextMatch.opponent_name)}</div>
+              <div class="dh-pills">${pills}</div>
+            </div>
+            ${countdownInnerHTML ? `
+              <div class="dh-hero-right">
+                <div class="dh-time-box">
+                  <div class="dh-time-label">TIME UNTIL MATCH</div>
+                  <div class="dh-time-val">${countdownInnerHTML}</div>
+                </div>
+              </div>
+            ` : ''}
+          ` : `
+            <div class="dh-hero-left">
+              <div class="dh-match-label">NO UPCOMING MATCHES</div>
+              <div class="dh-matchup-empty">Check back when the next season is scheduled.</div>
+            </div>
+          `}
+        </div>
+      </div>`;
+  })();
+
+  // Combined Ranking + Club Ladder bento card
+  const circ = 2 * Math.PI * 44;
+  const ringProgress = (rank !== null && totalPlayers > 1) ? (totalPlayers - rank) / (totalPlayers - 1) : 0;
+  const dashOffset = circ * (1 - ringProgress);
+  const ladderNearby = (() => {
+    if (ladderPos < 0) return [];
+    const start = Math.max(0, ladderPos - 2);
+    const end = Math.min(ladderVisible.length, ladderPos + 3);
+    return ladderVisible.slice(start, end);
+  })();
+  const rankLadderBento = `
+    <div class="db-card db-rank-ladder-card">
+      <div class="db-card-title">Ranking</div>
+      ${rank !== null ? `
+        <div class="db-rank-ring-wrap">
+          <svg class="db-rank-svg" viewBox="0 0 100 100">
+            <circle class="db-ring-track" cx="50" cy="50" r="44" fill="none" stroke-width="8"/>
+            <circle class="db-ring-fill" cx="50" cy="50" r="44" fill="none" stroke-width="8"
+              stroke-dasharray="${circ.toFixed(2)}"
+              stroke-dashoffset="${dashOffset.toFixed(2)}"
+              transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="db-rank-inner">
+            <div class="db-rank-num">#${rank}</div>
+            <div class="db-rank-of">of ${totalPlayers}</div>
+          </div>
+        </div>
+        <div class="db-rank-stats">
+          <div class="db-stat"><div class="db-stat-val">${wins}</div><div class="db-stat-lbl">Wins</div></div>
+          <div class="db-stat"><div class="db-stat-val">${losses}</div><div class="db-stat-lbl">Losses</div></div>
+          <div class="db-stat"><div class="db-stat-val">${winPct}%</div><div class="db-stat-lbl">Win Rate</div></div>
+        </div>
+      ` : `<div class="db-empty-msg">Not ranked yet</div>`}
+      ${ladderNearby.length > 0 ? `
+        <div class="db-card-divider"></div>
+        <div class="db-card-subtitle">Club Ladder</div>
+        <div class="db-ladder-list">
+          ${ladderNearby.map((p) => {
+            const pos = ladderVisible.indexOf(p) + 1;
+            const isMe = p.id === playerId;
+            return `<div class="db-ladder-row${isMe ? ' db-ladder-me' : ''}">
+              <span class="db-ladder-pos">${pos}</span>
+              <span class="db-ladder-name">${esc(p.name)}</span>
+              ${isMe ? '<span class="db-ladder-you">YOU</span>' : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      ` : ''}
+      <button class="db-card-link" onclick="navigate('ladder')">Full ladder →</button>
+    </div>`;
+
+  // Upcoming bento card
+  const upcomingBento = `
+    <div class="db-card db-upcoming-card">
+      <div class="db-card-title">Upcoming Matches</div>
+      ${upcoming.length === 0
+        ? '<div class="db-empty-msg">No matches scheduled</div>'
+        : `<div class="db-upcoming-rows">
+            ${upcoming.slice(0, 5).map((m) => `
+              <div class="db-upcoming-row">
+                <div class="db-upcoming-date">${fmtShortDate(m.week_date)}</div>
+                <div class="db-upcoming-opp">${esc(m.opponent_name)}</div>
+                <div class="db-upcoming-time">${m.match_time ? esc(m.match_time) : '—'}</div>
+              </div>`).join('')}
+          </div>
+          <button class="db-card-link" onclick="openPlayerProfile(${playerId})">View all →</button>`
+      }
+    </div>`;
+
+  // Quick actions bento card
+  const quickBento = `
+    <div class="db-card db-quick-card">
+      <div class="db-card-title">Quick Actions</div>
+      <div class="db-quick-list">
+        <button class="db-quick-item" onclick="openPlayerProfile(${playerId})">
+          <svg class="db-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          My Profile
+        </button>
+        <button class="db-quick-item" onclick="openReportScoreModal()">
+          <svg class="db-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          Report Score
+        </button>
+        <div class="db-quick-item db-quick-soon">
+          <svg class="db-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Challenge a Player
+          <span class="db-soon-badge">Coming Soon</span>
         </div>
       </div>
     </div>`;
 
-  const rankSection = rank !== null ? `
-    <div class="dash-section dash-area-rank">
-      <div class="dash-section-label">Your Ranking</div>
-      <div class="dash-rank-card">
-        <div class="dash-rank-num">#${rank}</div>
-        <div class="dash-rank-sub">of ${totalPlayers} members</div>
-        <button class="dash-rank-link" onclick="navigate('ladder')">See full ladder</button>
+  // Recent results
+  const recentResults = history.slice(0, 4);
+  const resultsHTML = recentResults.length > 0 ? `
+    <div class="db-results-section">
+      <div class="db-section-heading">Recent Results</div>
+      <div class="db-results-row">
+        ${recentResults.map((m) => {
+          const win = m.result === 'W';
+          const scoreStr = m.player_score != null ? `${m.player_score}–${m.opp_score}` : '';
+          return `
+            <div class="db-result-card ${win ? 'db-result-win' : 'db-result-loss'}">
+              <div class="db-result-badge">${win ? 'WIN' : 'LOSS'}</div>
+              <div class="db-result-opp">${esc(m.opponent_name)}</div>
+              ${scoreStr ? `<div class="db-result-score">${scoreStr}</div>` : ''}
+              <div class="db-result-date">${fmtShortDate(m.week_date)}</div>
+            </div>`;
+        }).join('')}
       </div>
     </div>` : '';
 
-  const quickSection = `
-    <div class="dash-section dash-area-quick">
-      <div class="dash-section-label">Quick Actions</div>
-      <div class="dash-quick-grid">
-        <button class="dash-quick-btn" onclick="navigate('players')">
-          <img src="/assets/players-icon-blue.png" alt="">Player List
-        </button>
-        <button class="dash-quick-btn" onclick="navigate('leagues')">
-          <img src="/assets/leagues-icon-blue.png" alt="">Leagues
-        </button>
-        <button class="dash-quick-btn" onclick="openPlayerProfile(${playerId})">
-          <img src="/assets/profile-icon-blue.png" alt="">My Profile
-        </button>
-      </div>
-    </div>`;
-
-  const hasUpcoming = restUpcoming.length > 0;
   content.innerHTML = `
-    <div class="dash-player${hasUpcoming ? '' : ' dash-player-no-upcoming'}">
-      <div class="dash-section dash-area-next">
-        <div class="dash-section-label">Next Match</div>
-        ${nextMatchHTML}
+    <div class="dp-wrap">
+      <div class="dp-columns">
+        <div class="dp-main">
+          ${heroHTML}
+          <div class="dp-bento">
+            ${rankLadderBento}
+            ${upcomingBento}
+            ${quickBento}
+          </div>
+          ${resultsHTML}
+        </div>
+        <div class="dp-right">
+          <div class="dp-right-title">Club Activity</div>
+          <div class="dp-right-empty">Activity feed coming soon.</div>
+        </div>
       </div>
-      ${upcomingSection}
-      ${rankSection}
-      ${quickSection}
     </div>`;
 }
 
@@ -812,15 +937,23 @@ function renderPlayerProfile() {
         confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
       } else if (action === 'send-invite') {
         try {
-          await window.api.sendInvite(p.id);
-          toast('Invite email sent!', 'success');
+          const result = await window.api.sendInvite(p.id);
+          if (result.emailSent) {
+            toast('Invite email sent!', 'success');
+          } else {
+            showAuthLinkModal('Invite Link', result.inviteUrl);
+          }
         } catch (err) {
           toast(err.message || 'Failed to send invite.', 'error');
         }
       } else if (action === 'send-reset') {
         try {
-          await window.api.sendReset(p.id);
-          toast('Password reset email sent!', 'success');
+          const result = await window.api.sendReset(p.id);
+          if (result.emailSent) {
+            toast('Password reset email sent!', 'success');
+          } else {
+            showAuthLinkModal('Password Reset Link', result.resetUrl);
+          }
         } catch (err) {
           toast(err.message || 'Failed to send reset email.', 'error');
         }
@@ -986,28 +1119,50 @@ async function renderLadder() {
   } else {
     const top10 = visible.slice(0, 10);
     const rest  = visible.slice(10);
-    const rowHTML = (p, i, topStyle) => {
-      const rec = records[p.id] || { wins: 0, losses: 0 };
+    const myId  = state.currentUser?.playerId;
+
+    const top10HTML = top10.map((p, i) => {
+      const rec   = records[p.id] || { wins: 0, losses: 0 };
+      const total = rec.wins + rec.losses;
+      const pct   = total > 0 ? Math.round(rec.wins / total * 100) : null;
+      const isMe  = p.id === myId;
+      const posClass = i < 3 ? ` ldr-card-pos-${i + 1}` : (isMe ? ' ldr-card-me' : '');
       return `
-      <div class="ladder-row" data-id="${p.id}" data-idx="${i}">
-        <span class="ladder-rank${topStyle ? ' ladder-rank-top10' : ''}">${i + 1}</span>
-        <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
-        <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
-      </div>`;
+        <div class="ldr-card${posClass}" data-action="view-profile" data-id="${p.id}">
+          <div class="ldr-card-rank">#${i + 1}</div>
+          <div class="ldr-card-name">${esc(p.name)}</div>
+          ${isMe ? '<div class="ldr-card-you">YOU</div>' : ''}
+          <div class="ldr-card-record">${rec.wins}W &ndash; ${rec.losses}L</div>
+          ${pct !== null ? `<div class="ldr-card-pct">${pct}%</div>` : ''}
+        </div>`;
+    }).join('');
+
+    const restRowHTML = (p, i) => {
+      const rec  = records[p.id] || { wins: 0, losses: 0 };
+      const isMe = p.id === myId;
+      return `
+        <div class="ldr-rest-row${isMe ? ' ldr-rest-me' : ''}" data-action="view-profile" data-id="${p.id}">
+          <span class="ldr-rest-rank">${i + 1}</span>
+          <span class="ldr-rest-name">${esc(p.name)}${isMe ? '<span class="ldr-you-chip">YOU</span>' : ''}</span>
+          <span class="ldr-rest-record">${rec.wins}W &ndash; ${rec.losses}L</span>
+        </div>`;
     };
+
     content.innerHTML = `
-      <div class="ladder-list ladder-list-readonly" id="ladderList">
-        <div class="ladder-top10-section">
-          <div class="ladder-top10-header">&#9733; Top 10</div>
-          ${top10.map((p, i) => rowHTML(p, i, true)).join('')}
+      <div class="ldr-player-wrap" id="ladderList">
+        <div class="ldr-section-block">
+          <div class="ldr-section-heading">Top 10</div>
+          <div class="ldr-top10-scroll">
+            ${top10HTML}
+          </div>
         </div>
         ${rest.length > 0 ? `
-        <div style="margin-top:10px">
-          <div class="ladder-rest-section">
-            <div class="ladder-rest-header">All Players</div>
-            ${rest.map((p, i) => rowHTML(p, i + 10, false)).join('')}
-          </div>
-        </div>` : ''}
+          <div class="ldr-section-block">
+            <div class="ldr-section-heading">All Players</div>
+            <div class="ldr-rest-list">
+              ${rest.map((p, i) => restRowHTML(p, i + 10)).join('')}
+            </div>
+          </div>` : ''}
       </div>`;
   }
 
@@ -1874,6 +2029,31 @@ function renderRostersModern(league, editMode = false) {
   </div>`;
 }
 
+function showAuthLinkModal(title, url) {
+  modal.open(title, `
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+      No email service is configured. Copy this link and send it directly to the player.
+    </p>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input class="form-control" id="authLinkInput" value="${esc(url)}" readonly
+        style="font-size:12px;font-family:monospace;flex:1">
+      <button class="btn btn-primary" id="authLinkCopyBtn" style="flex-shrink:0">Copy</button>
+    </div>
+    <div style="margin-top:14px;text-align:right">
+      <button class="btn btn-outline" id="authLinkCloseBtn">Close</button>
+    </div>
+  `);
+  document.getElementById('authLinkInput').select();
+  document.getElementById('authLinkCopyBtn').addEventListener('click', () => {
+    navigator.clipboard.writeText(url).catch(() => {
+      document.getElementById('authLinkInput').select();
+      document.execCommand('copy');
+    });
+    document.getElementById('authLinkCopyBtn').textContent = 'Copied!';
+  });
+  document.getElementById('authLinkCloseBtn').addEventListener('click', modal.close);
+}
+
 function openTimingModal(btn) {
   const matchId = Number(btn.dataset.matchId);
   const scheduleCourts = btn.dataset.scheduleCourts === '1';
@@ -2233,6 +2413,97 @@ async function saveMatchScore(btn) {
   row.querySelector('.score-save-btn').addEventListener('click', () =>
     saveMatchScore(row.querySelector('.score-save-btn'))
   );
+}
+
+// ===== REPORT SCORE MODAL (player) =====
+async function openReportScoreModal() {
+  const playerId = state.currentUser?.playerId;
+  if (!playerId) return;
+
+  modal.open('Report a Score', '<div class="modal-loading">Loading matches…</div>');
+
+  const playerData = await fetch(`/api/players/${playerId}/history`).then((r) => r.json());
+  const upcoming = playerData.upcoming || [];
+
+  function fmtDate(d) {
+    if (!d) return '';
+    const [y, m, day] = d.split('-').map(Number);
+    return new Date(y, m - 1, day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  function showMatchList() {
+    if (upcoming.length === 0) {
+      document.getElementById('modalBody').innerHTML =
+        '<div class="rsc-empty">You have no unscored matches to report.</div>';
+      return;
+    }
+    document.getElementById('modalBody').innerHTML = `
+      <p class="rsc-instructions">Select the match you want to report a score for.</p>
+      <div class="rsc-match-list">
+        ${upcoming.map((m) => `
+          <button class="rsc-match-item" data-match-id="${m.id}" data-opponent="${esc(m.opponent_name)}">
+            <div class="rsc-match-opp">vs ${esc(m.opponent_name)}</div>
+            <div class="rsc-match-meta">${esc(m.league_name)}${m.division_name ? ' · ' + esc(m.division_name) : ''} &nbsp;·&nbsp; ${fmtDate(m.week_date)}</div>
+          </button>`).join('')}
+      </div>`;
+    document.getElementById('modalBody').querySelectorAll('.rsc-match-item').forEach((btn) => {
+      btn.addEventListener('click', () => showScoreForm(Number(btn.dataset.matchId), btn.dataset.opponent));
+    });
+  }
+
+  function showScoreForm(matchId, opponentName) {
+    document.getElementById('modalBody').innerHTML = `
+      <button class="rsc-back-btn" id="rscBack">← Back</button>
+      <div class="rsc-matchup-header">
+        <span class="rsc-you">${esc(playerData.name)}</span>
+        <span class="rsc-vs">vs</span>
+        <span class="rsc-opp">${esc(opponentName)}</span>
+      </div>
+      <div class="rsc-score-form">
+        <div class="rsc-score-side">
+          <div class="rsc-score-label">Your Score</div>
+          <input id="rscMyScore" class="rsc-score-input" type="number" min="0" max="3" placeholder="0">
+        </div>
+        <div class="rsc-score-sep">–</div>
+        <div class="rsc-score-side">
+          <div class="rsc-score-label">Their Score</div>
+          <input id="rscTheirScore" class="rsc-score-input" type="number" min="0" max="3" placeholder="0">
+        </div>
+      </div>
+      <button class="btn btn-primary rsc-submit-btn" id="rscSubmit">Submit Score</button>`;
+
+    document.getElementById('rscBack').addEventListener('click', showMatchList);
+
+    document.getElementById('rscSubmit').addEventListener('click', async () => {
+      const myScore    = Number(document.getElementById('rscMyScore').value);
+      const theirScore = Number(document.getElementById('rscTheirScore').value);
+
+      const valid = Number.isInteger(myScore) && Number.isInteger(theirScore)
+        && myScore >= 0 && myScore <= 3 && theirScore >= 0 && theirScore <= 3
+        && (myScore === 3 || theirScore === 3) && myScore !== theirScore;
+
+      if (!valid) {
+        toast('Invalid score — one player must win 3 games (e.g. 3–1, 3–2)', 'warning');
+        return;
+      }
+
+      const submitBtn = document.getElementById('rscSubmit');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting…';
+      try {
+        await window.api.reportPlayerScore({ matchId, myScore, theirScore });
+        toast('Score submitted successfully!', 'success');
+        modal.close();
+        if (state.page === 'dashboard') renderDashboard();
+      } catch (err) {
+        toast(err.message || 'Failed to submit score', 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Score';
+      }
+    });
+  }
+
+  showMatchList();
 }
 
 // ===== SUB MODAL =====

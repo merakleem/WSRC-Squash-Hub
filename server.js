@@ -104,9 +104,12 @@ function authPage({ title, body, error, info }) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} — Play WSRC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
            background: #1e2758; display: flex; align-items: center;
            justify-content: center; min-height: 100vh; }
     .card { background: #fff; border-radius: 12px; overflow: hidden; width: 100%;
@@ -114,7 +117,7 @@ function authPage({ title, body, error, info }) {
     .card-header { background: #1e2758; padding: 28px 36px 24px; text-align: center; }
     .logo { width: 80px; height: 80px; object-fit: contain; }
     .card-body { padding: 28px 32px 32px; }
-    h1 { font-size: 17px; font-weight: 700; color: #1e2758; margin-bottom: 4px; }
+    h1 { font-family: 'Barlow', sans-serif; font-size: 17px; font-weight: 700; color: #1e2758; margin-bottom: 4px; }
     .subtitle { font-size: 13px; color: #6b7e93; margin-bottom: 22px; }
     label { display: block; font-size: 12px; font-weight: 600; color: #444; margin-bottom: 5px; }
     input[type=email], input[type=password], input[type=text] {
@@ -332,11 +335,15 @@ function buildPublicPage() {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>League Schedule — Play WSRC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="/assets/logo-blue.png">
   <style>
     :root { --primary:#1e2758; --accent:#3a4db5; --border:#e2e8f0; --muted:#64748b; --bg:#f4f6fb; }
     * { box-sizing:border-box; margin:0; padding:0; }
-    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:#1e293b; font-size:15px; line-height:1.5; }
+    body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color:#1e293b; font-size:15px; line-height:1.5; }
+    h1,h2,h3,h4,.header-title,.card-title { font-family:'Barlow',-apple-system,BlinkMacSystemFont,sans-serif; }
 
     .header { background:var(--primary); color:#fff; padding:28px 20px 24px; }
     .header-brand { display:flex; align-items:center; gap:8px; margin-bottom:14px; opacity:0.65; }
@@ -586,12 +593,9 @@ app.delete('/api/players/:id', requireAdmin, wrap(async (req, res) => {
 app.post('/api/players/:id/send-invite', requireAdmin, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
-
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return res.status(404).json({ error: 'Player not found' });
-  if (!player.email) return res.status(400).json({ error: 'This player has no email address on file.' });
 
   const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
@@ -604,35 +608,36 @@ app.post('/api/players/:id/send-invite', requireAdmin, wrap(async (req, res) => 
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const inviteUrl = `${baseUrl}/invite/${token}`;
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: 'Play WSRC <no-reply@playwsrc.ca>',
-      to: player.email,
-      subject: 'Activate your Play WSRC account',
-      html: `<p>Hi ${serverEsc(player.name)},</p>
+  if (RESEND_API_KEY && player.email) {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Play WSRC <no-reply@playwsrc.ca>',
+        to: player.email,
+        subject: 'Activate your Play WSRC account',
+        html: `<p>Hi ${serverEsc(player.name)},</p>
 <p>You've been invited to create an account on Play WSRC.</p>
 <p><a href="${serverEsc(inviteUrl)}">Click here to activate your account</a></p>
 <p>This link expires in 72 hours.</p>`,
-    }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    return res.status(502).json({ error: err.message || 'Failed to send email.' });
+      }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      return res.status(502).json({ error: err.message || 'Failed to send email.', inviteUrl });
+    }
+    return res.json({ ok: true, emailSent: true, inviteUrl });
   }
-  res.json({ ok: true });
+
+  res.json({ ok: true, emailSent: false, inviteUrl });
 }));
 
 app.post('/api/players/:id/send-reset', requireAdmin, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
-
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return res.status(404).json({ error: 'Player not found' });
-  if (!player.email) return res.status(400).json({ error: 'This player has no email address on file.' });
 
   const account = db.prepare('SELECT * FROM user_accounts WHERE player_id = ?').get(playerId);
   if (!account || !account.password_hash) return res.status(400).json({ error: 'This player has not activated their account yet. Send an invite instead.' });
@@ -645,24 +650,28 @@ app.post('/api/players/:id/send-reset', requireAdmin, wrap(async (req, res) => {
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const resetUrl = `${baseUrl}/reset-password/${token}`;
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: 'Play WSRC <no-reply@playwsrc.ca>',
-      to: player.email,
-      subject: 'Reset your Play WSRC password',
-      html: `<p>Hi ${serverEsc(player.name)},</p>
+  if (RESEND_API_KEY && player.email) {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Play WSRC <no-reply@playwsrc.ca>',
+        to: player.email,
+        subject: 'Reset your Play WSRC password',
+        html: `<p>Hi ${serverEsc(player.name)},</p>
 <p>A password reset was requested for your Play WSRC account.</p>
 <p><a href="${serverEsc(resetUrl)}">Click here to reset your password</a></p>
 <p>This link expires in 24 hours. If you did not request this, you can ignore this email.</p>`,
-    }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    return res.status(502).json({ error: err.message || 'Failed to send email.' });
+      }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      return res.status(502).json({ error: err.message || 'Failed to send email.', resetUrl });
+    }
+    return res.json({ ok: true, emailSent: true, resetUrl });
   }
-  res.json({ ok: true });
+
+  res.json({ ok: true, emailSent: false, resetUrl });
 }));
 
 app.get('/api/players/records', wrap(async (req, res) => {
@@ -788,6 +797,46 @@ app.put('/api/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
 
 app.put('/api/matches/:id/score', requireAdmin, wrap(async (req, res) => {
   await leagueModel.updateMatchScore({ matchId: Number(req.params.id), ...req.body });
+  res.json({ ok: true });
+}));
+
+// Player self-reporting: verify the caller is in the match, then map my/their score to p1/p2
+app.put('/api/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
+  const matchId  = Number(req.params.id);
+  const playerId = req.session.playerId;
+  const myScore    = Number(req.body.myScore);
+  const theirScore = Number(req.body.theirScore);
+
+  const db = getDB();
+  const match = db.prepare(`
+    SELECT m.id, m.player1_id, m.player2_id,
+           s1.sub_player_id AS p1_sub, s2.sub_player_id AS p2_sub
+    FROM matches m
+    LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
+    LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+    WHERE m.id = ?
+  `).get(matchId);
+
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+
+  const effP1 = match.p1_sub ?? match.player1_id;
+  const effP2 = match.p2_sub ?? match.player2_id;
+  const isP1  = effP1 === playerId;
+  const isP2  = effP2 === playerId;
+
+  if (!isP1 && !isP2) return res.status(403).json({ error: 'You are not a player in this match' });
+
+  const p1Score = isP1 ? myScore : theirScore;
+  const p2Score = isP2 ? myScore : theirScore;
+
+  const valid = Number.isInteger(p1Score) && Number.isInteger(p2Score)
+    && p1Score >= 0 && p1Score <= 3 && p2Score >= 0 && p2Score <= 3
+    && (p1Score === 3 || p2Score === 3) && p1Score !== p2Score;
+
+  if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 games (e.g. 3–1, 3–2)' });
+
+  const winnerId = p1Score > p2Score ? match.player1_id : match.player2_id;
+  await leagueModel.updateMatchScore({ matchId, player1Score: p1Score, player2Score: p2Score, winnerId });
   res.json({ ok: true });
 }));
 
