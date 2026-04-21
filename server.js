@@ -608,7 +608,7 @@ app.post('/api/players/:id/send-invite', requireAdmin, wrap(async (req, res) => 
     method: 'POST',
     headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'WSRC Squash Hub <noreply@wsrc.ca>',
+      from: 'WSRC Squash Hub <no-reply@playwsrc.ca>',
       to: player.email,
       subject: 'Activate your WSRC Squash Hub account',
       html: `<p>Hi ${serverEsc(player.name)},</p>
@@ -649,7 +649,7 @@ app.post('/api/players/:id/send-reset', requireAdmin, wrap(async (req, res) => {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'WSRC Squash Hub <noreply@wsrc.ca>',
+      from: 'WSRC Squash Hub <no-reply@playwsrc.ca>',
       to: player.email,
       subject: 'Reset your WSRC Squash Hub password',
       html: `<p>Hi ${serverEsc(player.name)},</p>
