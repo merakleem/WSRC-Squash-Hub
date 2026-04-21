@@ -30,7 +30,6 @@ if (typeof window !== 'undefined' && !window.api) {
     getValidConfigs:  (n) => _apiFetch('GET',    `/api/configs/${n}`),
 
     getLadder:        ()    => _apiFetch('GET', '/api/ladder'),
-    updateLadder:     (ids) => _apiFetch('PUT', '/api/ladder', { playerIds: ids }),
     getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
     getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
     replacePlayer:    (d)   => _apiFetch('POST', `/api/leagues/${d.leagueId}/replace-player`, d),
@@ -38,7 +37,7 @@ if (typeof window !== 'undefined' && !window.api) {
     sendInvite:        (id) => _apiFetch('POST', `/api/players/${id}/send-invite`),
     sendReset:         (id) => _apiFetch('POST', `/api/players/${id}/send-reset`),
     reportPlayerScore: (d)  => _apiFetch('PUT',  `/api/matches/${d.matchId}/player-score`, d),
-
+    getActivity:        ()   => _apiFetch('GET',  '/api/activity'),
   };
 }
 
@@ -176,6 +175,7 @@ document.querySelectorAll('.nav-item').forEach((el) => {
 });
 
 function renderPage() {
+  document.querySelector('.content').classList.remove('content--dashboard');
   switch (state.page) {
     case 'dashboard':     renderDashboard(); break;
     case 'players':       renderPlayers(); break;
@@ -188,37 +188,104 @@ function renderPage() {
 }
 
 // ===== DASHBOARD =====
+function abbrevName(name) {
+  const parts = (name || '').trim().split(/\s+/);
+  if (parts.length === 1) return name;
+  return parts[0][0] + '. ' + parts[parts.length - 1];
+}
+
+function timeAgo(utcStr) {
+  if (!utcStr) return '';
+  const ms = Date.now() - new Date(utcStr.replace(' ', 'T') + 'Z').getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(utcStr.replace(' ', 'T') + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function buildActivityHTML(activity, isAdmin = false) {
+  if (!activity || activity.length === 0) {
+    return `<div class="dp-activity-scroll"><div class="dp-right-empty">No activity in the past 7 days.</div></div>`;
+  }
+  const items = activity.map((m) => {
+    const p1Won = m.winner_id === m.player1_id;
+    const winnerName  = abbrevName(p1Won ? m.p1_name : m.p2_name);
+    const loserName   = abbrevName(p1Won ? m.p2_name : m.p1_name);
+    const winnerPos   = p1Won ? m.p1_pos : m.p2_pos;
+    const loserPos    = p1Won ? m.p2_pos : m.p1_pos;
+    const winnerScore = p1Won ? m.player1_score : m.player2_score;
+    const loserScore  = p1Won ? m.player2_score : m.player1_score;
+    const winnerLabel = winnerPos ? `(#${winnerPos}) ` : '';
+    const loserLabel  = loserPos  ? `(#${loserPos}) ` : '';
+    const submittedBy = isAdmin
+      ? `<div class="dp-activity-by">Submitted by ${esc(m.submitted_by_name || 'Admin')}</div>`
+      : '';
+    const movesUp = m.places_moved > 0
+      ? `<div class="dp-activity-moves">↑ ${esc(winnerName)} moves up ${m.places_moved} place${m.places_moved !== 1 ? 's' : ''}</div>`
+      : '';
+    return `<div class="dp-activity-item">
+      <div class="dp-activity-text">
+        <span class="dp-activity-winner">${esc(winnerLabel)}${esc(winnerName)}</span>
+        <span class="dp-activity-verb"> beat </span>
+        <span>${esc(loserLabel)}${esc(loserName)}</span>
+        <span class="dp-activity-score"> ${winnerScore}–${loserScore}</span>
+      </div>
+      <div class="dp-activity-time">${esc(timeAgo(m.confirmed_at))}</div>
+      ${movesUp}
+      ${submittedBy}
+    </div>`;
+  }).join('');
+  return `<div class="dp-activity-scroll">${items}</div>`;
+}
+
 async function renderDashboard() {
   document.getElementById('pageTitle').textContent = 'Dashboard';
   document.getElementById('topbarActions').innerHTML = '';
+  document.querySelector('.content').classList.add('content--dashboard');
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div class="dashboard-loading">Loading…</div>`;
 
   const user = state.currentUser;
 
   if (!user || user.role === 'admin') {
+    const activity = await window.api.getActivity();
     content.innerHTML = `
-      <div class="dash-admin">
-        <div class="dash-admin-hero">
-          <div class="dash-greeting">Welcome Back.</div>
-          <div class="dash-greeting-sub">Manage players, leagues, and schedules from here.</div>
-        </div>
-        <div class="dash-admin-grid">
-          <button class="dash-admin-card" onclick="navigate('players')">
-            <div class="dash-admin-card-icon"><img src="/assets/players-icon-blue.png" alt=""></div>
-            <div class="dash-admin-card-label">Manage Players</div>
-            <div class="dash-admin-card-sub">View, add, and edit players</div>
-          </button>
-          <button class="dash-admin-card" onclick="navigate('leagues')">
-            <div class="dash-admin-card-icon"><img src="/assets/leagues-icon-blue.png" alt=""></div>
-            <div class="dash-admin-card-label">Manage Leagues</div>
-            <div class="dash-admin-card-sub">Create leagues and enter scores</div>
-          </button>
-          <button class="dash-admin-card" onclick="navigate('ladder')">
-            <div class="dash-admin-card-icon"><img src="/assets/ladder-icon-blue.png" alt=""></div>
-            <div class="dash-admin-card-label">Player Rankings</div>
-            <div class="dash-admin-card-sub">Manage the club ladder</div>
-          </button>
+      <div class="dp-wrap">
+        <div class="dp-columns">
+          <div class="dp-main">
+            <div class="dash-admin">
+              <div class="dash-admin-hero">
+                <div class="dash-greeting">Welcome Back.</div>
+                <div class="dash-greeting-sub">Manage players, leagues, and schedules from here.</div>
+              </div>
+              <div class="dash-admin-grid">
+                <button class="dash-admin-card" onclick="navigate('players')">
+                  <div class="dash-admin-card-icon"><img src="/assets/players-icon-blue.png" alt=""></div>
+                  <div class="dash-admin-card-label">Manage Players</div>
+                  <div class="dash-admin-card-sub">View, add, and edit players</div>
+                </button>
+                <button class="dash-admin-card" onclick="navigate('leagues')">
+                  <div class="dash-admin-card-icon"><img src="/assets/leagues-icon-blue.png" alt=""></div>
+                  <div class="dash-admin-card-label">Manage Leagues</div>
+                  <div class="dash-admin-card-sub">Create leagues and enter scores</div>
+                </button>
+                <button class="dash-admin-card" onclick="navigate('ladder')">
+                  <div class="dash-admin-card-icon"><img src="/assets/ladder-icon-blue.png" alt=""></div>
+                  <div class="dash-admin-card-label">Player Rankings</div>
+                  <div class="dash-admin-card-sub">View the club ladder</div>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="dp-right">
+            <div class="dp-right-title">Club Activity</div>
+            ${buildActivityHTML(activity, true)}
+          </div>
         </div>
       </div>`;
     return;
@@ -226,9 +293,10 @@ async function renderDashboard() {
 
   // Player dashboard — fetch data in parallel
   const playerId = user.playerId;
-  const [playerData, ladder] = await Promise.all([
+  const [playerData, ladder, activity] = await Promise.all([
     fetch(`/api/players/${playerId}/history`).then((r) => r.json()),
     window.api.getLadder(),
+    window.api.getActivity(),
   ]);
 
   const upcoming = playerData.upcoming || [];
@@ -237,7 +305,8 @@ async function renderDashboard() {
   const ladderPos = ladderVisible.findIndex((p) => p.id === playerId);
   const rank = ladderPos >= 0 ? ladderPos + 1 : null;
   const totalPlayers = ladderVisible.length;
-  const nextMatch = upcoming[0] || null;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const nextMatch = upcoming.find((m) => m.week_date >= todayStr) || null;
   const wins = playerData.wins || 0;
   const losses = playerData.losses || 0;
   const total = wins + losses;
@@ -381,7 +450,7 @@ async function renderDashboard() {
   // Upcoming bento card
   const upcomingBento = `
     <div class="db-card db-upcoming-card">
-      <div class="db-card-title">Upcoming Matches</div>
+      <div class="db-card-title">Scheduled Matches</div>
       ${upcoming.length === 0
         ? '<div class="db-empty-msg">No matches scheduled</div>'
         : `<div class="db-upcoming-rows">
@@ -451,7 +520,7 @@ async function renderDashboard() {
         </div>
         <div class="dp-right">
           <div class="dp-right-title">Club Activity</div>
-          <div class="dp-right-empty">Activity feed coming soon.</div>
+          ${buildActivityHTML(activity, false)}
         </div>
       </div>
     </div>`;
@@ -549,7 +618,6 @@ function renderPlayerTable(players) {
 }
 
 function playerFormHTML(player = {}) {
-  const rating = player.club_locker_rating != null ? Number(player.club_locker_rating).toFixed(2) : '';
   const excluded = player.id ? !!player.exclude_from_ladder : false;
   return `
     <div class="form-group">
@@ -563,14 +631,6 @@ function playerFormHTML(player = {}) {
     <div class="form-group">
       <label>Phone</label>
       <input class="form-control" id="fPhone" value="${esc(player.phone || '')}" placeholder="(optional)">
-    </div>
-    <div class="form-group">
-      <label>Member Number <span class="form-hint">(used as login password)</span></label>
-      <input class="form-control" id="fMemberNumber" value="${esc(player.member_number || '')}" placeholder="Member number">
-    </div>
-    <div class="form-group">
-      <label>Club Locker Rating <span class="form-hint">(1.0 – 7.0, optional)</span></label>
-      <input class="form-control" id="fRating" type="number" min="1" max="7" step="0.01" value="${esc(rating)}" placeholder="e.g. 3.50">
     </div>
     <div class="form-group form-group-check">
       <label class="check-label">
@@ -592,12 +652,10 @@ function openAddPlayerModal() {
     const name = document.getElementById('fName').value.trim();
     const email = document.getElementById('fEmail').value.trim();
     const phone = document.getElementById('fPhone').value.trim();
-    const member_number = document.getElementById('fMemberNumber').value.trim();
-    const club_locker_rating = document.getElementById('fRating').value.trim();
     const exclude_from_ladder = document.getElementById('fExclude').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.addPlayer({ name, email, phone, member_number, wsrc_member: 1, club_locker_rating, exclude_from_ladder });
+      await window.api.addPlayer({ name, email, phone, exclude_from_ladder });
       modal.close();
       toast('Player added', 'success');
       state.players = await window.api.getPlayers();
@@ -615,12 +673,10 @@ function openEditPlayerModal(player) {
     const name = document.getElementById('fName').value.trim();
     const email = document.getElementById('fEmail').value.trim();
     const phone = document.getElementById('fPhone').value.trim();
-    const member_number = document.getElementById('fMemberNumber').value.trim();
-    const club_locker_rating = document.getElementById('fRating').value.trim();
     const exclude_from_ladder = document.getElementById('fExclude').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.updatePlayer({ id: player.id, name, email, phone, member_number, wsrc_member: 1, club_locker_rating, exclude_from_ladder });
+      await window.api.updatePlayer({ id: player.id, name, email, phone, exclude_from_ladder });
       modal.close();
       toast('Player updated', 'success');
       state.players = await window.api.getPlayers();
@@ -655,14 +711,11 @@ function confirmDeletePlayer(id, name) {
 }
 
 function exportPlayersCsv() {
-  const headers = ['name', 'email', 'phone', 'member_number', 'wsrc_member', 'club_locker_rating'];
+  const headers = ['name', 'email', 'phone'];
   const rows = state.players.map((p) => [
     p.name,
     p.email || '',
     p.phone || '',
-    p.member_number || '',
-    p.wsrc_member ? '1' : '0',
-    p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : '',
   ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
   const csv = [headers.join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -680,7 +733,7 @@ function openImportModal() {
       Upload a CSV exported from this app. Existing players with the same name will be skipped.
     </p>
     <p class="text-muted" style="font-size:12px;margin-bottom:16px">
-      Expected columns: <code>name, email, phone, member_number, wsrc_member, club_locker_rating</code>
+      Expected columns: <code>name, email, phone</code>
     </p>
     <input type="file" accept=".csv" id="fCsvFile" class="form-control" style="margin-bottom:0">
     <div id="fError" class="form-error" style="margin-top:8px"></div>
@@ -705,12 +758,9 @@ function openImportModal() {
         return;
       }
       const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
-      const nameIdx       = headers.indexOf('name');
-      const emailIdx      = headers.indexOf('email');
-      const phoneIdx      = headers.indexOf('phone');
-      const memberNumIdx  = headers.indexOf('member_number');
-      const memberIdx     = headers.indexOf('wsrc_member');
-      const ratingIdx     = headers.indexOf('club_locker_rating');
+      const nameIdx  = headers.indexOf('name');
+      const emailIdx = headers.indexOf('email');
+      const phoneIdx = headers.indexOf('phone');
       if (nameIdx === -1) {
         document.getElementById('fError').textContent = 'Missing required "name" column.';
         return;
@@ -722,29 +772,16 @@ function openImportModal() {
       parsed = [];
       const existingNames = new Set(state.players.map((p) => p.name.toLowerCase()));
       const skipped = [];
-      const conflicted = [];
       for (let i = 1; i < lines.length; i++) {
         const row = lines[i].match(/(".*?"|[^,]+|(?<=,)(?=,)|^(?=,)|(?<=,)$)/g) || lines[i].split(',');
         const name = parseCell(row, nameIdx).trim();
         if (!name) continue;
         if (existingNames.has(name.toLowerCase())) { skipped.push(name); continue; }
-        const wsrc_member = parseCell(row, memberIdx) === '1';
-        const member_number = parseCell(row, memberNumIdx);
-        if (member_number && !wsrc_member) { conflicted.push(name); continue; }
         parsed.push({
           name,
           email: parseCell(row, emailIdx),
           phone: parseCell(row, phoneIdx),
-          member_number,
-          wsrc_member,
-          club_locker_rating: parseCell(row, ratingIdx) || '',
         });
-      }
-      if (conflicted.length) {
-        document.getElementById('fError').textContent =
-          `Fix CSV before importing — these players have a member number but wsrc_member is not 1: ${conflicted.join(', ')}`;
-        document.getElementById('fSubmit').disabled = true;
-        return;
       }
       document.getElementById('fError').textContent = '';
       const preview = document.getElementById('importPreview');
@@ -788,11 +825,6 @@ function openBulkAddModal() {
       <input class="form-control bulk-name" placeholder="Name *" data-field="name" data-row="${i}">
       <input class="form-control bulk-email" placeholder="Email" data-field="email" data-row="${i}">
       <input class="form-control bulk-phone" placeholder="Phone" data-field="phone" data-row="${i}">
-      <label style="display:flex;align-items:center;justify-content:center;cursor:pointer;gap:4px;font-size:11px;color:var(--text-muted)">
-        <input type="checkbox" class="bulk-member-cb" data-row="${i}" checked>
-        Member
-      </label>
-      <input class="form-control bulk-member-number" placeholder="Member #" data-field="member_number" data-row="${i}">
       <button class="btn btn-ghost btn-sm bulk-remove" data-row="${i}" title="Remove row">&times;</button>
     </div>`).join('');
 
@@ -803,38 +835,23 @@ function openBulkAddModal() {
     document.querySelectorAll('.bulk-remove').forEach((btn) => {
       btn.addEventListener('click', () => {
         const idx = Number(btn.dataset.row);
-        const names    = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
-        const emails   = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
-        const phones   = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
-        const cbs      = [...document.querySelectorAll('.bulk-member-cb')].map(el => el.checked);
-        const members  = [...document.querySelectorAll('.bulk-member-number')].map(el => el.value);
-        names.splice(idx, 1); emails.splice(idx, 1); phones.splice(idx, 1); cbs.splice(idx, 1); members.splice(idx, 1);
+        const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
+        const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
+        const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
+        names.splice(idx, 1); emails.splice(idx, 1); phones.splice(idx, 1);
         rowCount = Math.max(1, rowCount - 1);
         rebuild();
-        document.querySelectorAll('.bulk-name').forEach((el, i)          => { el.value   = names[i]   || ''; });
-        document.querySelectorAll('.bulk-email').forEach((el, i)         => { el.value   = emails[i]  || ''; });
-        document.querySelectorAll('.bulk-phone').forEach((el, i)         => { el.value   = phones[i]  || ''; });
-        document.querySelectorAll('.bulk-member-cb').forEach((el, i)     => { el.checked = cbs[i] !== undefined ? cbs[i] : true; });
-        document.querySelectorAll('.bulk-member-number').forEach((el, i) => { el.value   = members[i] || ''; });
-        // Re-run toggle for each row after restore
-        document.querySelectorAll('.bulk-member-cb').forEach((cb) => cb.dispatchEvent(new Event('change')));
+        document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
+        document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
+        document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
       });
-    });
-
-    // Toggle member # based on WSRC member checkbox
-    document.querySelectorAll('.bulk-member-cb').forEach((cb) => {
-      const row = cb.closest('.bulk-row');
-      const inp = row.querySelector('.bulk-member-number');
-      const toggle = () => { inp.disabled = !cb.checked; if (!cb.checked) inp.value = ''; };
-      toggle();
-      cb.addEventListener('change', toggle);
     });
   };
 
   modal.open('Add Multiple Players', `
     <p class="text-muted" style="font-size:13px;margin-bottom:16px">Fill in each player's details. Rows without a name will be skipped.</p>
     <div class="bulk-header">
-      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span style="text-align:center">WSRC<br>Member</span><span>Member #</span><span></span>
+      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span></span>
     </div>
     <div id="bulkRows">${renderRows(rowCount)}</div>
     <button class="btn btn-outline btn-sm" id="bulkAddRow" style="margin-top:10px">+ Add Row</button>
@@ -847,31 +864,24 @@ function openBulkAddModal() {
   rebuild();
 
   document.getElementById('bulkAddRow').addEventListener('click', () => {
-    const names   = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
-    const emails  = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
-    const phones  = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
-    const cbs     = [...document.querySelectorAll('.bulk-member-cb')].map(el => el.checked);
-    const members = [...document.querySelectorAll('.bulk-member-number')].map(el => el.value);
+    const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
+    const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
+    const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
     rowCount++;
     rebuild();
-    document.querySelectorAll('.bulk-name').forEach((el, i)          => { el.value   = names[i]   || ''; });
-    document.querySelectorAll('.bulk-email').forEach((el, i)         => { el.value   = emails[i]  || ''; });
-    document.querySelectorAll('.bulk-phone').forEach((el, i)         => { el.value   = phones[i]  || ''; });
-    document.querySelectorAll('.bulk-member-cb').forEach((el, i)     => { el.checked = cbs[i] !== undefined ? cbs[i] : true; });
-    document.querySelectorAll('.bulk-member-number').forEach((el, i) => { el.value   = members[i] || ''; });
-    document.querySelectorAll('.bulk-member-cb').forEach((cb) => cb.dispatchEvent(new Event('change')));
+    document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
+    document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
+    document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
   });
 
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const rows = [];
     document.querySelectorAll('.bulk-row').forEach((row) => {
-      const name          = row.querySelector('.bulk-name').value.trim();
-      const email         = row.querySelector('.bulk-email').value.trim();
-      const phone         = row.querySelector('.bulk-phone').value.trim();
-      const wsrc_member   = row.querySelector('.bulk-member-cb').checked;
-      const member_number = wsrc_member ? row.querySelector('.bulk-member-number').value.trim() : '';
-      if (name) rows.push({ name, email, phone, wsrc_member, member_number });
+      const name  = row.querySelector('.bulk-name').value.trim();
+      const email = row.querySelector('.bulk-email').value.trim();
+      const phone = row.querySelector('.bulk-phone').value.trim();
+      if (name) rows.push({ name, email, phone });
     });
     if (rows.length === 0) {
       document.getElementById('fError').textContent = 'Enter at least one player name.';
@@ -1067,17 +1077,18 @@ async function renderLadder() {
   document.getElementById('pageTitle').textContent = 'Ladder';
   document.getElementById('topbarActions').innerHTML = '';
 
-  [state.ladder] = await Promise.all([window.api.getLadder()]);
-  const recordsArr = await window.api.getPlayerRecords();
+  const [ladder, recordsArr] = await Promise.all([
+    window.api.getLadder(),
+    window.api.getPlayerRecords(),
+  ]);
+  state.ladder = ladder;
   const records = Array.isArray(recordsArr)
     ? Object.fromEntries(recordsArr.map((r) => [r.id, r]))
     : recordsArr;
 
   const content = document.getElementById('mainContent');
 
-  const visible = state.ladder.filter((p) => !p.exclude_from_ladder);
-
-  if (visible.length === 0) {
+  if (ladder.length === 0) {
     content.innerHTML = `
       <div class="table-card">
         <div class="empty-state">
@@ -1088,156 +1099,107 @@ async function renderLadder() {
     return;
   }
 
-  const adminMode = isAdmin();
+  const myId  = state.currentUser?.playerId;
+  const top10 = ladder.slice(0, 10);
+  const playerInitials = (name) => {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
 
-  if (adminMode) {
-    content.innerHTML = `
-      <div class="table-card">
-        <div class="table-toolbar">
-          <span class="text-muted">${visible.length} player${visible.length !== 1 ? 's' : ''} &mdash; drag rows or use arrows to reorder</span>
+  const rankChangeBadge = (change) => {
+    if (!change || change === 0) return '';
+    if (change > 0) return `<span class="ldr-change ldr-change-up">↑${change}</span>`;
+    return `<span class="ldr-change ldr-change-down">↓${Math.abs(change)}</span>`;
+  };
+
+  const top10HTML = top10.map((p, i) => {
+    const rec   = records[p.id] || { wins: 0, losses: 0 };
+    const total = rec.wins + rec.losses;
+    const pct   = total > 0 ? Math.round(rec.wins / total * 100) : 0;
+    const isMe  = p.id === myId;
+    const nameParts = (p.name || '').trim().split(/\s+/);
+    const firstName = nameParts.slice(0, -1).join(' ') || nameParts[0];
+    const lastName  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+    const posClass  = i < 3 ? ` ldr-card-pos-${i + 1}` : (isMe ? ' ldr-card-me' : '');
+    return `
+      <div class="ldr-card${posClass}" data-action="view-profile" data-id="${p.id}">
+        <div class="ldr-card-avatar-wrap">
+          <div class="ldr-avatar ldr-avatar-lg">${playerInitials(p.name)}</div>
         </div>
-        <div class="ladder-list" id="ladderList">
-          ${visible.map((p, i) => {
-            const rec = records[p.id] || { wins: 0, losses: 0 };
-            const rating = p.club_locker_rating != null ? Number(p.club_locker_rating).toFixed(2) : null;
-            const ratingBadge = rating ? `<span class="ladder-rating">${rating}</span>` : '';
-            return `
-            <div class="ladder-row" draggable="true" data-id="${p.id}" data-idx="${i}">
-              <span class="ladder-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
-              <span class="ladder-rank">${i + 1}</span>
-              <a class="ladder-name player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a>
-              ${ratingBadge}
-              <span class="ladder-record">${rec.wins}W – ${rec.losses}L</span>
-              <div class="ladder-controls">
-                <button class="rank-btn" data-action="ladder-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
-                <button class="rank-btn" data-action="ladder-down" data-idx="${i}" ${i === visible.length - 1 ? 'disabled' : ''}>&#9660;</button>
-              </div>
-            </div>`;
-          }).join('')}
+        <div class="ldr-card-rank-row">
+          <span class="ldr-card-rank">#${i + 1}</span>
+          ${rankChangeBadge(p.rank_change)}
+          ${isMe ? '<span class="ldr-card-you">YOU</span>' : ''}
         </div>
-      </div>`;
-  } else {
-    const top10 = visible.slice(0, 10);
-    const rest  = visible.slice(10);
-    const myId  = state.currentUser?.playerId;
-
-    const top10HTML = top10.map((p, i) => {
-      const rec   = records[p.id] || { wins: 0, losses: 0 };
-      const total = rec.wins + rec.losses;
-      const pct   = total > 0 ? Math.round(rec.wins / total * 100) : null;
-      const isMe  = p.id === myId;
-      const posClass = i < 3 ? ` ldr-card-pos-${i + 1}` : (isMe ? ' ldr-card-me' : '');
-      return `
-        <div class="ldr-card${posClass}" data-action="view-profile" data-id="${p.id}">
-          <div class="ldr-card-rank">#${i + 1}</div>
-          <div class="ldr-card-name">${esc(p.name)}</div>
-          ${isMe ? '<div class="ldr-card-you">YOU</div>' : ''}
-          <div class="ldr-card-record">${rec.wins}W &ndash; ${rec.losses}L</div>
-          ${pct !== null ? `<div class="ldr-card-pct">${pct}%</div>` : ''}
-        </div>`;
-    }).join('');
-
-    const restRowHTML = (p, i) => {
-      const rec  = records[p.id] || { wins: 0, losses: 0 };
-      const isMe = p.id === myId;
-      return `
-        <div class="ldr-rest-row${isMe ? ' ldr-rest-me' : ''}" data-action="view-profile" data-id="${p.id}">
-          <span class="ldr-rest-rank">${i + 1}</span>
-          <span class="ldr-rest-name">${esc(p.name)}${isMe ? '<span class="ldr-you-chip">YOU</span>' : ''}</span>
-          <span class="ldr-rest-record">${rec.wins}W &ndash; ${rec.losses}L</span>
-        </div>`;
-    };
-
-    content.innerHTML = `
-      <div class="ldr-player-wrap" id="ladderList">
-        <div class="ldr-section-block">
-          <div class="ldr-section-heading">Top 10</div>
-          <div class="ldr-top10-scroll">
-            ${top10HTML}
+        <div class="ldr-card-fname">${esc(firstName)}</div>
+        ${lastName ? `<div class="ldr-card-lname">${esc(lastName)}</div>` : ''}
+        <div class="ldr-card-stats">
+          <div class="ldr-stat ldr-stat-w">
+            <span class="ldr-stat-num">${rec.wins}</span>
+            <span class="ldr-stat-label">WON</span>
+          </div>
+          <div class="ldr-stat ldr-stat-l">
+            <span class="ldr-stat-num">${rec.losses}</span>
+            <span class="ldr-stat-label">LOST</span>
           </div>
         </div>
-        ${rest.length > 0 ? `
-          <div class="ldr-section-block">
-            <div class="ldr-section-heading">All Players</div>
-            <div class="ldr-rest-list">
-              ${rest.map((p, i) => restRowHTML(p, i + 10)).join('')}
-            </div>
-          </div>` : ''}
+        <div class="ldr-card-pct-row">
+          <span class="ldr-pct-val">${total > 0 ? pct + '%' : '—'}</span>
+          <div class="ldr-pct-bar"><div class="ldr-pct-fill" style="width:${pct}%"></div></div>
+        </div>
       </div>`;
-  }
+  }).join('');
 
-  // Arrow buttons + player profile links
-  // data-idx is the index within `visible`; map back to state.ladder via player id
-  const list = document.getElementById('ladderList');
-  list.addEventListener('click', async (e) => {
-    const action = e.target.closest('[data-action]')?.dataset.action;
-    if (!action) return;
-    if (action === 'view-profile') {
-      openPlayerProfile(Number(e.target.closest('[data-action]').dataset.id));
-      return;
-    }
-    const visIdx = Number(e.target.closest('[data-action]').dataset.idx);
-    const playerId = visible[visIdx]?.id;
-    const fullIdx = state.ladder.findIndex((p) => p.id === playerId);
-    if (fullIdx === -1) return;
-    if (action === 'ladder-up' && fullIdx > 0) {
-      [state.ladder[fullIdx - 1], state.ladder[fullIdx]] = [state.ladder[fullIdx], state.ladder[fullIdx - 1]];
-    } else if (action === 'ladder-down' && fullIdx < state.ladder.length - 1) {
-      [state.ladder[fullIdx], state.ladder[fullIdx + 1]] = [state.ladder[fullIdx + 1], state.ladder[fullIdx]];
-    } else {
-      return;
-    }
-    await saveLadder();
-    renderLadder(showNonMembers);
+  const allRowHTML = (p, rank) => {
+    const rec   = records[p.id] || { wins: 0, losses: 0 };
+    const total = rec.wins + rec.losses;
+    const pct   = total > 0 ? Math.round(rec.wins / total * 100) : null;
+    const isMe  = p.id === myId;
+    return `
+      <div class="ldr-all-row${isMe ? ' ldr-all-me' : ''}" data-action="view-profile" data-id="${p.id}">
+        <span class="ldr-all-rank">${rank}</span>
+        <div class="ldr-all-player">
+          <div class="ldr-avatar ldr-avatar-sm">${playerInitials(p.name)}</div>
+          <span class="ldr-all-name">${esc(p.name)}${isMe ? '<span class="ldr-you-chip">YOU</span>' : ''}</span>
+          ${rankChangeBadge(p.rank_change)}
+        </div>
+        <span class="ldr-all-stat">${rec.wins}</span>
+        <span class="ldr-all-stat">${rec.losses}</span>
+        <span class="ldr-all-stat">${total}</span>
+        <span class="ldr-all-stat">${pct !== null ? pct + '%' : '—'}</span>
+      </div>`;
+  };
+
+  content.innerHTML = `
+    <div class="ldr-player-wrap" id="ladderList">
+      <div class="ldr-section-block">
+        <div class="section-title">TOP 10 <span class="divider"></span></div>
+        <div class="ldr-top10-scroll">
+          ${top10HTML}
+        </div>
+      </div>
+      <div class="ldr-section-block">
+        <div class="section-title">ALL MEMBERS <span class="divider"></span> <span class="ldr-total">${ladder.length} players</span></div>
+        <div class="ldr-all-table">
+          <div class="ldr-all-header">
+            <span class="ldr-all-rank">#</span>
+            <span class="ldr-all-player">PLAYER</span>
+            <span class="ldr-all-stat">WON</span>
+            <span class="ldr-all-stat">LOST</span>
+            <span class="ldr-all-stat">PLAYED</span>
+            <span class="ldr-all-stat">WIN %</span>
+          </div>
+          ${ladder.map((p, i) => allRowHTML(p, i + 1)).join('')}
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('ladderList').addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action="view-profile"]');
+    if (el) openPlayerProfile(Number(el.dataset.id));
   });
-
-  // Drag-and-drop (admin only)
-  let dragIdx = null;
-
-  if (adminMode) list.querySelectorAll('.ladder-row').forEach((row) => {
-    row.addEventListener('dragstart', (e) => {
-      dragIdx = Number(row.dataset.idx);
-      e.dataTransfer.effectAllowed = 'move';
-      row.classList.add('dragging');
-    });
-    row.addEventListener('dragend', () => {
-      row.classList.remove('dragging');
-      list.querySelectorAll('.ladder-row').forEach((r) => r.classList.remove('drag-over'));
-    });
-    row.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      list.querySelectorAll('.ladder-row').forEach((r) => r.classList.remove('drag-over'));
-      row.classList.add('drag-over');
-
-      // Auto-scroll while dragging near viewport edges
-      const zone = 80, speed = 10;
-      const scrollEl = document.querySelector('.content');
-      if (scrollEl) {
-        const { top, bottom } = scrollEl.getBoundingClientRect();
-        if (e.clientY < top + zone) scrollEl.scrollBy(0, -speed);
-        else if (e.clientY > bottom - zone) scrollEl.scrollBy(0, speed);
-      }
-    });
-    row.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      const dropVisIdx = Number(row.dataset.idx);
-      if (dragIdx === null || dragIdx === dropVisIdx) return;
-      const fromId = visible[dragIdx]?.id;
-      const toId = visible[dropVisIdx]?.id;
-      const fromFull = state.ladder.findIndex((p) => p.id === fromId);
-      const toFull = state.ladder.findIndex((p) => p.id === toId);
-      if (fromFull === -1 || toFull === -1) return;
-      const [moved] = state.ladder.splice(fromFull, 1);
-      state.ladder.splice(toFull, 0, moved);
-      await saveLadder();
-      renderLadder(showNonMembers);
-    });
-  });
-}
-
-async function saveLadder() {
-  await window.api.updateLadder(state.ladder.map((p) => p.id));
 }
 
 // ===== LEAGUES PAGE =====

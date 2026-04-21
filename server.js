@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
@@ -16,21 +17,33 @@ function serverEsc(str) {
 
 const PORT = process.env.PORT || 8080;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
-const ADMIN_PASSWORD = process.env.SITE_PASSWORD || 'wsrc2025';
-const SESSION_SECRET = process.env.SESSION_SECRET || 'wsrc-dev-secret-change-in-production';
+const ADMIN_PASSWORD = process.env.SITE_PASSWORD;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 const COOKIE_NAME = 'wsrc_session';
+
+if (!ADMIN_PASSWORD || !SESSION_SECRET) {
+  console.error('\n  ERROR: SITE_PASSWORD and SESSION_SECRET environment variables must be set.');
+  console.error('  Copy .env.example to .env and fill in the values.\n');
+  process.exit(1);
+}
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 const wrap = (fn) => (req, res) =>
-  fn(req, res).catch((err) => res.status(500).json({ error: err.message || String(err) }));
+  fn(req, res).catch((err) => {
+    console.error(err);
+    res.status(500).json({ error: 'An internal error occurred' });
+  });
 
 // ===== SESSION TOKENS =====
 
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 function signSession(payload) {
-  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const withExp = { ...payload, exp: Date.now() + SESSION_TTL_MS };
+  const data = Buffer.from(JSON.stringify(withExp)).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('hex');
   return `${data}.${sig}`;
 }
@@ -63,13 +76,15 @@ function getSession(req) {
   return verifySession(parseCookies(req)[COOKIE_NAME]);
 }
 
+const SECURE_FLAG = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+
 function setSessionCookie(res, payload) {
   const token = signSession(payload);
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax`);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}`);
 }
 
 function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}; Max-Age=0`);
 }
 
 // ===== AUTH HELPERS =====
@@ -180,7 +195,7 @@ app.post('/login', wrap(async (req, res) => {
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE LOWER(email) = LOWER(?)').get([email.trim()]);
   if (!player) {
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'No account found for that email.', body: loginFormBody() }));
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'Invalid email or password.', body: loginFormBody() }));
   }
   const account = db.prepare('SELECT * FROM user_accounts WHERE player_id = ?').get(player.id);
   if (!account || !account.password_hash) {
@@ -188,7 +203,7 @@ app.post('/login', wrap(async (req, res) => {
   }
   const match = await bcrypt.compare(password || '', account.password_hash);
   if (!match) {
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect password.', body: loginFormBody() }));
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'Invalid email or password.', body: loginFormBody() }));
   }
 
   setSessionCookie(res, { role: 'player', playerId: player.id });
@@ -796,7 +811,7 @@ app.put('/api/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
 }));
 
 app.put('/api/matches/:id/score', requireAdmin, wrap(async (req, res) => {
-  await leagueModel.updateMatchScore({ matchId: Number(req.params.id), ...req.body });
+  await leagueModel.updateMatchScore({ matchId: Number(req.params.id), submittedByPlayerId: null, ...req.body });
   res.json({ ok: true });
 }));
 
@@ -809,7 +824,7 @@ app.put('/api/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
 
   const db = getDB();
   const match = db.prepare(`
-    SELECT m.id, m.player1_id, m.player2_id,
+    SELECT m.id, m.player1_id, m.player2_id, m.player1_score,
            s1.sub_player_id AS p1_sub, s2.sub_player_id AS p2_sub
     FROM matches m
     LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
@@ -818,6 +833,10 @@ app.put('/api/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   `).get(matchId);
 
   if (!match) return res.status(404).json({ error: 'Match not found' });
+
+  if (match.player1_score !== null) {
+    return res.status(409).json({ error: 'Score has already been reported for this match' });
+  }
 
   const effP1 = match.p1_sub ?? match.player1_id;
   const effP2 = match.p2_sub ?? match.player2_id;
@@ -836,7 +855,7 @@ app.put('/api/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 games (e.g. 3–1, 3–2)' });
 
   const winnerId = p1Score > p2Score ? match.player1_id : match.player2_id;
-  await leagueModel.updateMatchScore({ matchId, player1Score: p1Score, player2Score: p2Score, winnerId });
+  await leagueModel.updateMatchScore({ matchId, player1Score: p1Score, player2Score: p2Score, winnerId, submittedByPlayerId: playerId });
   res.json({ ok: true });
 }));
 
@@ -921,11 +940,94 @@ app.get('/api/ladder', wrap(async (req, res) => {
   res.json(await ladderModel.getLadder());
 }));
 
-app.put('/api/ladder', requireAdmin, wrap(async (req, res) => {
-  const { playerIds } = req.body;
-  if (!Array.isArray(playerIds)) return res.status(400).json({ error: 'playerIds must be an array' });
-  await ladderModel.setLadder(playerIds);
-  res.json({ ok: true });
+// ===== ACTIVITY FEED =====
+
+app.get('/api/activity', wrap(async (req, res) => {
+  const db = getDB();
+
+  // Build the same initial ranking as getLadder()
+  const players = db.prepare(`
+    SELECT id, club_locker_rating, exclude_from_ladder
+    FROM players
+    WHERE exclude_from_ladder = 0 OR exclude_from_ladder IS NULL
+    ORDER BY
+      CASE WHEN club_locker_rating IS NULL THEN 1 ELSE 0 END ASC,
+      club_locker_rating DESC,
+      name ASC
+  `).all();
+  const ladderPlayerIds = new Set(players.map((p) => p.id));
+  let ranking = players.map((p) => p.id);
+
+  // All scored matches in chronological order, with display data
+  const allMatches = db.prepare(`
+    SELECT
+      m.id,
+      m.player1_id,
+      m.player2_id,
+      m.player1_score,
+      m.player2_score,
+      m.winner_id,
+      m.submitted_by_player_id,
+      sub_by.name AS submitted_by_name,
+      COALESCE(sp1.name, p1.name) AS p1_name,
+      COALESCE(sp2.name, p2.name) AS p2_name,
+      COALESCE(s1.sub_player_id, m.player1_id) AS eff_p1_id,
+      COALESCE(s2.sub_player_id, m.player2_id) AS eff_p2_id,
+      COALESCE(m.confirmed_at, w.date) AS confirmed_at
+    FROM matches m
+    JOIN players p1 ON p1.id = m.player1_id
+    JOIN players p2 ON p2.id = m.player2_id
+    JOIN team_matchups tm ON m.matchup_id = tm.id
+    JOIN weeks w ON tm.week_id = w.id
+    LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
+    LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+    LEFT JOIN players sp1 ON sp1.id = s1.sub_player_id
+    LEFT JOIN players sp2 ON sp2.id = s2.sub_player_id
+    LEFT JOIN players sub_by ON sub_by.id = m.submitted_by_player_id
+    WHERE m.winner_id IS NOT NULL
+      AND (m.skipped = 0 OR m.skipped IS NULL)
+    ORDER BY COALESCE(m.confirmed_at, w.date) ASC, m.id ASC
+  `).all();
+
+  // Walk every match chronologically:
+  //   1. Snapshot pre-match ranks for activity items within the 7-day window
+  //   2. Apply the ladder effect for all matches (so ranks stay accurate)
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const activity = [];
+
+  for (const match of allMatches) {
+    const effP1Id     = match.eff_p1_id;
+    const effP2Id     = match.eff_p2_id;
+    const effWinnerId = match.winner_id === match.player1_id ? effP1Id : effP2Id;
+    const effLoserId  = match.winner_id === match.player1_id ? effP2Id : effP1Id;
+
+    const p1Idx     = ranking.indexOf(effP1Id);
+    const p2Idx     = ranking.indexOf(effP2Id);
+    const winnerIdx = ranking.indexOf(effWinnerId);
+    const loserIdx  = ranking.indexOf(effLoserId);
+
+    // Capture pre-match positions for matches within the window
+    if ((match.confirmed_at || '') >= cutoff) {
+      // places_moved: how many spots the winner jumps up (only when upset occurs)
+      const placesWon = (winnerIdx !== -1 && loserIdx !== -1 && winnerIdx > loserIdx)
+        ? winnerIdx - loserIdx : 0;
+      activity.push({
+        ...match,
+        p1_pos: p1Idx !== -1 ? p1Idx + 1 : null,
+        p2_pos: p2Idx !== -1 ? p2Idx + 1 : null,
+        places_moved: placesWon,
+      });
+    }
+
+    // Apply ladder movement (same logic as getLadder)
+    if (!ladderPlayerIds.has(effWinnerId) || !ladderPlayerIds.has(effLoserId)) continue;
+    if (winnerIdx === -1 || loserIdx === -1) continue;
+    if (winnerIdx <= loserIdx) continue;
+    ranking.splice(winnerIdx, 1);
+    ranking.splice(loserIdx, 0, effWinnerId);
+  }
+
+  res.json(activity.reverse()); // newest first
 }));
 
 // ===== HELPERS =====

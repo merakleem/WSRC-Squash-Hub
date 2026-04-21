@@ -117,10 +117,11 @@ async function getMatches(matchupId) {
   );
 }
 
-async function updateMatchScore({ matchId, player1Score, player2Score, winnerId }) {
+async function updateMatchScore({ matchId, player1Score, player2Score, winnerId, submittedByPlayerId = null }) {
   return run(
-    'UPDATE matches SET player1_score = ?, player2_score = ?, winner_id = ? WHERE id = ?',
-    [player1Score, player2Score, winnerId || null, matchId]
+    `UPDATE matches SET player1_score = ?, player2_score = ?, winner_id = ?,
+     confirmed_at = datetime('now'), submitted_by_player_id = ? WHERE id = ?`,
+    [player1Score, player2Score, winnerId || null, submittedByPlayerId ?? null, matchId]
   );
 }
 

@@ -8,28 +8,18 @@ async function getPlayerById(id) {
   return get('SELECT * FROM players WHERE id = ?', [id]);
 }
 
-function parseRating(val) {
-  if (val === '' || val === null || val === undefined) return null;
-  const n = parseFloat(val);
-  if (isNaN(n)) return null;
-  if (n < 1.0 || n > 7.0) throw new Error('Club Locker Rating must be between 1.0 and 7.0');
-  return Math.round(n * 100) / 100;
-}
-
-async function addPlayer({ name, email, phone, wsrc_member, club_locker_rating, member_number, exclude_from_ladder }) {
-  const rating = parseRating(club_locker_rating);
+async function addPlayer({ name, email, phone, exclude_from_ladder }) {
   const result = await run(
-    'INSERT INTO players (name, email, phone, wsrc_member, club_locker_rating, member_number, exclude_from_ladder) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [name, email || null, phone || null, wsrc_member ? 1 : 0, rating, member_number || null, exclude_from_ladder ? 1 : 0]
+    'INSERT INTO players (name, email, phone, exclude_from_ladder) VALUES (?, ?, ?, ?)',
+    [name, email || null, phone || null, exclude_from_ladder ? 1 : 0]
   );
   return getPlayerById(result.lastID);
 }
 
-async function updatePlayer({ id, name, email, phone, wsrc_member, club_locker_rating, member_number, exclude_from_ladder }) {
-  const rating = parseRating(club_locker_rating);
+async function updatePlayer({ id, name, email, phone, exclude_from_ladder }) {
   await run(
-    'UPDATE players SET name = ?, email = ?, phone = ?, wsrc_member = ?, club_locker_rating = ?, member_number = ?, exclude_from_ladder = ? WHERE id = ?',
-    [name, email || null, phone || null, wsrc_member ? 1 : 0, rating, member_number || null, exclude_from_ladder ? 1 : 0, id]
+    'UPDATE players SET name = ?, email = ?, phone = ?, exclude_from_ladder = ? WHERE id = ?',
+    [name, email || null, phone || null, exclude_from_ladder ? 1 : 0, id]
   );
   return getPlayerById(id);
 }

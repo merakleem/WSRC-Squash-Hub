@@ -119,8 +119,8 @@ h1, h2, h3, h4, h5, h6,
 .nav-icon {
   width: 17px;
   height: 17px;
-  object-fit: contain;
   flex-shrink: 0;
+  object-fit: contain; /* kept for any remaining <img> icons */
 }
 .nav-item:hover { background: rgba(255,255,255,.08); color: #fff; }
 .nav-item.active { background: rgba(255,255,255,.15); color: #fff; }
@@ -493,7 +493,7 @@ tbody td {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.45);
-  z-index: 100;
+  z-index: 400;
   align-items: center;
   justify-content: center;
 }
@@ -2027,18 +2027,38 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   gap: 28px;
 }
 .ldr-section-block { display: flex; flex-direction: column; gap: 12px; }
-.ldr-section-heading {
-  font-family: 'Barlow', sans-serif;
-  font-size: 15px;
-  font-weight: 700;
-  color: #1c2b3a;
-  letter-spacing: .01em;
+.ldr-section-block .section-title { margin-bottom: 0; }
+.ldr-total {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
+
+/* ── Ladder avatar circles ── */
+.ldr-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #1e2758;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  flex-shrink: 0;
+  user-select: none;
+}
+.ldr-avatar-sm { width: 34px; height: 34px; font-size: 12px; }
+.ldr-avatar-lg { width: 60px; height: 60px; font-size: 21px; }
 
 /* ── Horizontal scroll strip ── */
 .ldr-top10-scroll {
   display: flex;
-  gap: 14px;
+  gap: 18px;
   overflow-x: auto;
   padding-bottom: 10px;
   -webkit-overflow-scrolling: touch;
@@ -2053,13 +2073,13 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .ldr-card {
   background: #fff;
   border-radius: 14px;
-  padding: 18px 16px 16px;
+  padding: 22px 20px 20px;
   box-shadow: 0 1px 4px rgba(0,0,0,.07), 0 4px 16px rgba(0,0,0,.05);
-  min-width: 190px;
+  min-width: 195px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   cursor: pointer;
   border-top: 4px solid #dde3ee;
   transition: box-shadow .15s, transform .12s;
@@ -2077,97 +2097,211 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .ldr-card-pos-3 { border-top-color: #b87333; }
 .ldr-card-me    { border-top-color: #3b8fc8; }
 
-/* Rank number */
+/* Avatar + medal */
+.ldr-card-avatar-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.ldr-medal {
+  position: absolute;
+  bottom: -4px;
+  right: calc(50% - 38px);
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Rank row */
+.ldr-card-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 .ldr-card-rank {
   font-family: 'Barlow', sans-serif;
-  font-size: 38px;
+  font-size: 22px;
   font-weight: 800;
   color: #1e2758;
   line-height: 1;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 .ldr-card-pos-1 .ldr-card-rank { color: #c9a227; }
 .ldr-card-pos-2 .ldr-card-rank { color: #7e8c9a; }
 .ldr-card-pos-3 .ldr-card-rank { color: #b87333; }
 .ldr-card-me    .ldr-card-rank { color: #3b8fc8; }
 
-/* Player name */
-.ldr-card-name {
+/* Rank change pills */
+.ldr-change {
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.ldr-change-up   { background: #d5f5e3; color: #1e6b3c; }
+.ldr-change-down { background: #fdecea; color: #a93226; }
+
+/* YOU badge */
+.ldr-card-you {
+  font-size: 9px;
+  font-weight: 700;
+  background: #3b8fc8;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 8px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+/* Player name lines */
+.ldr-card-fname {
   font-size: 14px;
   font-weight: 700;
   color: #1c2b3a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 140px;
+}
+.ldr-card-lname {
+  font-size: 14px;
+  font-weight: 400;
+  color: #1c2b3a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: -3px;
 }
 
-/* YOU badge */
-.ldr-card-you {
-  font-size: 10px;
-  font-weight: 700;
-  background: #3b8fc8;
-  color: #fff;
-  padding: 2px 7px;
+/* W / L stat boxes */
+.ldr-card-stats {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ldr-stat {
+  flex: 1;
   border-radius: 8px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  align-self: flex-start;
+  padding: 6px 4px 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
 }
-
-/* Record + win % */
-.ldr-card-record {
-  font-size: 12px;
-  color: #6b7e93;
-  font-weight: 500;
-  margin-top: 4px;
-}
-.ldr-card-pct {
+.ldr-stat-w { background: #e8f8ee; }
+.ldr-stat-l { background: #fdecea; }
+.ldr-stat-num {
   font-family: 'Barlow', sans-serif;
-  font-size: 20px;
-  font-weight: 700;
-  color: #3b8fc8;
+  font-size: 18px;
+  font-weight: 800;
   line-height: 1;
 }
+.ldr-stat-w .ldr-stat-num { color: #1e6b3c; }
+.ldr-stat-l .ldr-stat-num { color: #a93226; }
+.ldr-stat-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.ldr-stat-w .ldr-stat-label { color: #2e7d44; }
+.ldr-stat-l .ldr-stat-label { color: #c0392b; }
 
-/* ── All Players rest list ── */
-.ldr-rest-list {
+/* Win % with progress bar */
+.ldr-card-pct-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+}
+.ldr-pct-val {
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e2758;
+  min-width: 32px;
+}
+.ldr-pct-bar {
+  flex: 1;
+  height: 5px;
+  background: #e4e9f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ldr-pct-fill {
+  height: 100%;
+  background: #3b8fc8;
+  border-radius: 3px;
+  transition: width .3s;
+}
+
+/* ── All Members table ── */
+.ldr-all-table {
   background: #fff;
   border-radius: 14px;
   box-shadow: 0 1px 4px rgba(0,0,0,.07), 0 4px 16px rgba(0,0,0,.05);
   overflow: hidden;
 }
-.ldr-rest-row {
-  display: flex;
+.ldr-all-header,
+.ldr-all-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 52px 52px 62px 52px;
   align-items: center;
-  gap: 12px;
-  padding: 11px 18px;
+  gap: 0;
+  padding: 10px 16px;
+}
+.ldr-all-header {
+  background: #f7f9fc;
+  border-bottom: 1px solid #edf0f5;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #7e8c9a;
+}
+.ldr-all-row {
   border-bottom: 1px solid #f0f3f7;
   cursor: pointer;
   transition: background .12s;
 }
-.ldr-rest-row:last-child { border-bottom: none; }
-.ldr-rest-row:hover { background: #f7f9fc; }
-.ldr-rest-row.ldr-rest-me { background: #eaf2fb; font-weight: 600; }
-.ldr-rest-rank {
-  font-size: 13px;
+.ldr-all-row:last-child { border-bottom: none; }
+.ldr-all-row:hover { background: #f7f9fc; }
+.ldr-all-row.ldr-all-me { background: #eaf2fb; }
+.ldr-all-rank {
+  font-size: 12px;
   font-weight: 700;
-  color: #6b7e93;
-  min-width: 28px;
+  color: #9ca8b6;
 }
-.ldr-rest-name {
-  flex: 1;
+.ldr-all-row .ldr-all-rank {
+  font-size: 13px;
+  color: #6b7e93;
+}
+.ldr-all-player {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+.ldr-all-name {
   font-size: 14px;
   color: #1c2b3a;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.ldr-rest-record {
+.ldr-all-me .ldr-all-name { font-weight: 600; }
+.ldr-all-stat {
   font-size: 13px;
   color: #6b7e93;
-  white-space: nowrap;
+  text-align: center;
 }
+.ldr-all-header .ldr-all-stat { font-size: 10px; color: #7e8c9a; text-align: center; }
+.ldr-all-header .ldr-all-player { font-size: 10px; color: #7e8c9a; }
 .ldr-you-chip {
   font-size: 10px;
   font-weight: 700;
@@ -2195,14 +2329,18 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   margin-top: 1px;
 }
 
+/* When dashboard is active, content hands scrolling to dp-main */
+.content--dashboard {
+  overflow: hidden !important;
+  padding: 0 !important;
+}
 .dp-wrap {
-  margin: -24px -24px 0;
-  min-height: 100%;
+  height: 100%;
 }
 .dp-columns {
   display: flex;
   align-items: stretch;
-  min-height: calc(100vh - 60px); /* fill below topbar */
+  height: 100%;
 }
 .dp-main {
   flex: 1;
@@ -2212,13 +2350,18 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   display: flex;
   flex-direction: column;
   gap: 20px;
+  overflow-y: auto;
 }
 .dp-right {
-  width: 260px;
+  width: 300px;
   flex-shrink: 0;
   background: #fff;
   border-left: 1px solid var(--border);
-  padding: 20px 20px 32px;
+  padding: 20px 20px 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 .dp-right-title {
   font-family: 'Barlow', sans-serif;
@@ -2228,11 +2371,47 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 12px;
+  flex-shrink: 0;
+}
+.dp-activity-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 20px;
 }
 .dp-right-empty {
   font-size: 13px;
   color: var(--text-muted);
   font-style: italic;
+}
+.dp-activity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.dp-activity-item:last-child { border-bottom: none; }
+.dp-activity-text {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+.dp-activity-winner { font-weight: 600; }
+.dp-activity-verb   { color: var(--text-muted); }
+.dp-activity-score  { font-family: 'Barlow', sans-serif; font-weight: 700; color: var(--primary); }
+.dp-activity-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.dp-activity-by {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.dp-activity-moves {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1e8449;
 }
 
 /* ── Hero card ── */
@@ -2745,7 +2924,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 /* ── Responsive ── */
 @media (max-width: 1100px) {
   .dp-right { display: none; }
-  .dp-columns { min-height: unset; }
 }
 @media (max-width: 860px) {
   .dp-bento { grid-template-columns: 1fr 1fr; }
