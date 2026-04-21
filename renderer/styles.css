@@ -3014,7 +3014,8 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .db-rank-ladder-card { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
-  .dp-wrap { padding: 14px 14px 28px; }
+  .dp-wrap { padding: 0; }
+  .dp-main { padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
   .dp-bento { grid-template-columns: 1fr; }
   .db-rank-ladder-card { grid-column: auto; }
   .db-results-row { grid-template-columns: repeat(2, 1fr); }
