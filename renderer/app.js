@@ -37,7 +37,7 @@ if (typeof window !== 'undefined' && !window.api) {
     sendInvite:        (id) => _apiFetch('POST', `/api/players/${id}/send-invite`),
     sendReset:         (id) => _apiFetch('POST', `/api/players/${id}/send-reset`),
     reportPlayerScore: (d)  => _apiFetch('PUT',  `/api/matches/${d.matchId}/player-score`, d),
-    getActivity:        ()   => _apiFetch('GET',  '/api/activity'),
+    getActivity:        (days) => _apiFetch('GET', `/api/activity${days ? `?days=${days}` : ''}`),
   };
 }
 
@@ -180,6 +180,7 @@ function renderPage() {
     case 'dashboard':     renderDashboard(); break;
     case 'players':       renderPlayers(); break;
     case 'ladder':        renderLadder(); break;
+    case 'activity':      renderClubActivity(); break;
     case 'leagues':       renderLeagues(); break;
     case 'leagueDetail':  renderLeagueDetail(); break;
     case 'createLeague':  renderCreateLeague(); break;
@@ -243,6 +244,69 @@ function buildActivityHTML(activity, isAdmin = false) {
   return `<div class="dp-activity-scroll">${items}</div>`;
 }
 
+// ===== CLUB ACTIVITY PAGE =====
+async function renderClubActivity(days = 7) {
+  document.getElementById('pageTitle').textContent = 'Club Activity';
+  document.getElementById('topbarActions').innerHTML = '';
+
+  const content = document.getElementById('mainContent');
+  content.innerHTML = `<div class="ca-loading">Loading…</div>`;
+
+  const activity = await window.api.getActivity(days);
+
+  const itemsHTML = (activity && activity.length > 0) ? activity.map((m) => {
+    const p1Won      = m.winner_id === m.player1_id;
+    const winnerName = abbrevName(p1Won ? m.p1_name : m.p2_name);
+    const loserName  = abbrevName(p1Won ? m.p2_name : m.p1_name);
+    const winnerPos  = p1Won ? m.p1_pos : m.p2_pos;
+    const loserPos   = p1Won ? m.p2_pos : m.p1_pos;
+    const wScore     = p1Won ? m.player1_score : m.player2_score;
+    const lScore     = p1Won ? m.player2_score : m.player1_score;
+    const wLabel     = winnerPos ? `(#${winnerPos}) ` : '';
+    const lLabel     = loserPos  ? `(#${loserPos}) ` : '';
+    const movesUp    = m.places_moved > 0
+      ? `<div class="ca-item-moves">↑ ${esc(winnerName)} moves up ${m.places_moved} place${m.places_moved !== 1 ? 's' : ''}</div>`
+      : '';
+    const submittedBy = isAdmin()
+      ? `<div class="ca-item-by">Submitted by ${esc(m.submitted_by_name || 'Admin')}</div>`
+      : '';
+    return `
+      <div class="ca-item">
+        <div class="ca-item-main">
+          <span class="ca-winner">${esc(wLabel)}${esc(winnerName)}</span>
+          <span class="ca-verb"> beat </span>
+          <span class="ca-loser">${esc(lLabel)}${esc(loserName)}</span>
+          <span class="ca-score"> ${wScore}–${lScore}</span>
+        </div>
+        <div class="ca-item-meta">
+          <span class="ca-time">${esc(timeAgo(m.confirmed_at))}</span>
+          ${movesUp}${submittedBy}
+        </div>
+      </div>`;
+  }).join('') : `<div class="ca-empty">No activity in the past ${days} day${days !== 1 ? 's' : ''}.</div>`;
+
+  const loadMoreDays   = days === 7 ? 30 : days === 30 ? 90 : days === 90 ? 365 : null;
+  const loadMoreLabel  = loadMoreDays === 30 ? 'Load last 30 days' : loadMoreDays === 90 ? 'Load last 90 days' : loadMoreDays === 365 ? 'Load last year' : null;
+  const loadMoreHTML   = loadMoreLabel
+    ? `<div class="ca-load-more"><button class="btn btn-secondary" id="btnLoadMore">${loadMoreLabel}</button></div>`
+    : '';
+
+  content.innerHTML = `
+    <div class="ca-wrap">
+      <div class="section-title">
+        Last ${days} day${days !== 1 ? 's' : ''}
+        <span class="divider"></span>
+        <span class="ca-count">${activity.length} match${activity.length !== 1 ? 'es' : ''}</span>
+      </div>
+      <div class="ca-list">${itemsHTML}</div>
+      ${loadMoreHTML}
+    </div>`;
+
+  if (loadMoreLabel) {
+    document.getElementById('btnLoadMore').addEventListener('click', () => renderClubActivity(loadMoreDays));
+  }
+}
+
 async function renderDashboard() {
   document.getElementById('pageTitle').textContent = 'Dashboard';
   document.getElementById('topbarActions').innerHTML = '';
@@ -265,17 +329,17 @@ async function renderDashboard() {
               </div>
               <div class="dash-admin-grid">
                 <button class="dash-admin-card" onclick="navigate('players')">
-                  <div class="dash-admin-card-icon"><img src="/assets/players-icon-blue.png" alt=""></div>
+                  <div class="dash-admin-card-icon"><svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="#3b8fc8"><path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path fill-rule="evenodd" d="M5.216 14A2.238 2.238 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.325 6.325 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1h4.216z"/><path d="M4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/></svg></div>
                   <div class="dash-admin-card-label">Manage Players</div>
                   <div class="dash-admin-card-sub">View, add, and edit players</div>
                 </button>
                 <button class="dash-admin-card" onclick="navigate('leagues')">
-                  <div class="dash-admin-card-icon"><img src="/assets/leagues-icon-blue.png" alt=""></div>
+                  <div class="dash-admin-card-icon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 9H21M7 3V5M17 3V5M6 13H8M6 17H8M11 13H13M11 17H13M16 13H18M16 17H18M6.2 21H17.8C18.9201 21 19.4802 21 19.908 20.782C20.2843 20.5903 20.5903 20.2843 20.782 19.908C21 19.4802 21 18.9201 21 17.8V8.2C21 7.07989 21 6.51984 20.782 6.09202C20.5903 5.71569 20.2843 5.40973 19.908 5.21799C19.4802 5 18.9201 5 17.8 5H6.2C5.0799 5 4.51984 5 4.09202 5.21799C3.71569 5.40973 3.40973 5.71569 3.21799 6.09202C3 6.51984 3 7.07989 3 8.2V17.8C3 18.9201 3 19.4802 3.21799 19.908C3.40973 20.2843 3.71569 20.5903 4.09202 20.782C4.51984 21 5.07989 21 6.2 21Z" stroke="#3b8fc8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
                   <div class="dash-admin-card-label">Manage Leagues</div>
                   <div class="dash-admin-card-sub">Create leagues and enter scores</div>
                 </button>
                 <button class="dash-admin-card" onclick="navigate('ladder')">
-                  <div class="dash-admin-card-icon"><img src="/assets/ladder-icon-blue.png" alt=""></div>
+                  <div class="dash-admin-card-icon"><svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="#3b8fc8"><path fill-rule="evenodd" clip-rule="evenodd" d="M2 0V16H4V14H12V16H14V0H12V2H4V0H2ZM4 4V7H12V4H4ZM12 12H4V9H12V12Z"/></svg></div>
                   <div class="dash-admin-card-label">Player Rankings</div>
                   <div class="dash-admin-card-sub">View the club ladder</div>
                 </button>
@@ -471,15 +535,15 @@ async function renderDashboard() {
       <div class="db-card-title">Quick Actions</div>
       <div class="db-quick-list">
         <button class="db-quick-item" onclick="openPlayerProfile(${playerId})">
-          <svg class="db-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          <svg class="db-quick-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" fill="#3b8fc8"><g transform="translate(-180,-2159)"><g transform="translate(56,160)"><path d="M134,2008.99998 C131.783496,2008.99998 129.980955,2007.20598 129.980955,2004.99998 C129.980955,2002.79398 131.783496,2000.99998 134,2000.99998 C136.216504,2000.99998 138.019045,2002.79398 138.019045,2004.99998 C138.019045,2007.20598 136.216504,2008.99998 134,2008.99998 M137.775893,2009.67298 C139.370449,2008.39598 140.299854,2006.33098 139.958235,2004.06998 C139.561354,2001.44698 137.368965,1999.34798 134.722423,1999.04198 C131.070116,1998.61898 127.971432,2001.44898 127.971432,2004.99998 C127.971432,2006.88998 128.851603,2008.57398 130.224107,2009.67298 C126.852128,2010.93398 124.390463,2013.89498 124.004634,2017.89098 C123.948368,2018.48198 124.411563,2018.99998 125.008391,2018.99998 C125.519814,2018.99998 125.955881,2018.61598 126.001095,2018.10898 C126.404004,2013.64598 129.837274,2010.99998 134,2010.99998 C138.162726,2010.99998 141.595996,2013.64598 141.998905,2018.10898 C142.044119,2018.61598 142.480186,2018.99998 142.991609,2018.99998 C143.588437,2018.99998 144.051632,2018.48198 143.995366,2017.89098 C143.609537,2013.89498 141.147872,2010.93398 137.775893,2009.67298"/></g></g></svg>
           My Profile
         </button>
         <button class="db-quick-item" onclick="openReportScoreModal()">
-          <svg class="db-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          <svg class="db-quick-icon" viewBox="0 0 98.374 98.374" xmlns="http://www.w3.org/2000/svg" fill="#2ec610"><path d="M97.789,23.118l-7.24-7.24c-0.781-0.781-2.047-0.781-2.828,0L50.464,53.133l-13.291-13.29c-0.781-0.781-2.047-0.781-2.828,0l-7.24,7.24c-0.375,0.375-0.586,0.884-0.586,1.414c0,0.53,0.211,1.039,0.586,1.414L49.05,71.854c0.391,0.391,0.902,0.586,1.414,0.586c0.513,0,1.022-0.195,1.414-0.586l45.91-45.908c0.375-0.375,0.586-0.884,0.586-1.414C98.374,24.002,98.164,23.493,97.789,23.118z"/><path d="M73.583,80.979H10V17.395h65.098l8.485-8c0-1.104-0.896-2-2-2H2c-1.104,0-2,0.896-2,2v79.584c0,1.104,0.896,2,2,2h79.584c1.105,0,2-0.896,2-2v-37.88l-10,10.5L73.583,80.979L73.583,80.979z"/></svg>
           Report Score
         </button>
         <div class="db-quick-item db-quick-soon">
-          <svg class="db-quick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <svg class="db-quick-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="#ff7300"><path d="M23.5 13.187h-7.5v-12.187l-7.5 17.813h7.5v12.187l7.5-17.813z"/></svg>
           Challenge a Player
           <span class="db-soon-badge">Coming Soon</span>
         </div>
@@ -1165,10 +1229,10 @@ async function renderLadder() {
           <span class="ldr-all-name">${esc(p.name)}${isMe ? '<span class="ldr-you-chip">YOU</span>' : ''}</span>
           ${rankChangeBadge(p.rank_change)}
         </div>
-        <span class="ldr-all-stat">${rec.wins}</span>
-        <span class="ldr-all-stat">${rec.losses}</span>
-        <span class="ldr-all-stat">${total}</span>
-        <span class="ldr-all-stat">${pct !== null ? pct + '%' : '—'}</span>
+        <span class="ldr-all-stat ldr-col-won">${rec.wins}</span>
+        <span class="ldr-all-stat ldr-col-lost">${rec.losses}</span>
+        <span class="ldr-all-stat ldr-col-played">${total}</span>
+        <span class="ldr-all-stat ldr-col-winpct">${pct !== null ? pct + '%' : '—'}</span>
       </div>`;
   };
 
@@ -1186,10 +1250,10 @@ async function renderLadder() {
           <div class="ldr-all-header">
             <span class="ldr-all-rank">#</span>
             <span class="ldr-all-player">PLAYER</span>
-            <span class="ldr-all-stat">WON</span>
-            <span class="ldr-all-stat">LOST</span>
-            <span class="ldr-all-stat">PLAYED</span>
-            <span class="ldr-all-stat">WIN %</span>
+            <span class="ldr-all-stat ldr-col-won"><span class="ldr-col-long">WON</span><span class="ldr-col-short">W</span></span>
+            <span class="ldr-all-stat ldr-col-lost"><span class="ldr-col-long">LOST</span><span class="ldr-col-short">L</span></span>
+            <span class="ldr-all-stat ldr-col-played">PLAYED</span>
+            <span class="ldr-all-stat ldr-col-winpct">WIN %</span>
           </div>
           ${ladder.map((p, i) => allRowHTML(p, i + 1)).join('')}
         </div>

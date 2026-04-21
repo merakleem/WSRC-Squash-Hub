@@ -21,9 +21,15 @@ const ADMIN_PASSWORD = process.env.SITE_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const COOKIE_NAME = 'wsrc_session';
 
-if (!ADMIN_PASSWORD || !SESSION_SECRET) {
-  console.error('\n  ERROR: SITE_PASSWORD and SESSION_SECRET environment variables must be set.');
-  console.error('  Copy .env.example to .env and fill in the values.\n');
+const missingVars = [
+  !ADMIN_PASSWORD && 'SITE_PASSWORD',
+  !SESSION_SECRET && 'SESSION_SECRET',
+].filter(Boolean);
+
+if (missingVars.length > 0) {
+  console.error(`\n  ERROR: Missing required environment variable(s): ${missingVars.join(', ')}`);
+  console.error('  Railway: set these in your project\'s Variables tab.');
+  console.error('  Local: copy .env.example to .env and fill in the values.\n');
   process.exit(1);
 }
 
@@ -992,7 +998,8 @@ app.get('/api/activity', wrap(async (req, res) => {
   // Walk every match chronologically:
   //   1. Snapshot pre-match ranks for activity items within the 7-day window
   //   2. Apply the ladder effect for all matches (so ranks stay accurate)
-  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 3650);
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const activity = [];
 
   for (const match of allMatches) {

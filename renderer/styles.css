@@ -1735,10 +1735,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   transform: translateY(-2px);
 }
 .dash-admin-card:active { transform: translateY(0); }
-.dash-admin-card-icon img {
+.dash-admin-card-icon img,
+.dash-admin-card-icon svg {
   width: 32px;
   height: 32px;
-  opacity: 0.85;
 }
 .dash-admin-card-label {
   font-size: 15px;
@@ -2008,7 +2008,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .dash-greeting { font-size: 20px; }
   .dash-admin-grid { grid-template-columns: 1fr; gap: 10px; }
   .dash-admin-card { flex-direction: row; align-items: center; padding: 18px 16px; gap: 14px; }
-  .dash-admin-card-icon img { width: 28px; height: 28px; }
+  .dash-admin-card-icon img, .dash-admin-card-icon svg { width: 28px; height: 28px; }
   .dash-player, .dash-player-no-upcoming { grid-template-columns: 1fr; grid-template-areas: "next" "upcoming" "rank" "quick"; }
   .dash-next-card { padding: 22px 20px 20px; border-radius: 14px; min-height: unset; }
   .dash-next-you, .dash-next-opp { font-size: 19px; }
@@ -2302,6 +2302,22 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .ldr-all-header .ldr-all-stat { font-size: 10px; color: #7e8c9a; text-align: center; }
 .ldr-all-header .ldr-all-player { font-size: 10px; color: #7e8c9a; }
+
+/* Responsive column label helpers */
+.ldr-col-short { display: none; }
+
+@media (max-width: 560px) {
+  .ldr-all-header,
+  .ldr-all-row {
+    grid-template-columns: 28px 1fr 30px 30px;
+    padding: 10px 12px;
+  }
+  .ldr-col-played,
+  .ldr-col-winpct { display: none; }
+  .ldr-col-long  { display: none; }
+  .ldr-col-short { display: inline; }
+}
+
 .ldr-you-chip {
   font-size: 10px;
   font-weight: 700;
@@ -2310,6 +2326,74 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   padding: 2px 6px;
   border-radius: 8px;
   letter-spacing: .04em;
+}
+
+/* ===== CLUB ACTIVITY PAGE ===== */
+.ca-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ca-wrap .section-title { margin-bottom: 0; }
+.ca-count {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.ca-list {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.ca-item {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ca-item:last-child { border-bottom: none; }
+.ca-item-main { font-size: 14px; color: var(--text); line-height: 1.4; }
+.ca-winner { font-weight: 700; color: var(--text); }
+.ca-verb   { color: var(--text-muted); }
+.ca-loser  { color: var(--text); }
+.ca-score  { font-weight: 600; color: var(--text); }
+.ca-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.ca-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.ca-item-moves {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e8449;
+}
+.ca-item-by {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.ca-empty {
+  padding: 32px 18px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.ca-load-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
+.ca-loading {
+  color: var(--text-muted);
+  padding: 32px 0;
+  text-align: center;
 }
 
 /* ===== NEW PLAYER DASHBOARD ===== */
