@@ -1,12 +1,18 @@
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const { initDB, getDB } = require('./database/db');
 const playerService = require('./services/playerService');
 const leagueService = require('./services/leagueService');
 const leagueModel = require('./models/leagueModel');
 const ladderModel = require('./models/ladderModel');
 const { getValidConfigurations } = require('./utils/helpers');
+
+function serverEsc(str) {
+  if (str == null) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 const PORT = process.env.PORT || 8080;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
@@ -17,6 +23,9 @@ const COOKIE_NAME = 'wsrc_session';
 const app = express();
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: false }));
+
+const wrap = (fn) => (req, res) =>
+  fn(req, res).catch((err) => res.status(500).json({ error: err.message || String(err) }));
 
 // ===== SESSION TOKENS =====
 
@@ -152,7 +161,7 @@ app.get('/login', (req, res) => {
   res.send(authPage({ title: 'Sign In', body: loginFormBody() }));
 });
 
-app.post('/login', (req, res) => {
+app.post('/login', wrap(async (req, res) => {
   const { email, password } = req.body;
 
   // Admin login — email blank, password matches env var
@@ -164,22 +173,24 @@ app.post('/login', (req, res) => {
     return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect password.', body: loginFormBody() }));
   }
 
-  // Player login — authenticate with email + member number
+  // Player login — email + bcrypt password via user_accounts
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE LOWER(email) = LOWER(?)').get([email.trim()]);
   if (!player) {
     return res.status(401).send(authPage({ title: 'Sign In', error: 'No account found for that email.', body: loginFormBody() }));
   }
-  if (!player.member_number) {
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'Your member number has not been set. Contact your administrator.', body: loginFormBody() }));
+  const account = db.prepare('SELECT * FROM user_accounts WHERE player_id = ?').get(player.id);
+  if (!account || !account.password_hash) {
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'Your account has not been activated yet. Check your email for an invite link, or contact your administrator.', body: loginFormBody() }));
   }
-  if (player.member_number.toUpperCase() !== (password || '').toUpperCase()) {
-    return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect member number.', body: loginFormBody() }));
+  const match = await bcrypt.compare(password || '', account.password_hash);
+  if (!match) {
+    return res.status(401).send(authPage({ title: 'Sign In', error: 'Incorrect password.', body: loginFormBody() }));
   }
 
   setSessionCookie(res, { role: 'player', playerId: player.id });
   res.redirect('/');
-});
+}));
 
 function loginFormBody() {
   return `<form method="POST" action="/login">
@@ -188,6 +199,7 @@ function loginFormBody() {
     <label>Password</label>
     <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
     <button type="submit">Sign In</button>
+    <div class="link-row"><a href="/forgot-password">Forgot password?</a></div>
   </form>`;
 }
 
@@ -196,12 +208,95 @@ app.get('/logout', (req, res) => {
   res.redirect('/login');
 });
 
+// ===== INVITE (first-time account setup) =====
+
+function inviteFormBody(token) {
+  return `<form method="POST" action="/invite/${serverEsc(token)}">
+    <label>New Password</label>
+    <input type="password" name="password" placeholder="At least 8 characters" autofocus autocomplete="new-password">
+    <label>Confirm Password</label>
+    <input type="password" name="confirm" placeholder="Repeat password" autocomplete="new-password">
+    <button type="submit">Activate Account</button>
+  </form>`;
+}
+
+app.get('/invite/:token', (req, res) => {
+  const db = getDB();
+  const account = db.prepare('SELECT * FROM user_accounts WHERE invite_token = ?').get(req.params.token);
+  if (!account || !account.invite_expires || new Date(account.invite_expires) < new Date()) {
+    return res.send(authPage({ title: 'Invalid Link', body: `<p style="font-size:13px;color:#6b7e93;margin-bottom:20px">This invite link is invalid or has expired. Contact your administrator for a new one.</p><div class="link-row"><a href="/login">Back to login</a></div>` }));
+  }
+  const player = db.prepare('SELECT name FROM players WHERE id = ?').get(account.player_id);
+  res.send(authPage({
+    title: 'Activate Your Account',
+    info: `Welcome, ${serverEsc(player?.name || '')}! Choose a password to activate your account.`,
+    body: inviteFormBody(req.params.token),
+  }));
+});
+
+app.post('/invite/:token', wrap(async (req, res) => {
+  const db = getDB();
+  const account = db.prepare('SELECT * FROM user_accounts WHERE invite_token = ?').get(req.params.token);
+  if (!account || !account.invite_expires || new Date(account.invite_expires) < new Date()) {
+    return res.send(authPage({ title: 'Invalid Link', body: `<p style="font-size:13px;color:#6b7e93;margin-bottom:20px">This invite link is invalid or has expired.</p><div class="link-row"><a href="/login">Back to login</a></div>` }));
+  }
+  const { password, confirm } = req.body;
+  if (!password || password.length < 8) {
+    return res.send(authPage({ title: 'Activate Your Account', error: 'Password must be at least 8 characters.', body: inviteFormBody(req.params.token) }));
+  }
+  if (password !== confirm) {
+    return res.send(authPage({ title: 'Activate Your Account', error: 'Passwords do not match.', body: inviteFormBody(req.params.token) }));
+  }
+  const hash = await bcrypt.hash(password, 12);
+  db.prepare('UPDATE user_accounts SET password_hash = ?, invite_token = NULL, invite_expires = NULL WHERE player_id = ?').run(hash, account.player_id);
+  setSessionCookie(res, { role: 'player', playerId: account.player_id });
+  res.redirect('/');
+}));
+
+// ===== PASSWORD RESET =====
+
+function resetFormBody(token) {
+  return `<form method="POST" action="/reset-password/${serverEsc(token)}">
+    <label>New Password</label>
+    <input type="password" name="password" placeholder="At least 8 characters" autofocus autocomplete="new-password">
+    <label>Confirm Password</label>
+    <input type="password" name="confirm" placeholder="Repeat password" autocomplete="new-password">
+    <button type="submit">Reset Password</button>
+  </form>`;
+}
+
+app.get('/reset-password/:token', (req, res) => {
+  const db = getDB();
+  const account = db.prepare('SELECT * FROM user_accounts WHERE reset_token = ?').get(req.params.token);
+  if (!account || !account.reset_expires || new Date(account.reset_expires) < new Date()) {
+    return res.send(authPage({ title: 'Invalid Link', body: `<p style="font-size:13px;color:#6b7e93;margin-bottom:20px">This password reset link is invalid or has expired. Contact your administrator for a new one.</p><div class="link-row"><a href="/login">Back to login</a></div>` }));
+  }
+  res.send(authPage({ title: 'Reset Password', body: resetFormBody(req.params.token) }));
+});
+
+app.post('/reset-password/:token', wrap(async (req, res) => {
+  const db = getDB();
+  const account = db.prepare('SELECT * FROM user_accounts WHERE reset_token = ?').get(req.params.token);
+  if (!account || !account.reset_expires || new Date(account.reset_expires) < new Date()) {
+    return res.send(authPage({ title: 'Invalid Link', body: `<p style="font-size:13px;color:#6b7e93;margin-bottom:20px">This password reset link is invalid or has expired.</p><div class="link-row"><a href="/login">Back to login</a></div>` }));
+  }
+  const { password, confirm } = req.body;
+  if (!password || password.length < 8) {
+    return res.send(authPage({ title: 'Reset Password', error: 'Password must be at least 8 characters.', body: resetFormBody(req.params.token) }));
+  }
+  if (password !== confirm) {
+    return res.send(authPage({ title: 'Reset Password', error: 'Passwords do not match.', body: resetFormBody(req.params.token) }));
+  }
+  const hash = await bcrypt.hash(password, 12);
+  db.prepare('UPDATE user_accounts SET password_hash = ?, reset_token = NULL, reset_expires = NULL WHERE player_id = ?').run(hash, account.player_id);
+  setSessionCookie(res, { role: 'player', playerId: account.player_id });
+  res.redirect('/');
+}));
+
 app.get('/forgot-password', (req, res) => {
   res.send(authPage({
-    title: 'Forgot Member Number',
-    body: `<p style="font-size:13px;color:#6b7e93;margin-bottom:20px">
-      Your password is your WSRC member number (e.g. X118). Contact your administrator if you don't know it.
-    </p>
+    title: 'Forgot Password',
+    body: `<p style="font-size:13px;color:#6b7e93;margin-bottom:20px">Contact your administrator to send you a password reset link.</p>
     <div class="link-row"><a href="/login">Back to login</a></div>`,
   }));
 });
@@ -461,10 +556,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'renderer')));
 
-// Wrap async route handlers
-const wrap = (fn) => (req, res) =>
-  fn(req, res).catch((err) => res.status(500).json({ error: err.message || String(err) }));
-
 // ===== API: WHO AM I =====
 
 app.get('/api/me', (req, res) => {
@@ -492,6 +583,88 @@ app.delete('/api/players/:id', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+app.post('/api/players/:id/send-invite', requireAdmin, wrap(async (req, res) => {
+  const playerId = Number(req.params.id);
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+
+  const db = getDB();
+  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Player not found' });
+  if (!player.email) return res.status(400).json({ error: 'This player has no email address on file.' });
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+
+  db.prepare(`INSERT INTO user_accounts (player_id, invite_token, invite_expires)
+    VALUES (?, ?, ?)
+    ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`
+  ).run(playerId, token, expires);
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const inviteUrl = `${baseUrl}/invite/${token}`;
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'WSRC Squash Hub <noreply@wsrc.ca>',
+      to: player.email,
+      subject: 'Activate your WSRC Squash Hub account',
+      html: `<p>Hi ${serverEsc(player.name)},</p>
+<p>You've been invited to create an account on WSRC Squash Hub.</p>
+<p><a href="${serverEsc(inviteUrl)}">Click here to activate your account</a></p>
+<p>This link expires in 72 hours.</p>`,
+    }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    return res.status(502).json({ error: err.message || 'Failed to send email.' });
+  }
+  res.json({ ok: true });
+}));
+
+app.post('/api/players/:id/send-reset', requireAdmin, wrap(async (req, res) => {
+  const playerId = Number(req.params.id);
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+
+  const db = getDB();
+  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+  if (!player) return res.status(404).json({ error: 'Player not found' });
+  if (!player.email) return res.status(400).json({ error: 'This player has no email address on file.' });
+
+  const account = db.prepare('SELECT * FROM user_accounts WHERE player_id = ?').get(playerId);
+  if (!account || !account.password_hash) return res.status(400).json({ error: 'This player has not activated their account yet. Send an invite instead.' });
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+  db.prepare('UPDATE user_accounts SET reset_token = ?, reset_expires = ? WHERE player_id = ?').run(token, expires, playerId);
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const resetUrl = `${baseUrl}/reset-password/${token}`;
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'WSRC Squash Hub <noreply@wsrc.ca>',
+      to: player.email,
+      subject: 'Reset your WSRC Squash Hub password',
+      html: `<p>Hi ${serverEsc(player.name)},</p>
+<p>A password reset was requested for your WSRC Squash Hub account.</p>
+<p><a href="${serverEsc(resetUrl)}">Click here to reset your password</a></p>
+<p>This link expires in 24 hours. If you did not request this, you can ignore this email.</p>`,
+    }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    return res.status(502).json({ error: err.message || 'Failed to send email.' });
+  }
+  res.json({ ok: true });
+}));
+
 app.get('/api/players/records', wrap(async (req, res) => {
   const rows = await playerService.getAllPlayerRecords();
   const map = {};
@@ -509,7 +682,10 @@ app.get('/api/players/:id/history', wrap(async (req, res) => {
   ]);
   if (!player) return res.status(404).json({ error: 'Player not found' });
   const rec = records.find((r) => r.id === id) || { wins: 0, losses: 0 };
-  res.json({ ...player, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming });
+  const db = getDB();
+  const account = db.prepare('SELECT password_hash FROM user_accounts WHERE player_id = ?').get(id);
+  const accountStatus = account?.password_hash ? 'verified' : (account ? 'pending' : 'none');
+  res.json({ ...player, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming, accountStatus });
 }));
 
 // ===== LEAGUES =====
@@ -560,6 +736,56 @@ app.delete('/api/leagues/:id', requireAdmin, wrap(async (req, res) => {
 
 // ===== MATCHES =====
 
+app.put('/api/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
+  const matchId = Number(req.params.id);
+  const { matchTime, courtNumber } = req.body;
+
+  const db = getDB();
+
+  // Get league settings and week context for this match
+  const ctx = db.prepare(`
+    SELECT l.schedule_courts, l.num_courts, tm.week_id
+    FROM matches m
+    JOIN team_matchups tm ON m.matchup_id = tm.id
+    JOIN weeks w ON tm.week_id = w.id
+    JOIN leagues l ON w.league_id = l.id
+    WHERE m.id = ?
+  `).get(matchId);
+
+  if (!ctx) return res.status(404).json({ error: 'Match not found' });
+
+  let warning = null;
+
+  if (matchTime) {
+    if (ctx.schedule_courts && courtNumber) {
+      // Hard block: same court + same time in same week (excluding this match)
+      const conflict = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM matches m
+        JOIN team_matchups tm ON m.matchup_id = tm.id
+        WHERE tm.week_id = ? AND m.court_number = ? AND m.match_time = ? AND m.id != ?
+      `).get(ctx.week_id, courtNumber, matchTime, matchId);
+      if (conflict.cnt > 0) {
+        return res.status(409).json({ error: `Court ${courtNumber} is already booked at ${matchTime} this week.` });
+      }
+    }
+
+    if (ctx.num_courts > 0) {
+      // Count other matches at this time in the same week
+      const atSameTime = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM matches m
+        JOIN team_matchups tm ON m.matchup_id = tm.id
+        WHERE tm.week_id = ? AND m.match_time = ? AND m.id != ?
+      `).get(ctx.week_id, matchTime, matchId);
+      if (atSameTime.cnt >= ctx.num_courts) {
+        warning = `All ${ctx.num_courts} court${ctx.num_courts !== 1 ? 's' : ''} are already booked at ${matchTime} this week.`;
+      }
+    }
+  }
+
+  await leagueModel.updateMatchTiming(matchId, matchTime || null, courtNumber || null);
+  res.json({ ok: true, warning });
+}));
+
 app.put('/api/matches/:id/score', requireAdmin, wrap(async (req, res) => {
   await leagueModel.updateMatchScore({ matchId: Number(req.params.id), ...req.body });
   res.json({ ok: true });
@@ -584,6 +810,13 @@ app.put('/api/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
 app.delete('/api/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
   const { originalPlayerId } = req.body;
   await leagueModel.removeMatchSub(Number(req.params.id), originalPlayerId);
+  res.json({ ok: true });
+}));
+
+app.post('/api/leagues/:id/replace-player', requireAdmin, wrap(async (req, res) => {
+  const { oldPlayerId, newPlayerId } = req.body;
+  if (!oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'oldPlayerId and newPlayerId are required' });
+  await leagueModel.replacePlayerInLeague(Number(req.params.id), Number(oldPlayerId), Number(newPlayerId));
   res.json({ ok: true });
 }));
 

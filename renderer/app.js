@@ -33,6 +33,10 @@ if (typeof window !== 'undefined' && !window.api) {
     updateLadder:     (ids) => _apiFetch('PUT', '/api/ladder', { playerIds: ids }),
     getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
     getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
+    replacePlayer:    (d)   => _apiFetch('POST', `/api/leagues/${d.leagueId}/replace-player`, d),
+    updateMatchTiming:(d)   => _apiFetch('PUT',  `/api/matches/${d.matchId}/timing`, d),
+    sendInvite:       (id)  => _apiFetch('POST', `/api/players/${id}/send-invite`),
+    sendReset:        (id)  => _apiFetch('POST', `/api/players/${id}/send-reset`),
 
   };
 }
@@ -73,6 +77,8 @@ const state = {
 
 // ===== ROLE HELPERS =====
 const isAdmin = () => state.currentUser?.role === 'admin';
+
+let leagueEditMode = false;
 
 // ===== UTILS =====
 function esc(str) {
@@ -131,6 +137,7 @@ document.getElementById('modalOverlay').addEventListener('click', (e) => {
 
 // ===== NAVIGATION =====
 function navigate(page, params = {}) {
+  if (page !== 'leagueDetail') leagueEditMode = false;
   state.prevPage = state.page;
   state.page = page;
   if (params.league) state.currentLeague = params.league;
@@ -775,11 +782,16 @@ function renderPlayerProfile() {
 
   const adminMode = isAdmin();
   document.getElementById('pageTitle').textContent = p.name;
+  const acctStatus = p.accountStatus || 'none'; // 'verified' | 'pending' | 'none'
+  const hasEmail = !!p.email;
+
   document.getElementById('topbarActions').innerHTML = adminMode ? `
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="edit-player" data-id="${p.id}">Edit Information</button>
+        ${hasEmail && acctStatus !== 'verified' ? `<button class="options-item" data-action="send-invite">Send Invite</button>` : ''}
+        ${hasEmail && acctStatus === 'verified' ? `<button class="options-item" data-action="send-reset">Send Password Reset</button>` : ''}
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
       </div>
     </div>` : '';
@@ -789,7 +801,7 @@ function renderPlayerProfile() {
       e.stopPropagation();
       document.getElementById('optionsDropdown').classList.toggle('open');
     });
-    document.getElementById('optionsDropdown').addEventListener('click', (e) => {
+    document.getElementById('optionsDropdown').addEventListener('click', async (e) => {
       const action = e.target.dataset.action;
       document.getElementById('optionsDropdown').classList.remove('open');
       if (action === 'edit-player') {
@@ -798,6 +810,20 @@ function renderPlayerProfile() {
         openEditPlayerModal(player);
       } else if (action === 'delete-player') {
         confirmDeletePlayer(Number(e.target.dataset.id), e.target.dataset.name);
+      } else if (action === 'send-invite') {
+        try {
+          await window.api.sendInvite(p.id);
+          toast('Invite email sent!', 'success');
+        } catch (err) {
+          toast(err.message || 'Failed to send invite.', 'error');
+        }
+      } else if (action === 'send-reset') {
+        try {
+          await window.api.sendReset(p.id);
+          toast('Password reset email sent!', 'success');
+        } catch (err) {
+          toast(err.message || 'Failed to send reset email.', 'error');
+        }
       }
     });
     document.addEventListener('click', function closeOptions() {
@@ -871,6 +897,12 @@ function renderPlayerProfile() {
         </tbody>
       </table>`;
 
+  const acctBadgeHTML = adminMode ? (() => {
+    if (acctStatus === 'verified') return `<span class="acct-badge acct-badge-verified">Verified</span>`;
+    if (!hasEmail) return `<span class="acct-badge acct-badge-none">No Email</span>`;
+    return `<span class="acct-badge acct-badge-pending">Not Verified</span>`;
+  })() : '';
+
   document.getElementById('mainContent').innerHTML = `
     <div class="profile-header-card">
       <div class="profile-info">
@@ -879,6 +911,7 @@ function renderPlayerProfile() {
           <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">${esc(p.name)}</h2>
           ${p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
           ${p.phone ? `<div class="text-muted" style="font-size:13px">${esc(p.phone)}</div>` : ''}
+          ${acctBadgeHTML}
         </div>
       </div>
       <div class="profile-stats">
@@ -1185,13 +1218,15 @@ function printBoxes(league) {
   let pagesHTML = '';
 
   rounds.forEach((roundWeeks, roundIdx) => {
-    // Build pairIndex: sorted player-id pair -> week
-    const pairWeek = {};
+    // Build pairIndex: sorted player-id pair -> match object
+    const pairMatch = {};
     roundWeeks.forEach((week) => {
       (week.matchups || []).forEach((mu) => {
         (mu.matches || []).forEach((match) => {
-          const key = [match.player1_id, match.player2_id].sort((a, b) => a - b).join('-');
-          pairWeek[key] = week;
+          if (!match.skipped) {
+            const key = [match.player1_id, match.player2_id].sort((a, b) => a - b).join('-');
+            pairMatch[key] = match;
+          }
         });
       });
     });
@@ -1212,6 +1247,18 @@ function printBoxes(league) {
         const cells = players.map((colP) => {
           if (rowP.player_id === colP.player_id) {
             return '<td class="box-cell box-cell-self"><div class="box-cell-x">✕</div></td>';
+          }
+          const key = [rowP.player_id, colP.player_id].sort((a, b) => a - b).join('-');
+          const match = pairMatch[key];
+          if (match && match.player1_score !== null && match.player2_score !== null) {
+            const isP1 = match.player1_id === rowP.player_id;
+            const myScore = isP1 ? match.player1_score : match.player2_score;
+            const theirScore = isP1 ? match.player2_score : match.player1_score;
+            const won = match.winner_id === rowP.player_id;
+            return `<td class="box-cell box-cell-scored ${won ? 'box-cell-win' : 'box-cell-loss'}">
+              <div class="box-score-result">${won ? 'W' : 'L'}</div>
+              <div class="box-score">${myScore}&ndash;${theirScore}</div>
+            </td>`;
           }
           return '<td class="box-cell"></td>';
         }).join('');
@@ -1339,6 +1386,25 @@ function printBoxes(league) {
       font-weight: 700;
       color: #000;
       line-height: 1;
+    }
+    .box-cell-scored {
+      text-align: center;
+      vertical-align: middle;
+    }
+    .box-cell-win { background: #e8f5e9; }
+    .box-cell-loss { background: #fdecea; }
+    .box-score-result {
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .box-cell-win .box-score-result { color: #1a6b35; }
+    .box-cell-loss .box-score-result { color: #b71c1c; }
+    .box-score {
+      font-size: 12pt;
+      font-weight: 700;
+      color: #000;
     }
 
     @page { size: A4 landscape; margin: 0; }
@@ -1623,6 +1689,9 @@ function renderLeagueDetail() {
   const adminMode = isAdmin();
   document.getElementById('pageTitle').textContent = league.name;
   document.getElementById('topbarActions').innerHTML = adminMode ? `
+    <button class="btn ${leagueEditMode ? 'btn-primary' : 'btn-outline'}" id="editRosterBtn">
+      ${leagueEditMode ? 'Done Editing' : 'Edit Players'}
+    </button>
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
       <div class="options-dropdown" id="optionsDropdown">
@@ -1635,6 +1704,11 @@ function renderLeagueDetail() {
     </div>` : '';
 
   if (adminMode) {
+    document.getElementById('editRosterBtn').addEventListener('click', () => {
+      leagueEditMode = !leagueEditMode;
+      renderLeagueDetail();
+    });
+
     document.getElementById('optionsBtn').addEventListener('click', (e) => {
       e.stopPropagation();
       document.getElementById('optionsDropdown').classList.toggle('open');
@@ -1692,7 +1766,7 @@ function renderLeagueDetail() {
     </div>
 
     <div class="section-title">${isModern ? 'Divisions' : 'Rosters'} <div class="divider"></div></div>
-    ${isModern ? renderRostersModern(league) : renderRosters(league)}
+    ${isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
 
     <div class="section-title">Schedule <div class="divider"></div></div>
     <div class="schedule-list" id="scheduleList">
@@ -1714,6 +1788,15 @@ function renderLeagueDetail() {
     });
   });
 
+  // Replace player buttons (admin, edit mode only)
+  if (adminMode && leagueEditMode) {
+    content.querySelectorAll('.replace-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        openReplacePlayerModal(league.id, Number(btn.dataset.playerId), btn.dataset.playerName);
+      });
+    });
+  }
+
   // Score forms (admin only)
   if (adminMode) {
     content.querySelectorAll('.score-save-btn').forEach((btn) => {
@@ -1723,6 +1806,11 @@ function renderLeagueDetail() {
     // Sub buttons
     content.querySelectorAll('.sub-btn').forEach((btn) => {
       btn.addEventListener('click', () => openSubModal(btn));
+    });
+
+    // Timing buttons
+    content.querySelectorAll('.timing-btn').forEach((btn) => {
+      btn.addEventListener('click', () => openTimingModal(btn));
     });
 
     // Skip buttons
@@ -1745,7 +1833,7 @@ function renderLeagueDetail() {
   }
 }
 
-function renderRosters(league) {
+function renderRosters(league, editMode = false) {
   if (!league.teams || league.teams.length === 0) return '';
   return `<div class="roster-grid">
     ${league.teams.map((team) => {
@@ -1759,13 +1847,14 @@ function renderRosters(league) {
             <div class="roster-player">
               <span class="div-chip">${esc(m.division_name.replace(/^Division\s*/i, 'D'))}</span>
               <a class="player-link" data-player-id="${m.player_id}" href="#">${esc(m.player_name)}</a>
+              ${editMode ? `<button class="replace-btn" data-player-id="${m.player_id}" data-player-name="${esc(m.player_name)}">Replace</button>` : ''}
             </div>`).join('')}
         </div>`;
     }).join('')}
   </div>`;
 }
 
-function renderRostersModern(league) {
+function renderRostersModern(league, editMode = false) {
   if (!league.divisions || league.divisions.length === 0) return '';
   return `<div class="roster-grid">
     ${league.divisions.map((div) => {
@@ -1778,10 +1867,155 @@ function renderRostersModern(league) {
           ${members.map((m) => `
             <div class="roster-player">
               <a class="player-link" data-player-id="${m.player_id}" href="#">${esc(m.player_name)}</a>
+              ${editMode ? `<button class="replace-btn" data-player-id="${m.player_id}" data-player-name="${esc(m.player_name)}">Replace</button>` : ''}
             </div>`).join('')}
         </div>`;
     }).join('')}
   </div>`;
+}
+
+function openTimingModal(btn) {
+  const matchId = Number(btn.dataset.matchId);
+  const scheduleCourts = btn.dataset.scheduleCourts === '1';
+  const numCourts = Number(btn.dataset.numCourts) || 0;
+  const currentTime = btn.dataset.matchTime || '';
+  const currentCourt = btn.dataset.courtNumber || '';
+
+  const courtField = scheduleCourts ? `
+    <div class="form-group">
+      <label>Court</label>
+      <select class="form-control" id="timingCourt">
+        <option value="">— No court —</option>
+        ${Array.from({ length: numCourts }, (_, i) => i + 1).map((n) =>
+          `<option value="${n}" ${Number(currentCourt) === n ? 'selected' : ''}>Court ${n}</option>`
+        ).join('')}
+      </select>
+    </div>` : '';
+
+  modal.open('Edit Match Time', `
+    <div class="form-group">
+      <label>Time</label>
+      <input type="time" class="form-control" id="timingTime" value="${esc(currentTime)}">
+    </div>
+    ${courtField}
+    <div id="timingWarning" style="display:none;margin-top:8px;padding:10px 12px;background:#fef9e7;border:1px solid #f0c040;border-radius:6px;font-size:13px;color:#7d5800"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline" id="timingCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="timingSaveBtn">Save</button>
+    </div>
+  `);
+
+  document.getElementById('timingCancelBtn').addEventListener('click', modal.close);
+
+  document.getElementById('timingSaveBtn').addEventListener('click', async () => {
+    const saveBtn = document.getElementById('timingSaveBtn');
+    const timeVal = document.getElementById('timingTime').value || null;
+    const courtVal = scheduleCourts ? (document.getElementById('timingCourt').value || null) : null;
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+
+    try {
+      const result = await window.api.updateMatchTiming({ matchId, matchTime: timeVal, courtNumber: courtVal ? Number(courtVal) : null });
+      if (result.warning) {
+        const warnEl = document.getElementById('timingWarning');
+        if (warnEl) { warnEl.style.display = ''; warnEl.textContent = result.warning; }
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Confirm Anyway';
+        saveBtn.onclick = null;
+        saveBtn.addEventListener('click', async () => {
+          modal.close();
+          const league = await window.api.getLeague(state.currentLeague.id);
+          state.currentLeague = league;
+          renderLeagueDetail();
+        });
+        return;
+      }
+      modal.close();
+      const league = await window.api.getLeague(state.currentLeague.id);
+      state.currentLeague = league;
+      renderLeagueDetail();
+    } catch (e) {
+      const warnEl = document.getElementById('timingWarning');
+      if (warnEl) {
+        warnEl.style.display = '';
+        warnEl.style.background = '#fdecea';
+        warnEl.style.borderColor = '#e57373';
+        warnEl.style.color = '#b71c1c';
+        warnEl.textContent = e.message || 'Failed to save timing.';
+      }
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
+}
+
+function openReplacePlayerModal(leagueId, oldPlayerId, oldPlayerName) {
+  const leaguePlayerIds = new Set((state.currentLeague.players || []).map((p) => p.player_id));
+  const available = state.players.filter((p) => !leaguePlayerIds.has(p.id));
+
+  modal.open(`Replace ${esc(oldPlayerName)}`, `
+    <p style="margin:0 0 12px;color:var(--text-muted);font-size:13px">
+      Choose a replacement for <strong>${esc(oldPlayerName)}</strong>.
+      The new player will take over all scheduled matches and history in this league.
+    </p>
+    <input class="form-control" id="replaceSearch" placeholder="Search players…" style="margin-bottom:10px" autofocus>
+    <div id="replaceList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline" id="replaceCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="replaceConfirmBtn" disabled>Select a player</button>
+    </div>
+  `, { wide: true });
+
+  let selectedId = null;
+
+  function renderList(query = '') {
+    const q = query.toLowerCase();
+    const filtered = q ? available.filter((p) => p.name.toLowerCase().includes(q)) : available;
+    const list = document.getElementById('replaceList');
+    if (!list) return;
+    if (filtered.length === 0) {
+      list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No players available</div>`;
+      return;
+    }
+    list.innerHTML = filtered.map((p) => `
+      <div class="replace-option ${p.id === selectedId ? 'replace-option-selected' : ''}" data-pid="${p.id}" data-name="${esc(p.name)}"
+           style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;border-bottom:1px solid var(--border)">
+        ${esc(p.name)}
+      </div>`).join('');
+    list.querySelectorAll('.replace-option').forEach((row) => {
+      row.addEventListener('click', () => {
+        selectedId = Number(row.dataset.pid);
+        list.querySelectorAll('.replace-option').forEach((r) => r.classList.remove('replace-option-selected'));
+        row.classList.add('replace-option-selected');
+        const confirmBtn = document.getElementById('replaceConfirmBtn');
+        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Replace with ${row.dataset.name}`; }
+      });
+    });
+  }
+
+  renderList();
+  document.getElementById('replaceSearch').addEventListener('input', (e) => renderList(e.target.value));
+  document.getElementById('replaceCancelBtn').addEventListener('click', modal.close);
+  document.getElementById('replaceConfirmBtn').addEventListener('click', async () => {
+    if (!selectedId) return;
+    const btn = document.getElementById('replaceConfirmBtn');
+    btn.disabled = true;
+    btn.textContent = 'Replacing…';
+    try {
+      await window.api.replacePlayer({ leagueId, oldPlayerId, newPlayerId: selectedId });
+      modal.close();
+      leagueEditMode = false;
+      const league = await window.api.getLeague(leagueId);
+      state.currentLeague = league;
+      renderLeagueDetail();
+      toast('Player replaced successfully', 'success');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Replace Player';
+      toast(e.message || 'Failed to replace player', 'error');
+    }
+  });
 }
 
 function renderWeekCard(week, league, adminMode = true) {
@@ -1871,9 +2105,19 @@ function renderMatchRow(match, league, adminMode = true) {
     ? `<span class="sub-badge" title="Subbing for ${esc(match.player2_name)}">SUB</span>` : '';
 
   const showCourt = league && league.schedule_courts && match.court_number;
-  const courtInfo = showCourt
-    ? `<span class="match-court-label">Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}</span>`
-    : (match.match_time ? `<span class="match-court-label">${match.match_time}</span>` : '');
+  const timingLabel = showCourt
+    ? `Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}`
+    : (match.match_time || '');
+  const canEditTiming = adminMode && !match.skipped;
+  const timingAttrs = canEditTiming ? `
+    class="match-court-label timing-btn${timingLabel ? '' : ' timing-btn-empty'}"
+    data-match-id="${match.id}"
+    data-match-time="${match.match_time || ''}"
+    data-court-number="${match.court_number || ''}"
+    data-schedule-courts="${league && league.schedule_courts ? '1' : '0'}"
+    data-num-courts="${league ? league.num_courts : 2}"` : `class="match-court-label"`;
+  const courtInfo = (canEditTiming || timingLabel)
+    ? `<span ${timingAttrs}>${timingLabel || 'Set time'}</span>` : '';
 
   const isSkipped = !!match.skipped;
   const leagueId = league ? league.id : '';
@@ -1933,7 +2177,7 @@ function renderMatchRow(match, league, adminMode = true) {
           data-p2-id="${match.player2_id}" data-p2-name="${esc(match.player2_name)}"
           data-sub1-id="${match.sub1_id || ''}" data-sub1-name="${esc(match.sub1_name || '')}"
           data-sub2-id="${match.sub2_id || ''}" data-sub2-name="${esc(match.sub2_name || '')}">Sub</button>` : ''}
-        ${adminMode ? `<button class="btn btn-ghost btn-sm skip-btn" style="font-size:11px;color:var(--text-muted)" data-match-id="${match.id}">Skip</button>` : ''}
+${adminMode ? `<button class="btn btn-ghost btn-sm skip-btn" style="font-size:11px;color:var(--text-muted)" data-match-id="${match.id}">Skip</button>` : ''}
       </div>
     </div>`;
 }

@@ -1,4 +1,4 @@
-const { run, all, get } = require('../database/db');
+const { run, all, get, getDB } = require('../database/db');
 const crypto = require('crypto');
 
 async function getAllLeagues() {
@@ -167,6 +167,39 @@ async function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
   return remaining.length;
 }
 
+async function updateMatchTiming(matchId, matchTime, courtNumber) {
+  return run(
+    'UPDATE matches SET match_time = ?, court_number = ? WHERE id = ?',
+    [matchTime || null, courtNumber || null, matchId]
+  );
+}
+
+async function replacePlayerInLeague(leagueId, oldPlayerId, newPlayerId) {
+  const db = getDB();
+  db.transaction(() => {
+    db.prepare('UPDATE league_players SET player_id = ? WHERE player_id = ? AND league_id = ?')
+      .run(newPlayerId, oldPlayerId, leagueId);
+    const matchSubquery = `matchup_id IN (
+      SELECT tm.id FROM team_matchups tm JOIN weeks w ON tm.week_id = w.id WHERE w.league_id = ?
+    )`;
+    db.prepare(`UPDATE matches SET player1_id = ? WHERE player1_id = ? AND ${matchSubquery}`)
+      .run(newPlayerId, oldPlayerId, leagueId);
+    db.prepare(`UPDATE matches SET player2_id = ? WHERE player2_id = ? AND ${matchSubquery}`)
+      .run(newPlayerId, oldPlayerId, leagueId);
+    db.prepare(`UPDATE matches SET winner_id = ? WHERE winner_id = ? AND ${matchSubquery}`)
+      .run(newPlayerId, oldPlayerId, leagueId);
+    const subMatchSubquery = `match_id IN (
+      SELECT m.id FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id WHERE w.league_id = ?
+    )`;
+    db.prepare(`UPDATE match_subs SET original_player_id = ? WHERE original_player_id = ? AND ${subMatchSubquery}`)
+      .run(newPlayerId, oldPlayerId, leagueId);
+    db.prepare(`UPDATE match_subs SET sub_player_id = ? WHERE sub_player_id = ? AND ${subMatchSubquery}`)
+      .run(newPlayerId, oldPlayerId, leagueId);
+    db.prepare(`UPDATE week_byes SET player_id = ? WHERE player_id = ? AND week_id IN (SELECT id FROM weeks WHERE league_id = ?)`)
+      .run(newPlayerId, oldPlayerId, leagueId);
+  })();
+}
+
 module.exports = {
   getAllLeagues,
   getLeagueById,
@@ -185,4 +218,6 @@ module.exports = {
   unskipMatch,
   setSubForRemaining,
   getWeekByes,
+  replacePlayerInLeague,
+  updateMatchTiming,
 };
