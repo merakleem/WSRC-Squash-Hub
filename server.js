@@ -103,7 +103,7 @@ function authPage({ title, body, error, info }) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title} — WSRC Squash Hub</title>
+  <title>${title} — Play WSRC</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -141,7 +141,7 @@ function authPage({ title, body, error, info }) {
       <img class="logo" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC Logo">
     </div>
     <div class="card-body">
-      <h1>WSRC Squash Hub</h1>
+      <h1>Play WSRC</h1>
       ${info  ? `<div class="info">${info}</div>` : '<p class="subtitle">Sign in to continue</p>'}
       ${body}
       ${error ? `<div class="error">${error}</div>` : ''}
@@ -331,7 +331,7 @@ function buildPublicPage() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>League Schedule — WSRC Squash Hub</title>
+  <title>League Schedule — Play WSRC</title>
   <link rel="icon" type="image/png" href="/assets/logo-blue.png">
   <style>
     :root { --primary:#1e2758; --accent:#3a4db5; --border:#e2e8f0; --muted:#64748b; --bg:#f4f6fb; }
@@ -532,7 +532,7 @@ function buildPublicPage() {
 
       document.getElementById('root').innerHTML =
         '<div class="header">'
-        +'<div class="header-brand"><img src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC"><span class="header-brand-text">WSRC Squash Hub</span></div>'
+        +'<div class="header-brand"><img src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC"><span class="header-brand-text">Play WSRC</span></div>'
         +'<div class="header-title">'+esc(league.name)+'</div>'
         +'</div>'
         +'<div class="content">'
@@ -608,11 +608,11 @@ app.post('/api/players/:id/send-invite', requireAdmin, wrap(async (req, res) => 
     method: 'POST',
     headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'WSRC Squash Hub <no-reply@playwsrc.ca>',
+      from: 'Play WSRC <no-reply@playwsrc.ca>',
       to: player.email,
-      subject: 'Activate your WSRC Squash Hub account',
+      subject: 'Activate your Play WSRC account',
       html: `<p>Hi ${serverEsc(player.name)},</p>
-<p>You've been invited to create an account on WSRC Squash Hub.</p>
+<p>You've been invited to create an account on Play WSRC.</p>
 <p><a href="${serverEsc(inviteUrl)}">Click here to activate your account</a></p>
 <p>This link expires in 72 hours.</p>`,
     }),
@@ -649,11 +649,11 @@ app.post('/api/players/:id/send-reset', requireAdmin, wrap(async (req, res) => {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'WSRC Squash Hub <no-reply@playwsrc.ca>',
+      from: 'Play WSRC <no-reply@playwsrc.ca>',
       to: player.email,
-      subject: 'Reset your WSRC Squash Hub password',
+      subject: 'Reset your Play WSRC password',
       html: `<p>Hi ${serverEsc(player.name)},</p>
-<p>A password reset was requested for your WSRC Squash Hub account.</p>
+<p>A password reset was requested for your Play WSRC account.</p>
 <p><a href="${serverEsc(resetUrl)}">Click here to reset your password</a></p>
 <p>This link expires in 24 hours. If you did not request this, you can ignore this email.</p>`,
     }),
@@ -853,7 +853,7 @@ app.post('/api/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: `WSRC Squash Hub <no-reply@playwsrc.ca>`,
+        from: `Play WSRC <no-reply@playwsrc.ca>`,
         to: [player.player_email],
         subject,
         html: `<p>${htmlBody}</p>`,
@@ -891,7 +891,7 @@ async function start() {
   await initDB(DB_PATH);
   app.listen(PORT, () => {
     console.log('');
-    console.log('  WSRC Squash Hub is running!');
+    console.log('  Play WSRC is running!');
     console.log(`  Open http://localhost:${PORT} in your browser`);
     console.log('');
     console.log('  Press Ctrl+C to stop.');
