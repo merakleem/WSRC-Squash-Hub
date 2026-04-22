@@ -66,9 +66,6 @@ function initDB(dbPath) {
     db.pragma('foreign_keys = ON');
   }
 
-  // Backfill existing players: mark as WSRC members with rating 2.50
-  db.prepare(`UPDATE players SET wsrc_member = 1, club_locker_rating = 2.50 WHERE club_locker_rating IS NULL`).run();
-
   // Backfill/regenerate tokens to ensure they are 4-char hex
   const leaguesNeedingToken = db.prepare(`SELECT id FROM leagues WHERE public_token IS NULL OR length(public_token) != 4`).all();
   for (const league of leaguesNeedingToken) {

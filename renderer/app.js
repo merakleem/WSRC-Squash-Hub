@@ -377,8 +377,7 @@ async function renderDashboard() {
   const winPct = total > 0 ? Math.round((wins / total) * 100) : 0;
   const firstName = (playerData.name || '').split(' ')[0];
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : hour < 21 ? 'Good evening' : 'Good night';
+  const greeting = 'Welcome back';
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   // Update topbar with greeting + date
@@ -696,6 +695,10 @@ function playerFormHTML(player = {}) {
       <label>Phone</label>
       <input class="form-control" id="fPhone" value="${esc(player.phone || '')}" placeholder="(optional)">
     </div>
+    <div class="form-group">
+      <label>Club Locker Rating</label>
+      <input class="form-control" id="fRating" type="number" step="0.01" min="0" value="${esc(player.club_locker_rating != null ? player.club_locker_rating : '')}" placeholder="e.g. 3.50 (optional)">
+    </div>
     <div class="form-group form-group-check">
       <label class="check-label">
         <input type="checkbox" id="fExclude" ${excluded ? 'checked' : ''}>
@@ -716,10 +719,12 @@ function openAddPlayerModal() {
     const name = document.getElementById('fName').value.trim();
     const email = document.getElementById('fEmail').value.trim();
     const phone = document.getElementById('fPhone').value.trim();
+    const ratingRaw = document.getElementById('fRating').value.trim();
+    const club_locker_rating = ratingRaw !== '' ? parseFloat(ratingRaw) : null;
     const exclude_from_ladder = document.getElementById('fExclude').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.addPlayer({ name, email, phone, exclude_from_ladder });
+      await window.api.addPlayer({ name, email, phone, club_locker_rating, exclude_from_ladder });
       modal.close();
       toast('Player added', 'success');
       state.players = await window.api.getPlayers();
@@ -737,10 +742,12 @@ function openEditPlayerModal(player) {
     const name = document.getElementById('fName').value.trim();
     const email = document.getElementById('fEmail').value.trim();
     const phone = document.getElementById('fPhone').value.trim();
+    const ratingRaw = document.getElementById('fRating').value.trim();
+    const club_locker_rating = ratingRaw !== '' ? parseFloat(ratingRaw) : null;
     const exclude_from_ladder = document.getElementById('fExclude').checked;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.updatePlayer({ id: player.id, name, email, phone, exclude_from_ladder });
+      await window.api.updatePlayer({ id: player.id, name, email, phone, club_locker_rating, exclude_from_ladder });
       modal.close();
       toast('Player updated', 'success');
       state.players = await window.api.getPlayers();
@@ -1942,8 +1949,11 @@ function renderLeagueDetail() {
 
   content.innerHTML = `
     <div class="league-header-card">
-      <h2>${esc(league.name)}</h2>
-      <div class="league-stats">${statsHTML}</div>
+      <div class="league-header-inner">
+        <h2>${esc(league.name)}</h2>
+        <div class="league-header-divider"></div>
+        <div class="league-stats">${statsHTML}</div>
+      </div>
     </div>
 
     <div class="section-title">${isModern ? 'Divisions' : 'Rosters'} <div class="divider"></div></div>

@@ -582,7 +582,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.static(path.join(__dirname, 'renderer')));
+app.use(express.static(path.join(__dirname, 'renderer'), { etag: false, lastModified: false, setHeaders: (res) => res.setHeader('Cache-Control', 'no-store') }));
 
 // ===== API: WHO AM I =====
 

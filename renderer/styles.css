@@ -1008,21 +1008,53 @@ tbody td {
 
 /* ===== LEAGUE DETAIL ===== */
 .league-header-card {
-  background: var(--primary);
+  position: relative;
+  background-image: url('/assets/squash-racquets-bg.jpg');
+  background-size: cover;
+  background-position: center;
   color: #fff;
   border-radius: var(--radius-lg);
-  padding: 24px 28px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.league-header-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(26, 54, 93, 0.82);
+  border-radius: inherit;
+}
+.league-header-inner {
+  position: relative;
+  padding: 32px 32px 28px;
+}
+.league-header-card h2 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  letter-spacing: -0.01em;
+}
+.league-header-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.2);
   margin-bottom: 24px;
 }
-.league-header-card h2 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
 .league-stats {
   display: flex;
-  gap: 28px;
+  gap: 0;
   flex-wrap: wrap;
 }
-.stat { display: flex; flex-direction: column; }
-.stat-val { font-size: 20px; font-weight: 700; }
-.stat-label { font-size: 11.5px; opacity: .7; text-transform: uppercase; letter-spacing: .04em; }
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 32px;
+  margin-right: 32px;
+  border-right: 1px solid rgba(255,255,255,0.2);
+}
+.stat:last-child { border-right: none; padding-right: 0; margin-right: 0; }
+.stat-val { font-size: 22px; font-weight: 800; line-height: 1; }
+.stat-label { font-size: 11px; opacity: .65; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-top: 2px; }
 
 .section-title {
   font-size: 15px;
@@ -1652,10 +1684,11 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .league-grid { grid-template-columns: 1fr; }
 
   /* League detail header */
-  .league-header-card { padding: 18px 16px; }
-  .league-header-card h2 { font-size: 18px; }
-  .league-stats { gap: 16px; }
-  .stat-val { font-size: 17px; }
+  .league-header-inner { padding: 22px 18px 20px; }
+  .league-header-card h2 { font-size: 18px; margin-bottom: 14px; }
+  .league-header-divider { margin-bottom: 16px; }
+  .stat { padding-right: 20px; margin-right: 20px; }
+  .stat-val { font-size: 18px; }
 
   /* Rosters */
   .roster-grid { grid-template-columns: 1fr 1fr; }

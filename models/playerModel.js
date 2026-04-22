@@ -8,18 +8,18 @@ async function getPlayerById(id) {
   return get('SELECT * FROM players WHERE id = ?', [id]);
 }
 
-async function addPlayer({ name, email, phone, exclude_from_ladder }) {
+async function addPlayer({ name, email, phone, club_locker_rating, exclude_from_ladder }) {
   const result = await run(
-    'INSERT INTO players (name, email, phone, exclude_from_ladder) VALUES (?, ?, ?, ?)',
-    [name, email || null, phone || null, exclude_from_ladder ? 1 : 0]
+    'INSERT INTO players (name, email, phone, club_locker_rating, exclude_from_ladder) VALUES (?, ?, ?, ?, ?)',
+    [name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0]
   );
   return getPlayerById(result.lastID);
 }
 
-async function updatePlayer({ id, name, email, phone, exclude_from_ladder }) {
+async function updatePlayer({ id, name, email, phone, club_locker_rating, exclude_from_ladder }) {
   await run(
-    'UPDATE players SET name = ?, email = ?, phone = ?, exclude_from_ladder = ? WHERE id = ?',
-    [name, email || null, phone || null, exclude_from_ladder ? 1 : 0, id]
+    'UPDATE players SET name = ?, email = ?, phone = ?, club_locker_rating = ?, exclude_from_ladder = ? WHERE id = ?',
+    [name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0, id]
   );
   return getPlayerById(id);
 }
