@@ -404,8 +404,6 @@ async function renderSchedule() {
     </div>`;
   }).join('');
 
-  const gridTemplateColumns = `${TIME_COL_W}px repeat(${courts.length}, ${COURT_COL_W}px)`;
-
   content.innerHTML = `
     <div class="sch-page">
       <div class="sch-daybar">
@@ -434,9 +432,9 @@ async function renderSchedule() {
         : `<div class="sch-grid-area">
             <div class="sch-grid-card">
               <div class="sch-grid-scroll">
-                <div class="sch-grid-header" style="grid-template-columns:${gridTemplateColumns}">
-                  <div class="sch-time-spacer"></div>
-                  ${courts.map((c) => `<div class="sch-court-hd">${esc(c.name)}</div>`).join('')}
+                <div class="sch-grid-header">
+                  <div class="sch-time-spacer" style="width:${TIME_COL_W}px"></div>
+                  ${courts.map((c) => `<div class="sch-court-hd" style="min-width:${COURT_COL_W}px">${esc(c.name)}</div>`).join('')}
                 </div>
                 <div class="sch-grid-body">
                   <div class="sch-time-col" style="width:${TIME_COL_W}px;height:${gridH}px">${timeAxisHTML.join('')}</div>
