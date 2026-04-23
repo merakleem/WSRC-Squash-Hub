@@ -1,7 +1,7 @@
 {
   "name": "Play WSRC",
   "short_name": "Play WSRC",
-  "description": "Westmount Squash & Racquet Club league and ladder management",
+  "description": "Winnipeg Squash Racquet Club squash management software",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
