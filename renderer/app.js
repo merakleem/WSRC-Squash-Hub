@@ -304,7 +304,6 @@ async function renderSchedule() {
   if (!state.scheduleDate) state.scheduleDate = _isoDate(new Date());
   const today = _isoDate(new Date());
 
-  // Build topbar with "New Booking" button for admins
   const actionsEl = document.getElementById('topbarActions');
   actionsEl.innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnNewBooking">+ New Booking</button>` : '';
 
@@ -320,129 +319,140 @@ async function renderSchedule() {
 
   const { courts, slots } = scheduleData;
 
-  // Day strip: 7-day window centred on current date
-  const stripStart = _addDaysLocal(state.scheduleDate, -3);
-  const stripDays = Array.from({ length: 7 }, (_, i) => _addDaysLocal(stripStart, i));
+  // Column widths matched between sticky header grid and body flex
+  const isMobile = window.innerWidth < 640;
+  const TIME_COL_W = isMobile ? 44 : 64;
+  const COURT_COL_W = isMobile ? 140 : 200;
 
-  const dayStripHTML = stripDays.map((d) => {
-    const parts = d.split('-').map(Number);
-    const dayObj = new Date(parts[0], parts[1] - 1, parts[2]);
-    const dayNum = dayObj.getDate();
-    const dayName = dayObj.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+  // Date display info
+  const [dpY, dpM, dpD] = state.scheduleDate.split('-').map(Number);
+  const dateObj = new Date(dpY, dpM - 1, dpD);
+  const weekdayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+  const dateLong = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const isToday = state.scheduleDate === today;
+
+  // 7-day strip centred on selected date
+  const stripStart = _addDaysLocal(state.scheduleDate, -3);
+  const dayStripHTML = Array.from({ length: 7 }, (_, i) => {
+    const d = _addDaysLocal(stripStart, i);
+    const [, , dd] = d.split('-').map(Number);
+    const dObj = new Date(d.split('-').map(Number)[0], d.split('-').map(Number)[1] - 1, dd);
+    const dayName = dObj.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
     const isActive = d === state.scheduleDate;
-    const isToday = d === today;
-    return `<button class="sch-day-btn${isActive ? ' active' : ''}${isToday ? ' today' : ''}" data-date="${d}">
+    const isDayToday = d === today;
+    return `<button class="sch-day-btn${isActive ? ' active' : ''}${isDayToday ? ' today' : ''}" data-date="${d}">
       <span class="sch-day-name">${dayName}</span>
-      <span class="sch-day-num">${dayNum}</span>
+      <span class="sch-day-num">${dd}</span>
     </button>`;
   }).join('');
 
-  const dateLabel = (() => {
-    const parts = state.scheduleDate.split('-').map(Number);
-    const d = new Date(parts[0], parts[1] - 1, parts[2]);
-    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  })();
-
-  // Time axis constants
-  const DAY_START = 7 * 60;   // 7:00 = 420 min
-  const DAY_END   = 22 * 60;  // 22:00 = 1320 min
-  const SLOT_H    = 28;       // px per 30 min
+  // Time axis
+  const DAY_START = 7 * 60;
+  const DAY_END   = 22 * 60;
+  const SLOT_H    = 28;
   const SLOT_MIN  = 30;
   const totalSlots = (DAY_END - DAY_START) / SLOT_MIN;
   const gridH = totalSlots * SLOT_H;
 
-  // Time labels every 60 min
-  const timeLabels = [];
-  for (let m = DAY_START; m <= DAY_END; m += 60) {
-    const h = Math.floor(m / 60);
-    const label = h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
-    const top = ((m - DAY_START) / SLOT_MIN) * SLOT_H;
-    timeLabels.push({ label, top });
+  function fmtHour(h) {
+    const ampm = h >= 12 ? 'pm' : 'am';
+    const hh = h % 12 === 0 ? 12 : h % 12;
+    return `${hh}${ampm}`;
   }
 
-  const timeAxisHTML = timeLabels.map(({ label, top }) =>
-    `<div class="sch-time-label" style="top:${top}px">${label}</div>`
-  ).join('');
+  const timeAxisHTML = [];
+  for (let m = DAY_START; m <= DAY_END; m += 60) {
+    const h = Math.floor(m / 60);
+    const top = ((m - DAY_START) / SLOT_MIN) * SLOT_H;
+    timeAxisHTML.push(`<div class="sch-time-label" style="top:${top}px">${fmtHour(h)}</div>`);
+  }
 
-  // Horizontal grid lines every 30 min
+  // Grid lines
   const gridLinesHTML = Array.from({ length: totalSlots + 1 }, (_, i) => {
     const top = i * SLOT_H;
-    const isMajor = i % 2 === 0;
-    return `<div class="sch-grid-line${isMajor ? ' major' : ''}" style="top:${top}px"></div>`;
+    return `<div class="sch-grid-line${i % 2 === 0 ? ' major' : ''}" style="top:${top}px"></div>`;
   }).join('');
 
-  // Build booking blocks per court
-  function timeToMinutes(timeStr) {
-    if (!timeStr) return null;
-    const [h, m] = timeStr.split(':').map(Number);
+  function timeToMinutes(t) {
+    if (!t) return null;
+    const [h, m] = t.split(':').map(Number);
     return h * 60 + (m || 0);
   }
 
-  const courtColumnsHTML = courts.length === 0
-    ? `<div class="sch-no-courts">No courts configured. <a href="#" id="schGoSettings">Add courts in Club Settings.</a></div>`
-    : courts.map((court) => {
-      const courtSlots = slots.filter((s) => s.courtId === court.id);
-      const blocksHTML = courtSlots.map((s) => {
-        const startMin = timeToMinutes(s.startTime);
-        if (startMin === null) return '';
-        const top = ((startMin - DAY_START) / SLOT_MIN) * SLOT_H;
-        const h = (s.durationMinutes / SLOT_MIN) * SLOT_H;
-        if (top < 0 || top >= gridH) return '';
-        const safeH = Math.min(h, gridH - top);
-        const isLeague = s.source === 'league';
-        const editAttrs = (!isLeague && isAdmin())
-          ? ` data-booking-id="${s.id}" style="background:${esc(s.color)};top:${top}px;height:${safeH}px;cursor:pointer"`
-          : ` style="background:${esc(s.color)};top:${top}px;height:${safeH}px"`;
-        return `<div class="sch-booking${isLeague ? ' sch-booking-league' : ''}"${editAttrs}>
-          <div class="sch-booking-title">${esc(s.title)}</div>
-          ${s.info ? `<div class="sch-booking-info">${esc(s.info)}</div>` : ''}
-        </div>`;
-      }).join('');
-
-      return `<div class="sch-court-col">
-        <div class="sch-court-header">${esc(court.name)}</div>
-        <div class="sch-court-body" style="height:${gridH}px" data-court-id="${court.id}">
-          ${gridLinesHTML}
-          ${blocksHTML}
-        </div>
+  // Court columns (body only, no header inside)
+  const courtColumnsHTML = courts.map((court) => {
+    const blocksHTML = slots.filter((s) => s.courtId === court.id).map((s) => {
+      const startMin = timeToMinutes(s.startTime);
+      if (startMin === null) return '';
+      const top = ((startMin - DAY_START) / SLOT_MIN) * SLOT_H;
+      const h = (s.durationMinutes / SLOT_MIN) * SLOT_H;
+      if (top < 0 || top >= gridH) return '';
+      const safeH = Math.min(h, gridH - top);
+      const isLeague = s.source === 'league';
+      const editAttr = (!isLeague && isAdmin()) ? ` data-booking-id="${s.id}"` : '';
+      const cursorStyle = (!isLeague && isAdmin()) ? ';cursor:pointer' : '';
+      return `<div class="sch-booking${isLeague ? ' sch-booking-league' : ''}"${editAttr} style="background:${esc(s.color)};top:${top}px;height:${safeH}px${cursorStyle}">
+        <div class="sch-booking-title">${esc(s.title)}</div>
+        ${s.info ? `<div class="sch-booking-info">${esc(s.info)}</div>` : ''}
       </div>`;
     }).join('');
+    return `<div class="sch-court-col" style="height:${gridH}px" data-court-id="${court.id}">
+      ${gridLinesHTML}${blocksHTML}
+    </div>`;
+  }).join('');
+
+  const gridTemplateColumns = `${TIME_COL_W}px repeat(${courts.length}, ${COURT_COL_W}px)`;
 
   content.innerHTML = `
     <div class="sch-page">
       <div class="sch-daybar">
-        <button class="sch-nav-btn" id="schPrev">&#8249;</button>
+        <div class="sch-daybar-left">
+          <button class="sch-nav-btn" id="schPrev">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <div class="sch-daybar-date">
+            <div class="sch-daybar-weekday">${weekdayName}</div>
+            <div class="sch-daybar-subdate">${dateLong}${isToday ? ' · Today' : ''}</div>
+          </div>
+          <button class="sch-nav-btn" id="schNext">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <label class="sch-jump-btn" style="position:relative">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>
+            Jump to date
+            <input type="date" id="schDatePicker" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:none;padding:0;margin:0" value="${state.scheduleDate}">
+          </label>
+        </div>
         <div class="sch-day-strip">${dayStripHTML}</div>
-        <button class="sch-nav-btn" id="schNext">&#8250;</button>
-        <input type="date" class="sch-datepicker" id="schDatePicker" value="${state.scheduleDate}" title="Jump to date">
       </div>
-      <div class="sch-date-label">${esc(dateLabel)}</div>
+
       ${courts.length === 0
         ? `<div class="sch-no-courts">No courts configured.${isAdmin() ? ` <a href="#" id="schGoSettings">Add courts in Club Settings.</a>` : ''}</div>`
-        : `<div class="sch-grid-wrap">
-            <div class="sch-time-axis">${timeAxisHTML}</div>
-            <div class="sch-courts-scroll">
-              <div class="sch-courts-row">${courtColumnsHTML}</div>
+        : `<div class="sch-grid-area">
+            <div class="sch-grid-card">
+              <div class="sch-grid-scroll">
+                <div class="sch-grid-header" style="grid-template-columns:${gridTemplateColumns}">
+                  <div class="sch-time-spacer"></div>
+                  ${courts.map((c) => `<div class="sch-court-hd">${esc(c.name)}</div>`).join('')}
+                </div>
+                <div class="sch-grid-body">
+                  <div class="sch-time-col" style="width:${TIME_COL_W}px;height:${gridH}px">${timeAxisHTML.join('')}</div>
+                  <div class="sch-courts-row" style="--court-w:${COURT_COL_W}px">${courtColumnsHTML}</div>
+                </div>
+              </div>
             </div>
           </div>`
       }
     </div>`;
 
-  // Wire day strip buttons
   content.querySelectorAll('.sch-day-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      state.scheduleDate = btn.dataset.date;
-      renderSchedule();
-    });
+    btn.addEventListener('click', () => { state.scheduleDate = btn.dataset.date; renderSchedule(); });
   });
-
   document.getElementById('schPrev')?.addEventListener('click', () => {
-    state.scheduleDate = _addDaysLocal(state.scheduleDate, -7);
-    renderSchedule();
+    state.scheduleDate = _addDaysLocal(state.scheduleDate, -7); renderSchedule();
   });
   document.getElementById('schNext')?.addEventListener('click', () => {
-    state.scheduleDate = _addDaysLocal(state.scheduleDate, 7);
-    renderSchedule();
+    state.scheduleDate = _addDaysLocal(state.scheduleDate, 7); renderSchedule();
   });
   document.getElementById('schDatePicker')?.addEventListener('change', (e) => {
     if (e.target.value) { state.scheduleDate = e.target.value; renderSchedule(); }
@@ -450,15 +460,10 @@ async function renderSchedule() {
   document.getElementById('schGoSettings')?.addEventListener('click', (e) => {
     e.preventDefault(); navigate('clubSettings');
   });
-
-  // New booking button
   document.getElementById('btnNewBooking')?.addEventListener('click', () => openNewBookingModal(courts));
-
-  // Edit booking on click
   content.querySelectorAll('[data-booking-id]').forEach((el) => {
     el.addEventListener('click', () => {
-      const bookingId = Number(el.dataset.bookingId);
-      const slot = slots.find((s) => s.id === bookingId);
+      const slot = slots.find((s) => s.id === Number(el.dataset.bookingId));
       if (slot) openEditBookingModal(slot, courts);
     });
   });
