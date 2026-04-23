@@ -3182,7 +3182,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .sch-nav-btn:hover { background: var(--hover); }
 .sch-jump-btn {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -3197,7 +3196,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   white-space: nowrap;
   user-select: none;
   margin-left: 6px;
-  overflow: hidden;
 }
 .sch-jump-btn:hover { background: var(--hover); }
 
