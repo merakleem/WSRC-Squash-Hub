@@ -3281,6 +3281,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .sch-grid-card {
   flex: 1;
   min-height: 0;
+  align-self: flex-start;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -3327,7 +3328,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   font-weight: 700;
   color: var(--text);
   font-family: 'Barlow', sans-serif;
-  transform: translateY(-50%);
   white-space: nowrap;
   pointer-events: none;
   line-height: 1;

@@ -366,7 +366,7 @@ async function renderSchedule() {
   for (let m = DAY_START; m <= DAY_END; m += 60) {
     const h = Math.floor(m / 60);
     const top = ((m - DAY_START) / SLOT_MIN) * SLOT_H;
-    const transform = top === 0 ? '' : ';transform:translateY(-50%)';
+    const transform = top === 0 ? ';transform:none' : ';transform:translateY(-50%)';
     timeAxisHTML.push(`<div class="sch-time-label" style="top:${top}px${transform}">${fmtHour(h)}</div>`);
   }
 
