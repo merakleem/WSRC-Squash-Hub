@@ -417,11 +417,11 @@ async function renderSchedule() {
           <button class="sch-nav-btn" id="schNext">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
-          <label class="sch-jump-btn" style="position:relative">
+          <button class="sch-jump-btn" id="schJumpBtn">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>
             Jump to date
-            <input type="date" id="schDatePicker" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:none;padding:0;margin:0" value="${state.scheduleDate}">
-          </label>
+          </button>
+          <input type="date" id="schDatePicker" style="position:fixed;top:-9999px;left:-9999px;opacity:0" value="${state.scheduleDate}">
         </div>
         <div class="sch-day-strip">${dayStripHTML}</div>
       </div>
@@ -449,10 +449,14 @@ async function renderSchedule() {
     btn.addEventListener('click', () => { state.scheduleDate = btn.dataset.date; renderSchedule(); });
   });
   document.getElementById('schPrev')?.addEventListener('click', () => {
-    state.scheduleDate = _addDaysLocal(state.scheduleDate, -7); renderSchedule();
+    state.scheduleDate = _addDaysLocal(state.scheduleDate, -1); renderSchedule();
   });
   document.getElementById('schNext')?.addEventListener('click', () => {
-    state.scheduleDate = _addDaysLocal(state.scheduleDate, 7); renderSchedule();
+    state.scheduleDate = _addDaysLocal(state.scheduleDate, 1); renderSchedule();
+  });
+  document.getElementById('schJumpBtn')?.addEventListener('click', () => {
+    const picker = document.getElementById('schDatePicker');
+    try { picker?.showPicker(); } catch (_) { picker?.click(); }
   });
   document.getElementById('schDatePicker')?.addEventListener('change', (e) => {
     if (e.target.value) { state.scheduleDate = e.target.value; renderSchedule(); }
