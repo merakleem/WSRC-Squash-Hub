@@ -420,11 +420,11 @@ async function renderSchedule() {
           <button class="sch-nav-btn" id="schNext">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
-          <label class="sch-jump-btn" for="schDatePicker">
+          <div class="sch-jump-wrap">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>
-            Jump to date
-          </label>
-          <input type="date" id="schDatePicker" value="${state.scheduleDate}" style="width:0;height:0;min-width:0;opacity:0;border:none;padding:0;margin:0;vertical-align:middle">
+            <span>Jump to date</span>
+            <input type="date" id="schDatePicker" class="sch-jump-input" value="${state.scheduleDate}">
+          </div>
         </div>
         <div class="sch-day-strip">${dayStripHTML}</div>
       </div>

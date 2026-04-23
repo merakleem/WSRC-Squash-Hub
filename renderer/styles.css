@@ -3181,8 +3181,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   flex-shrink: 0;
 }
 .sch-nav-btn:hover { background: var(--hover); }
-.sch-jump-btn {
-  display: flex;
+.sch-jump-wrap {
+  position: relative;
+  display: inline-flex;
   align-items: center;
   gap: 7px;
   background: var(--bg);
@@ -3197,7 +3198,27 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   user-select: none;
   margin-left: 6px;
 }
-.sch-jump-btn:hover { background: var(--hover); }
+.sch-jump-wrap:hover { background: var(--hover); }
+.sch-jump-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+}
+.sch-jump-input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  opacity: 0;
+  cursor: pointer;
+}
 
 /* Day strip */
 .sch-day-strip {
@@ -3383,7 +3404,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .sch-day-strip { overflow-x: auto; scrollbar-width: none; }
   .sch-day-strip::-webkit-scrollbar { display: none; }
   .sch-grid-area { padding: 12px 12px 16px; }
-  .sch-jump-btn { margin-left: 0; }
+  .sch-jump-wrap { margin-left: 0; }
 }
 @media (max-width: 640px) {
   .form-row { flex-direction: column; gap: 0; }
