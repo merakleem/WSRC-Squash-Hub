@@ -3336,12 +3336,30 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .sch-courts-row {
   display: flex;
   flex: 1;
+  position: relative;
+}
+.sch-courts-row--admin {
+  cursor: crosshair;
 }
 .sch-court-col {
   flex: 1;
   min-width: var(--court-w, 200px);
   position: relative;
   border-right: 1px solid rgba(0,0,0,0.06);
+}
+.sch-drag-overlay {
+  position: absolute;
+  background: rgba(59, 143, 200, 0.15);
+  border: 2px solid rgba(59, 143, 200, 0.55);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 10;
+  box-sizing: border-box;
+}
+.sch-court-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
 }
 .sch-grid-line {
   position: absolute;
@@ -3363,6 +3381,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  cursor: default;
 }
 .sch-booking-title {
   font-size: 13px;

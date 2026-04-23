@@ -110,6 +110,9 @@ let leagueEditMode = false;
 // Cache of court lists by league ID, populated when a league is loaded
 const _leagueCourtsCache = new Map();
 
+// AbortController for schedule page drag/click document listeners
+let _scheduleListenerAC = null;
+
 // ===== UTILS =====
 function esc(str) {
   if (str == null) return '';
@@ -468,19 +471,140 @@ async function renderSchedule() {
       if (slot) openEditBookingModal(slot, courts);
     });
   });
+
+  // Grid click/drag to create bookings (admin only)
+  if (isAdmin()) {
+    const courtsRow = content.querySelector('.sch-courts-row');
+    if (courtsRow) {
+      courtsRow.classList.add('sch-courts-row--admin');
+
+      function minutesToTimeStr(m) {
+        return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      }
+
+      function getCourtIdxAtX(clientX) {
+        const cols = [...courtsRow.querySelectorAll('.sch-court-col')];
+        return cols.findIndex((col) => {
+          const r = col.getBoundingClientRect();
+          return clientX >= r.left && clientX < r.right;
+        });
+      }
+
+      function getTimeAtY(clientY) {
+        const rowRect = courtsRow.getBoundingClientRect();
+        const y = Math.max(0, Math.min(clientY - rowRect.top, gridH - 1));
+        return Math.round((DAY_START + (y / SLOT_H) * SLOT_MIN) / 15) * 15;
+      }
+
+      if (_scheduleListenerAC) _scheduleListenerAC.abort();
+      _scheduleListenerAC = new AbortController();
+      const { signal } = _scheduleListenerAC;
+
+      let drag = null;
+
+      courtsRow.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('.sch-booking')) return;
+        const startIdx = getCourtIdxAtX(e.clientX);
+        if (startIdx === -1) return;
+        e.preventDefault();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'sch-drag-overlay';
+        courtsRow.appendChild(overlay);
+
+        const t = getTimeAtY(e.clientY);
+        drag = { startX: e.clientX, startY: e.clientY, startIdx, startTime: t, overlay, moved: false,
+          minIdx: startIdx, maxIdx: startIdx, minTime: t, maxTime: t + 60 };
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+        if (!drag.moved && Math.sqrt(dx * dx + dy * dy) > 8) drag.moved = true;
+        if (!drag.moved) return;
+
+        const rowRect = courtsRow.getBoundingClientRect();
+        const clampedIdx = getCourtIdxAtX(e.clientX) !== -1
+          ? getCourtIdxAtX(e.clientX)
+          : (e.clientX < rowRect.left ? 0 : courts.length - 1);
+
+        drag.minIdx = Math.min(drag.startIdx, clampedIdx);
+        drag.maxIdx = Math.max(drag.startIdx, clampedIdx);
+
+        const t = getTimeAtY(e.clientY);
+        drag.minTime = Math.min(drag.startTime, t);
+        drag.maxTime = Math.max(drag.startTime, t);
+        if (drag.maxTime === drag.minTime) drag.maxTime = drag.minTime + 15;
+
+        const cols = [...courtsRow.querySelectorAll('.sch-court-col')];
+        const startRect = cols[drag.minIdx].getBoundingClientRect();
+        const endRect = cols[drag.maxIdx].getBoundingClientRect();
+        const top = ((drag.minTime - DAY_START) / SLOT_MIN) * SLOT_H;
+        const height = ((drag.maxTime - drag.minTime) / SLOT_MIN) * SLOT_H;
+        const left = startRect.left - rowRect.left;
+        const width = endRect.right - startRect.left;
+        drag.overlay.style.cssText = `top:${top}px;height:${height}px;left:${left}px;width:${width}px`;
+      }, { signal });
+
+      document.addEventListener('mouseup', () => {
+        if (!drag) return;
+        const { moved, overlay, startIdx, startTime, minIdx, maxIdx, minTime, maxTime } = drag;
+        drag = null;
+        overlay.remove();
+
+        if (!moved) {
+          openNewBookingModal(courts, { courtId: courts[startIdx].id, startTime: minutesToTimeStr(startTime) });
+        } else {
+          const selectedCourts = courts.slice(minIdx, maxIdx + 1);
+          const duration = maxTime - minTime;
+          if (selectedCourts.length === 1) {
+            openNewBookingModal(courts, { courtId: selectedCourts[0].id, startTime: minutesToTimeStr(minTime), durationMinutes: duration });
+          } else {
+            openNewBookingModal(courts, { selectedCourts, startTime: minutesToTimeStr(minTime), durationMinutes: duration });
+          }
+        }
+      }, { signal });
+    }
+  }
 }
 
-async function openNewBookingModal(courts) {
+function durationOptions(selected = 60) {
+  const opts = [15, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240];
+  if (!opts.includes(selected)) opts.push(selected);
+  opts.sort((a, b) => a - b);
+  return opts.map((v) => {
+    const h = Math.floor(v / 60), m = v % 60;
+    const label = h > 0 && m > 0 ? `${h}h ${m}m` : h > 0 ? `${h}h` : `${m}m`;
+    return `<option value="${v}"${v === selected ? ' selected' : ''}>${label}</option>`;
+  }).join('');
+}
+
+async function openNewBookingModal(courts, prefill = {}) {
+  const { courtId: prefillCourtId, startTime: prefillTime, durationMinutes: prefillDuration, selectedCourts } = prefill;
+  const isMulti = Array.isArray(selectedCourts) && selectedCourts.length > 1;
   const bookingTypes = await window.api.getBookingTypes();
-  modal.open('New Booking', `
-    <form id="bookingForm">
-      <div class="form-group">
+  const startTimeVal = prefillTime || '19:00';
+  const durationVal = prefillDuration || 60;
+
+  const courtField = isMulti
+    ? `<div class="form-group">
+        <label class="form-label">Courts</label>
+        <div class="sch-court-checks">
+          ${courts.map((c) => `<label class="check-label"><input type="checkbox" class="fBookingCourtChk" value="${c.id}"${selectedCourts.some((sc) => sc.id === c.id) ? ' checked' : ''}> ${esc(c.name)}</label>`).join('')}
+        </div>
+      </div>`
+    : `<div class="form-group">
         <label class="form-label">Court</label>
         <select class="form-control" id="fBookingCourt" required>
           <option value="">— Select court —</option>
-          ${courts.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+          ${courts.map((c) => `<option value="${c.id}"${c.id === prefillCourtId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
         </select>
-      </div>
+      </div>`;
+
+  modal.open('New Booking', `
+    <form id="bookingForm">
+      ${courtField}
       <div class="form-group">
         <label class="form-label">Date</label>
         <input type="date" class="form-control" id="fBookingDate" value="${state.scheduleDate || _isoDate(new Date())}" required>
@@ -488,17 +612,11 @@ async function openNewBookingModal(courts) {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Start Time</label>
-          <input type="time" class="form-control" id="fBookingTime" value="19:00" required>
+          <input type="time" class="form-control" id="fBookingTime" value="${startTimeVal}" required>
         </div>
         <div class="form-group">
           <label class="form-label">Duration</label>
-          <select class="form-control" id="fBookingDuration">
-            <option value="30">30 min</option>
-            <option value="45">45 min</option>
-            <option value="60" selected>1 hour</option>
-            <option value="90">1.5 hours</option>
-            <option value="120">2 hours</option>
-          </select>
+          <select class="form-control" id="fBookingDuration">${durationOptions(durationVal)}</select>
         </div>
       </div>
       <div class="form-group">
@@ -514,27 +632,41 @@ async function openNewBookingModal(courts) {
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Add Booking</button>
+        <button type="submit" class="btn btn-primary">${isMulti ? 'Add Bookings' : 'Add Booking'}</button>
       </div>
     </form>
   `);
+
   document.getElementById('bookingForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const courtId = Number(document.getElementById('fBookingCourt').value);
     const date = document.getElementById('fBookingDate').value;
     const startTime = document.getElementById('fBookingTime').value;
     const durationMinutes = Number(document.getElementById('fBookingDuration').value);
     const bookingTypeId = document.getElementById('fBookingType').value ? Number(document.getElementById('fBookingType').value) : null;
     const info = document.getElementById('fBookingInfo').value.trim() || null;
-    if (!courtId || !date || !startTime) return;
-    try {
-      await window.api.addBooking({ courtId, date, startTime, durationMinutes, bookingTypeId, info });
-      modal.close();
-      state.scheduleDate = date;
-      toast('Booking added');
-      renderSchedule();
-    } catch (err) {
-      toast(err.message, 'error');
+
+    if (isMulti) {
+      const courtIds = [...document.querySelectorAll('.fBookingCourtChk:checked')].map((el) => Number(el.value));
+      if (!courtIds.length || !date || !startTime) return;
+      try {
+        for (const courtId of courtIds) {
+          await window.api.addBooking({ courtId, date, startTime, durationMinutes, bookingTypeId, info });
+        }
+        modal.close();
+        state.scheduleDate = date;
+        toast(courtIds.length > 1 ? `${courtIds.length} bookings added` : 'Booking added');
+        renderSchedule();
+      } catch (err) { toast(err.message, 'error'); }
+    } else {
+      const courtId = Number(document.getElementById('fBookingCourt').value);
+      if (!courtId || !date || !startTime) return;
+      try {
+        await window.api.addBooking({ courtId, date, startTime, durationMinutes, bookingTypeId, info });
+        modal.close();
+        state.scheduleDate = date;
+        toast('Booking added');
+        renderSchedule();
+      } catch (err) { toast(err.message, 'error'); }
     }
   });
 }
