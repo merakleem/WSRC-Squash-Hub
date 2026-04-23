@@ -57,12 +57,20 @@ if (typeof window !== 'undefined' && !window.api) {
     addCourt:           (d)       => _apiFetch('POST',   '/api/courts', d),
     updateCourt:        (id, d)   => _apiFetch('PUT',    `/api/courts/${id}`, d),
     deleteCourt:        (id)      => _apiFetch('DELETE', `/api/courts/${id}`),
+    getSchedule:        (date)    => _apiFetch('GET',    `/api/schedule?date=${date}`),
+    getBookingTypes:    ()        => _apiFetch('GET',    '/api/booking-types'),
+    addBookingType:     (d)       => _apiFetch('POST',   '/api/booking-types', d),
+    updateBookingType:  (id, d)   => _apiFetch('PUT',    `/api/booking-types/${id}`, d),
+    deleteBookingType:  (id)      => _apiFetch('DELETE', `/api/booking-types/${id}`),
+    addBooking:         (d)       => _apiFetch('POST',   '/api/bookings', d),
+    updateBooking:      (id, d)   => _apiFetch('PUT',    `/api/bookings/${id}`, d),
+    deleteBooking:      (id)      => _apiFetch('DELETE', `/api/bookings/${id}`),
   };
 }
 
 // ===== STATE =====
 const state = {
-  page: 'players',        // 'players' | 'ladder' | 'leagues' | 'leagueDetail' | 'createLeague' | 'playerProfile'
+  page: 'players',        // 'players' | 'ladder' | 'leagues' | 'leagueDetail' | 'createLeague' | 'playerProfile' | 'schedule'
   prevPage: null,
   players: [],
   ladder: [],             // [{ id, name, position }] in ladder order
@@ -70,6 +78,7 @@ const state = {
   currentLeague: null,
   currentPlayer: null,    // { id, name, email, phone, wins, losses, history: [...] }
   currentUser: null,      // { role: 'admin'|'player', playerId: number|null }
+  scheduleDate: null,     // YYYY-MM-DD, null = today
   wizard: {
     step: 1,
     setupType: 'traditional',
@@ -87,10 +96,9 @@ const state = {
     numRounds: 1,
     blackoutDates: [],
     matchStartTime: '19:00',
-    numCourts: 2,
+    selectedCourtIds: [],
     matchDuration: 45,
     matchBuffer: 15,
-    scheduleCourts: false,
   },
 };
 
@@ -98,6 +106,9 @@ const state = {
 const isAdmin = () => state.currentUser?.role === 'admin';
 
 let leagueEditMode = false;
+
+// Cache of court lists by league ID, populated when a league is loaded
+const _leagueCourtsCache = new Map();
 
 // ===== UTILS =====
 function esc(str) {
@@ -194,12 +205,14 @@ document.querySelectorAll('.nav-item').forEach((el) => {
 });
 
 function renderPage() {
-  document.querySelector('.content').classList.remove('content--dashboard');
+  const contentEl = document.querySelector('.content');
+  contentEl.classList.remove('content--dashboard', 'content--schedule');
   switch (state.page) {
     case 'dashboard':     renderDashboard(); break;
     case 'players':       renderPlayers(); break;
     case 'ladder':        renderLadder(); break;
     case 'activity':      renderClubActivity(); break;
+    case 'schedule':      renderSchedule(); break;
     case 'clubSettings':  renderClubSettings(); break;
     case 'leagues':       renderLeagues(); break;
     case 'leagueDetail':  renderLeagueDetail(); break;
@@ -262,6 +275,343 @@ function buildActivityHTML(activity, isAdmin = false) {
     </div>`;
   }).join('');
   return `<div class="dp-activity-scroll">${items}</div>`;
+}
+
+// ===== SCHEDULE PAGE =====
+function _isoDate(d) {
+  // Returns YYYY-MM-DD for a Date object using local time
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function _addDaysLocal(isoDate, n) {
+  const parts = isoDate.split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  d.setDate(d.getDate() + n);
+  return _isoDate(d);
+}
+
+function _scheduleDayLabel(isoDate) {
+  const parts = isoDate.split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+async function renderSchedule() {
+  document.getElementById('pageTitle').textContent = 'Schedule';
+  const content = document.getElementById('mainContent');
+  content.classList.add('content--schedule');
+
+  if (!state.scheduleDate) state.scheduleDate = _isoDate(new Date());
+  const today = _isoDate(new Date());
+
+  // Build topbar with "New Booking" button for admins
+  const actionsEl = document.getElementById('topbarActions');
+  actionsEl.innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnNewBooking">+ New Booking</button>` : '';
+
+  content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
+
+  let scheduleData;
+  try {
+    scheduleData = await window.api.getSchedule(state.scheduleDate);
+  } catch (e) {
+    content.innerHTML = `<div style="padding:20px;color:var(--text-danger)">Failed to load schedule: ${esc(e.message)}</div>`;
+    return;
+  }
+
+  const { courts, slots } = scheduleData;
+
+  // Day strip: 7-day window centred on current date
+  const stripStart = _addDaysLocal(state.scheduleDate, -3);
+  const stripDays = Array.from({ length: 7 }, (_, i) => _addDaysLocal(stripStart, i));
+
+  const dayStripHTML = stripDays.map((d) => {
+    const parts = d.split('-').map(Number);
+    const dayObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    const dayNum = dayObj.getDate();
+    const dayName = dayObj.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+    const isActive = d === state.scheduleDate;
+    const isToday = d === today;
+    return `<button class="sch-day-btn${isActive ? ' active' : ''}${isToday ? ' today' : ''}" data-date="${d}">
+      <span class="sch-day-name">${dayName}</span>
+      <span class="sch-day-num">${dayNum}</span>
+    </button>`;
+  }).join('');
+
+  const dateLabel = (() => {
+    const parts = state.scheduleDate.split('-').map(Number);
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  })();
+
+  // Time axis constants
+  const DAY_START = 7 * 60;   // 7:00 = 420 min
+  const DAY_END   = 22 * 60;  // 22:00 = 1320 min
+  const SLOT_H    = 28;       // px per 30 min
+  const SLOT_MIN  = 30;
+  const totalSlots = (DAY_END - DAY_START) / SLOT_MIN;
+  const gridH = totalSlots * SLOT_H;
+
+  // Time labels every 60 min
+  const timeLabels = [];
+  for (let m = DAY_START; m <= DAY_END; m += 60) {
+    const h = Math.floor(m / 60);
+    const label = h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
+    const top = ((m - DAY_START) / SLOT_MIN) * SLOT_H;
+    timeLabels.push({ label, top });
+  }
+
+  const timeAxisHTML = timeLabels.map(({ label, top }) =>
+    `<div class="sch-time-label" style="top:${top}px">${label}</div>`
+  ).join('');
+
+  // Horizontal grid lines every 30 min
+  const gridLinesHTML = Array.from({ length: totalSlots + 1 }, (_, i) => {
+    const top = i * SLOT_H;
+    const isMajor = i % 2 === 0;
+    return `<div class="sch-grid-line${isMajor ? ' major' : ''}" style="top:${top}px"></div>`;
+  }).join('');
+
+  // Build booking blocks per court
+  function timeToMinutes(timeStr) {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + (m || 0);
+  }
+
+  const courtColumnsHTML = courts.length === 0
+    ? `<div class="sch-no-courts">No courts configured. <a href="#" id="schGoSettings">Add courts in Club Settings.</a></div>`
+    : courts.map((court) => {
+      const courtSlots = slots.filter((s) => s.courtId === court.id);
+      const blocksHTML = courtSlots.map((s) => {
+        const startMin = timeToMinutes(s.startTime);
+        if (startMin === null) return '';
+        const top = ((startMin - DAY_START) / SLOT_MIN) * SLOT_H;
+        const h = (s.durationMinutes / SLOT_MIN) * SLOT_H;
+        if (top < 0 || top >= gridH) return '';
+        const safeH = Math.min(h, gridH - top);
+        const isLeague = s.source === 'league';
+        const editAttrs = (!isLeague && isAdmin())
+          ? ` data-booking-id="${s.id}" style="background:${esc(s.color)};top:${top}px;height:${safeH}px;cursor:pointer"`
+          : ` style="background:${esc(s.color)};top:${top}px;height:${safeH}px"`;
+        return `<div class="sch-booking${isLeague ? ' sch-booking-league' : ''}"${editAttrs}>
+          <div class="sch-booking-title">${esc(s.title)}</div>
+          ${s.info ? `<div class="sch-booking-info">${esc(s.info)}</div>` : ''}
+        </div>`;
+      }).join('');
+
+      return `<div class="sch-court-col">
+        <div class="sch-court-header">${esc(court.name)}</div>
+        <div class="sch-court-body" style="height:${gridH}px" data-court-id="${court.id}">
+          ${gridLinesHTML}
+          ${blocksHTML}
+        </div>
+      </div>`;
+    }).join('');
+
+  content.innerHTML = `
+    <div class="sch-page">
+      <div class="sch-daybar">
+        <button class="sch-nav-btn" id="schPrev">&#8249;</button>
+        <div class="sch-day-strip">${dayStripHTML}</div>
+        <button class="sch-nav-btn" id="schNext">&#8250;</button>
+        <input type="date" class="sch-datepicker" id="schDatePicker" value="${state.scheduleDate}" title="Jump to date">
+      </div>
+      <div class="sch-date-label">${esc(dateLabel)}</div>
+      ${courts.length === 0
+        ? `<div class="sch-no-courts">No courts configured.${isAdmin() ? ` <a href="#" id="schGoSettings">Add courts in Club Settings.</a>` : ''}</div>`
+        : `<div class="sch-grid-wrap">
+            <div class="sch-time-axis">${timeAxisHTML}</div>
+            <div class="sch-courts-scroll">
+              <div class="sch-courts-row">${courtColumnsHTML}</div>
+            </div>
+          </div>`
+      }
+    </div>`;
+
+  // Wire day strip buttons
+  content.querySelectorAll('.sch-day-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.scheduleDate = btn.dataset.date;
+      renderSchedule();
+    });
+  });
+
+  document.getElementById('schPrev')?.addEventListener('click', () => {
+    state.scheduleDate = _addDaysLocal(state.scheduleDate, -7);
+    renderSchedule();
+  });
+  document.getElementById('schNext')?.addEventListener('click', () => {
+    state.scheduleDate = _addDaysLocal(state.scheduleDate, 7);
+    renderSchedule();
+  });
+  document.getElementById('schDatePicker')?.addEventListener('change', (e) => {
+    if (e.target.value) { state.scheduleDate = e.target.value; renderSchedule(); }
+  });
+  document.getElementById('schGoSettings')?.addEventListener('click', (e) => {
+    e.preventDefault(); navigate('clubSettings');
+  });
+
+  // New booking button
+  document.getElementById('btnNewBooking')?.addEventListener('click', () => openNewBookingModal(courts));
+
+  // Edit booking on click
+  content.querySelectorAll('[data-booking-id]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const bookingId = Number(el.dataset.bookingId);
+      const slot = slots.find((s) => s.id === bookingId);
+      if (slot) openEditBookingModal(slot, courts);
+    });
+  });
+}
+
+async function openNewBookingModal(courts) {
+  const bookingTypes = await window.api.getBookingTypes();
+  modal.open('New Booking', `
+    <form id="bookingForm">
+      <div class="form-group">
+        <label class="form-label">Court</label>
+        <select class="form-control" id="fBookingCourt" required>
+          <option value="">— Select court —</option>
+          ${courts.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-control" id="fBookingDate" value="${state.scheduleDate || _isoDate(new Date())}" required>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Start Time</label>
+          <input type="time" class="form-control" id="fBookingTime" value="19:00" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Duration</label>
+          <select class="form-control" id="fBookingDuration">
+            <option value="30">30 min</option>
+            <option value="45">45 min</option>
+            <option value="60" selected>1 hour</option>
+            <option value="90">1.5 hours</option>
+            <option value="120">2 hours</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Booking Type</label>
+        <select class="form-control" id="fBookingType">
+          <option value="">— None —</option>
+          ${bookingTypes.map((bt) => `<option value="${bt.id}">${esc(bt.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Info / Notes</label>
+        <input type="text" class="form-control" id="fBookingInfo" placeholder="e.g. Player name, team, notes" maxlength="120">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Booking</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const courtId = Number(document.getElementById('fBookingCourt').value);
+    const date = document.getElementById('fBookingDate').value;
+    const startTime = document.getElementById('fBookingTime').value;
+    const durationMinutes = Number(document.getElementById('fBookingDuration').value);
+    const bookingTypeId = document.getElementById('fBookingType').value ? Number(document.getElementById('fBookingType').value) : null;
+    const info = document.getElementById('fBookingInfo').value.trim() || null;
+    if (!courtId || !date || !startTime) return;
+    try {
+      await window.api.addBooking({ courtId, date, startTime, durationMinutes, bookingTypeId, info });
+      modal.close();
+      state.scheduleDate = date;
+      toast('Booking added');
+      renderSchedule();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+async function openEditBookingModal(slot, courts) {
+  const bookingTypes = await window.api.getBookingTypes();
+  modal.open('Edit Booking', `
+    <form id="bookingForm">
+      <div class="form-group">
+        <label class="form-label">Court</label>
+        <select class="form-control" id="fBookingCourt" required>
+          ${courts.map((c) => `<option value="${c.id}" ${c.id === slot.courtId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-control" id="fBookingDate" value="${esc(slot.date || state.scheduleDate)}" required>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Start Time</label>
+          <input type="time" class="form-control" id="fBookingTime" value="${esc(slot.startTime)}" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Duration</label>
+          <select class="form-control" id="fBookingDuration">
+            <option value="30" ${slot.durationMinutes === 30 ? 'selected' : ''}>30 min</option>
+            <option value="45" ${slot.durationMinutes === 45 ? 'selected' : ''}>45 min</option>
+            <option value="60" ${slot.durationMinutes === 60 ? 'selected' : ''}>1 hour</option>
+            <option value="90" ${slot.durationMinutes === 90 ? 'selected' : ''}>1.5 hours</option>
+            <option value="120" ${slot.durationMinutes === 120 ? 'selected' : ''}>2 hours</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Booking Type</label>
+        <select class="form-control" id="fBookingType">
+          <option value="">— None —</option>
+          ${bookingTypes.map((bt) => `<option value="${bt.id}" ${slot.bookingTypeId === bt.id ? 'selected' : ''}>${esc(bt.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Info / Notes</label>
+        <input type="text" class="form-control" id="fBookingInfo" value="${esc(slot.info || '')}" maxlength="120">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-danger" id="btnDeleteBooking">Delete</button>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </form>
+  `);
+  document.getElementById('btnDeleteBooking').addEventListener('click', async () => {
+    if (!confirm('Delete this booking?')) return;
+    try {
+      await window.api.deleteBooking(slot.id);
+      modal.close();
+      toast('Booking deleted');
+      renderSchedule();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+  document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const courtId = Number(document.getElementById('fBookingCourt').value);
+    const date = document.getElementById('fBookingDate').value;
+    const startTime = document.getElementById('fBookingTime').value;
+    const durationMinutes = Number(document.getElementById('fBookingDuration').value);
+    const bookingTypeId = document.getElementById('fBookingType').value ? Number(document.getElementById('fBookingType').value) : null;
+    const info = document.getElementById('fBookingInfo').value.trim() || null;
+    try {
+      await window.api.updateBooking(slot.id, { courtId, date, startTime, durationMinutes, bookingTypeId, info });
+      modal.close();
+      state.scheduleDate = date;
+      toast('Booking updated');
+      renderSchedule();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
 }
 
 // ===== CLUB ACTIVITY PAGE =====
@@ -334,7 +684,10 @@ async function renderClubSettings() {
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
 
-  const courts = await window.api.getCourts();
+  const [courts, bookingTypes] = await Promise.all([
+    window.api.getCourts(),
+    window.api.getBookingTypes(),
+  ]);
 
   content.innerHTML = `
     <div class="settings-page">
@@ -359,6 +712,31 @@ async function renderClubSettings() {
             </div>`
         }
       </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Booking Types</h2>
+          <button class="btn btn-primary btn-sm" id="btnAddBookingType">+ Add Type</button>
+        </div>
+        <p class="settings-section-desc">Custom booking types appear in the court schedule. League matches are shown automatically.</p>
+        ${bookingTypes.length === 0
+          ? `<div class="settings-empty">No booking types yet.</div>`
+          : `<div class="court-list">
+              ${bookingTypes.map((bt) => `
+                <div class="court-item">
+                  <div class="court-item-name" style="display:flex;align-items:center;gap:10px">
+                    <span class="btype-swatch" style="background:${esc(bt.color)}"></span>
+                    ${esc(bt.name)}
+                  </div>
+                  <div class="court-item-actions">
+                    <button class="btn btn-outline btn-sm" data-btype-edit="${bt.id}">Edit</button>
+                    <button class="btn btn-danger btn-sm" data-btype-delete="${bt.id}">Delete</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>`
+        }
+      </div>
     </div>`;
 
   document.getElementById('btnAddCourt').addEventListener('click', openAddCourtModal);
@@ -373,6 +751,20 @@ async function renderClubSettings() {
     const id = Number(btn.dataset.courtDelete);
     const name = courts.find((c) => c.id === id)?.name || '';
     btn.addEventListener('click', () => deleteCourtConfirm(id, name));
+  });
+
+  document.getElementById('btnAddBookingType').addEventListener('click', openAddBookingTypeModal);
+
+  content.querySelectorAll('[data-btype-edit]').forEach((btn) => {
+    const id = Number(btn.dataset.btypeEdit);
+    const bt = bookingTypes.find((b) => b.id === id);
+    btn.addEventListener('click', () => openEditBookingTypeModal(bt));
+  });
+
+  content.querySelectorAll('[data-btype-delete]').forEach((btn) => {
+    const id = Number(btn.dataset.btypeDelete);
+    const bt = bookingTypes.find((b) => b.id === id);
+    btn.addEventListener('click', () => deleteBookingTypeConfirm(bt));
   });
 }
 
@@ -445,6 +837,104 @@ function deleteCourtConfirm(id, name) {
       await window.api.deleteCourt(id);
       modal.close();
       toast('Court deleted');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function openAddBookingTypeModal() {
+  modal.open('Add Booking Type', `
+    <form id="btypeForm">
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input class="form-control" type="text" id="fBtypeName" placeholder="e.g. Junior Training" maxlength="60" autofocus>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Colour</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="color" id="fBtypeColor" value="#3b82f6" style="width:44px;height:36px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer">
+          <span id="fBtypeColorHex" style="font-size:13px;color:var(--text-muted)">#3b82f6</span>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('fBtypeColor').addEventListener('input', (e) => {
+    document.getElementById('fBtypeColorHex').textContent = e.target.value;
+  });
+  document.getElementById('btypeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('fBtypeName').value.trim();
+    const color = document.getElementById('fBtypeColor').value;
+    if (!name) return;
+    try {
+      await window.api.addBookingType({ name, color });
+      modal.close();
+      toast('Booking type added');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function openEditBookingTypeModal(bt) {
+  modal.open('Edit Booking Type', `
+    <form id="btypeForm">
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input class="form-control" type="text" id="fBtypeName" value="${esc(bt.name)}" maxlength="60">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Colour</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="color" id="fBtypeColor" value="${esc(bt.color)}" style="width:44px;height:36px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer">
+          <span id="fBtypeColorHex" style="font-size:13px;color:var(--text-muted)">${esc(bt.color)}</span>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('fBtypeColor').addEventListener('input', (e) => {
+    document.getElementById('fBtypeColorHex').textContent = e.target.value;
+  });
+  document.getElementById('btypeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('fBtypeName').value.trim();
+    const color = document.getElementById('fBtypeColor').value;
+    if (!name) return;
+    try {
+      await window.api.updateBookingType(bt.id, { name, color });
+      modal.close();
+      toast('Booking type updated');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function deleteBookingTypeConfirm(bt) {
+  modal.open('Delete Booking Type', `
+    <p style="margin:0 0 16px">Delete <strong>${esc(bt.name)}</strong>? Existing bookings with this type will keep their appearance but lose the type label.</p>
+    <div class="form-actions">
+      <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+      <button type="button" class="btn btn-danger" id="btnConfirmDeleteBtype">Delete</button>
+    </div>
+  `);
+  document.getElementById('btnConfirmDeleteBtype').addEventListener('click', async () => {
+    try {
+      await window.api.deleteBookingType(bt.id);
+      modal.close();
+      toast('Booking type deleted');
       renderClubSettings();
     } catch (err) {
       toast(err.message, 'error');
@@ -562,7 +1052,7 @@ async function renderDashboard() {
     const pills = nextMatch ? [
       `<span class="dh-pill">${fmtMatchDate(nextMatch.week_date)}</span>`,
       nextMatch.match_time ? `<span class="dh-pill">${esc(nextMatch.match_time)}</span>` : '',
-      nextMatch.schedule_courts && nextMatch.court_number ? `<span class="dh-pill">Court ${nextMatch.court_number}</span>` : '',
+      (nextMatch.court_name || (nextMatch.schedule_courts && nextMatch.court_number)) ? `<span class="dh-pill">${nextMatch.court_name || `Court ${nextMatch.court_number}`}</span>` : '',
       nextMatch.division_name ? `<span class="dh-pill">${esc(nextMatch.division_name)}</span>` : '',
     ].filter(Boolean).join('') : '';
     const countdownInnerHTML = (() => {
@@ -1239,9 +1729,9 @@ function renderPlayerProfile() {
         </thead>
         <tbody>
           ${p.upcoming.map((m) => {
-            const showCourt = m.schedule_courts && m.court_number;
-            const timeInfo = showCourt
-              ? `Court ${m.court_number}${m.match_time ? ' · ' + m.match_time : ''}`
+            const courtLabel = m.court_name || (m.schedule_courts && m.court_number ? `Court ${m.court_number}` : null);
+            const timeInfo = courtLabel
+              ? `${courtLabel}${m.match_time ? ' · ' + m.match_time : ''}`
               : (m.match_time || '—');
             return `
             <tr>
@@ -1905,7 +2395,8 @@ function printSchedule(league) {
         const p2 = m.sub2_name || m.player2_name;
         const score = (m.player1_score != null && m.player2_score != null)
           ? `<span class="sched-score">${m.player1_score}–${m.player2_score}</span>` : '';
-        const court = league.schedule_courts && m.court_number ? `<span class="sched-meta">Ct ${m.court_number}</span>` : '';
+        const courtLabel = m.court_name || (league.schedule_courts && m.court_number ? `Ct ${m.court_number}` : null);
+        const court = courtLabel ? `<span class="sched-meta">${esc(courtLabel)}</span>` : '';
         const time = m.match_time ? `<span class="sched-meta">${m.match_time}</span>` : '';
         return `<div class="sched-match">${esc(p1)} <span class="sched-vs">vs</span> ${esc(p2)}${score}${court}${time}</div>`;
       }).join('');
@@ -2237,21 +2728,41 @@ function showAuthLinkModal(title, url) {
 
 function openTimingModal(btn) {
   const matchId = Number(btn.dataset.matchId);
+  const leagueId = Number(btn.dataset.leagueId) || null;
+  const currentTime = btn.dataset.matchTime || '';
+  const currentCourtId = btn.dataset.courtId ? Number(btn.dataset.courtId) : null;
+  const currentCourtNumber = btn.dataset.courtNumber || '';
   const scheduleCourts = btn.dataset.scheduleCourts === '1';
   const numCourts = Number(btn.dataset.numCourts) || 0;
-  const currentTime = btn.dataset.matchTime || '';
-  const currentCourt = btn.dataset.courtNumber || '';
 
-  const courtField = scheduleCourts ? `
-    <div class="form-group">
-      <label>Court</label>
-      <select class="form-control" id="timingCourt">
-        <option value="">— No court —</option>
-        ${Array.from({ length: numCourts }, (_, i) => i + 1).map((n) =>
-          `<option value="${n}" ${Number(currentCourt) === n ? 'selected' : ''}>Court ${n}</option>`
-        ).join('')}
-      </select>
-    </div>` : '';
+  // Determine which court system to use
+  const leagueCourts = leagueId ? (_leagueCourtsCache.get(leagueId) || []) : [];
+  const useNewCourts = leagueCourts.length > 0;
+
+  let courtField = '';
+  if (useNewCourts) {
+    courtField = `
+      <div class="form-group">
+        <label>Court</label>
+        <select class="form-control" id="timingCourt">
+          <option value="">— No court —</option>
+          ${leagueCourts.map((c) =>
+            `<option value="${c.id}" ${currentCourtId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`
+          ).join('')}
+        </select>
+      </div>`;
+  } else if (scheduleCourts && numCourts > 0) {
+    courtField = `
+      <div class="form-group">
+        <label>Court</label>
+        <select class="form-control" id="timingCourt">
+          <option value="">— No court —</option>
+          ${Array.from({ length: numCourts }, (_, i) => i + 1).map((n) =>
+            `<option value="${n}" ${Number(currentCourtNumber) === n ? 'selected' : ''}>Court ${n}</option>`
+          ).join('')}
+        </select>
+      </div>`;
+  }
 
   modal.open('Edit Match Time', `
     <div class="form-group">
@@ -2271,13 +2782,17 @@ function openTimingModal(btn) {
   document.getElementById('timingSaveBtn').addEventListener('click', async () => {
     const saveBtn = document.getElementById('timingSaveBtn');
     const timeVal = document.getElementById('timingTime').value || null;
-    const courtVal = scheduleCourts ? (document.getElementById('timingCourt').value || null) : null;
+    const rawCourtVal = (useNewCourts || scheduleCourts) ? (document.getElementById('timingCourt')?.value || null) : null;
+    const courtVal = useNewCourts
+      ? null
+      : (rawCourtVal ? Number(rawCourtVal) : null);
+    const courtId = useNewCourts && rawCourtVal ? Number(rawCourtVal) : null;
 
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving…';
 
     try {
-      const result = await window.api.updateMatchTiming({ matchId, matchTime: timeVal, courtNumber: courtVal ? Number(courtVal) : null });
+      const result = await window.api.updateMatchTiming({ matchId, matchTime: timeVal, courtNumber: courtVal, courtId });
       if (result.warning) {
         const warnEl = document.getElementById('timingWarning');
         if (warnEl) { warnEl.style.display = ''; warnEl.textContent = result.warning; }
@@ -2465,16 +2980,28 @@ function renderMatchRow(match, league, adminMode = true) {
   const p2SubBadge = match.sub2_name
     ? `<span class="sub-badge" title="Subbing for ${esc(match.player2_name)}">SUB</span>` : '';
 
-  const showCourt = league && league.schedule_courts && match.court_number;
-  const timingLabel = showCourt
-    ? `Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}`
-    : (match.match_time || '');
+  // Populate courts cache for this league
+  if (league?.courts?.length) _leagueCourtsCache.set(league.id, league.courts);
+
+  // Determine court display: new system (court_id) takes priority over old (court_number)
+  const leagueCourts = league?.courts || [];
+  const newCourtName = leagueCourts.length > 0 && match.court_id
+    ? leagueCourts.find((c) => c.id === match.court_id)?.name
+    : null;
+  const showCourt = newCourtName != null || (league?.schedule_courts && match.court_number);
+  const timingLabel = newCourtName
+    ? `${newCourtName}${match.match_time ? ' · ' + match.match_time : ''}`
+    : (league?.schedule_courts && match.court_number
+        ? `Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}`
+        : (match.match_time || ''));
   const canEditTiming = adminMode && !match.skipped;
   const timingAttrs = canEditTiming ? `
     class="match-court-label timing-btn${timingLabel ? '' : ' timing-btn-empty'}"
     data-match-id="${match.id}"
+    data-league-id="${league ? league.id : ''}"
     data-match-time="${match.match_time || ''}"
     data-court-number="${match.court_number || ''}"
+    data-court-id="${match.court_id || ''}"
     data-schedule-courts="${league && league.schedule_courts ? '1' : '0'}"
     data-num-courts="${league ? league.num_courts : 2}"` : `class="match-court-label"`;
   const courtInfo = (canEditTiming || timingLabel)
@@ -2805,10 +3332,9 @@ function startCreateLeague() {
     numRounds: 1,
     blackoutDates: [],
     matchStartTime: '19:00',
-    numCourts: 2,
+    selectedCourtIds: [],
     matchDuration: 45,
     matchBuffer: 15,
-    scheduleCourts: false,
   };
   navigate('createLeague');
 }
@@ -3038,9 +3564,12 @@ async function renderStep3() {
 
 async function renderStep3Modern() {
   const n = state.wizard.rankedPlayers.length;
-  const { modernNumDivisions, numRounds, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
+  const { modernNumDivisions, numRounds, matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
+  const allCourts = await window.api.getCourts();
   const maxDivs = Math.floor(n / 2);
   const isValid = modernNumDivisions >= 1 && modernNumDivisions <= maxDivs;
+
+  const numCourts = selectedCourtIds.length;
 
   // Compute estimated total weeks based on even distribution
   let totalWeeks = null;
@@ -3089,8 +3618,16 @@ async function renderStep3Modern() {
           <input class="form-control" id="wStartTime" type="time" value="${matchStartTime}">
         </div>
         <div class="form-group">
-          <label># of Courts</label>
-          <input class="form-control" id="wCourts" type="number" min="1" value="${numCourts}">
+          <label>Courts</label>
+          ${allCourts.length === 0
+            ? `<p class="text-muted" style="font-size:12px;margin-top:4px">No courts set up. <a href="#" onclick="navigate('clubSettings');return false">Add courts in Club Settings</a> first.</p>`
+            : `<div class="court-picker">${allCourts.map((c) => `
+                <label class="court-pick-item">
+                  <input type="checkbox" class="wCourtCheck" value="${c.id}" ${selectedCourtIds.includes(c.id) ? 'checked' : ''}>
+                  ${esc(c.name)}
+                </label>`).join('')}
+              </div>`
+          }
         </div>
         <div class="form-group">
           <label>Match Duration <span class="form-hint">(minutes)</span></label>
@@ -3099,12 +3636,6 @@ async function renderStep3Modern() {
         <div class="form-group">
           <label>Buffer Between Matches <span class="form-hint">(minutes)</span></label>
           <input class="form-control" id="wBuffer" type="number" min="0" value="${matchBuffer}">
-        </div>
-        <div class="form-group form-group-check">
-          <label class="check-label">
-            <input type="checkbox" id="wScheduleCourts" ${scheduleCourts ? 'checked' : ''}>
-            Display court assignments on schedule
-          </label>
         </div>
       </div>
     </div>
@@ -3120,7 +3651,7 @@ async function renderStep3Modern() {
   document.getElementById('wNext').addEventListener('click', () => {
     if (!isValid) return;
     state.wizard.modernNumDivisions = modernNumDivisions;
-    state.wizard.modernDivisionPlayers = null; // reset so step 5 re-distributes
+    state.wizard.modernDivisionPlayers = null;
     state.wizard.step = 4;
     renderCreateLeague();
   });
@@ -3129,11 +3660,10 @@ async function renderStep3Modern() {
     state.wizard.modernNumDivisions = Math.max(1, Number(document.getElementById('wModernDivs').value) || 1);
     state.wizard.numRounds = Math.max(1, Number(document.getElementById('wRounds').value) || 1);
     state.wizard.matchStartTime = document.getElementById('wStartTime').value;
-    state.wizard.numCourts = Math.max(1, Number(document.getElementById('wCourts').value) || 1);
+    state.wizard.selectedCourtIds = [...document.querySelectorAll('.wCourtCheck:checked')].map((el) => Number(el.value));
     state.wizard.matchDuration = Math.max(1, Number(document.getElementById('wDuration').value) || 1);
     state.wizard.matchBuffer = Math.max(0, Number(document.getElementById('wBuffer').value) || 0);
-    state.wizard.scheduleCourts = document.getElementById('wScheduleCourts').checked;
-    state.wizard.modernDivisionPlayers = null; // reset distribution
+    state.wizard.modernDivisionPlayers = null;
     renderCreateLeague();
   }
 
@@ -3142,8 +3672,9 @@ async function renderStep3Modern() {
 
 async function renderStep3Traditional() {
   const n = state.wizard.rankedPlayers.length;
-  const { numTeams, numRounds, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
-  const configs = await window.api.getValidConfigs(n);
+  const { numTeams, numRounds, matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
+  const [configs, allCourts] = await Promise.all([window.api.getValidConfigs(n), window.api.getCourts()]);
+  const numCourts = selectedCourtIds.length;
 
   const isValid = numTeams >= 2 && n % numTeams === 0;
   const numDivisions = isValid ? n / numTeams : null;
@@ -3214,8 +3745,16 @@ async function renderStep3Traditional() {
           <input class="form-control" id="wStartTime" type="time" value="${matchStartTime}">
         </div>
         <div class="form-group">
-          <label># of Courts</label>
-          <input class="form-control" id="wCourts" type="number" min="1" value="${numCourts}">
+          <label>Courts</label>
+          ${allCourts.length === 0
+            ? `<p class="text-muted" style="font-size:12px;margin-top:4px">No courts set up. <a href="#" onclick="navigate('clubSettings');return false">Add courts in Club Settings</a> first.</p>`
+            : `<div class="court-picker">${allCourts.map((c) => `
+                <label class="court-pick-item">
+                  <input type="checkbox" class="wCourtCheck" value="${c.id}" ${selectedCourtIds.includes(c.id) ? 'checked' : ''}>
+                  ${esc(c.name)}
+                </label>`).join('')}
+              </div>`
+          }
         </div>
         <div class="form-group">
           <label>Match Duration <span class="form-hint">(minutes)</span></label>
@@ -3224,12 +3763,6 @@ async function renderStep3Traditional() {
         <div class="form-group">
           <label>Buffer Between Matches <span class="form-hint">(minutes)</span></label>
           <input class="form-control" id="wBuffer" type="number" min="0" value="${matchBuffer}">
-        </div>
-        <div class="form-group form-group-check">
-          <label class="check-label">
-            <input type="checkbox" id="wScheduleCourts" ${scheduleCourts ? 'checked' : ''}>
-            Display court assignments on schedule
-          </label>
         </div>
         ${lateWarning ? `<div class="struct-warning struct-warning-late">&#9888; ${lateWarning}</div>` : ''}
       </div>
@@ -3255,10 +3788,9 @@ async function renderStep3Traditional() {
     state.wizard.numTeams = Number(document.getElementById('wTeams').value) || 0;
     state.wizard.numRounds = Math.max(1, Number(document.getElementById('wRounds').value) || 1);
     state.wizard.matchStartTime = document.getElementById('wStartTime').value;
-    state.wizard.numCourts = Math.max(1, Number(document.getElementById('wCourts').value) || 1);
+    state.wizard.selectedCourtIds = [...document.querySelectorAll('.wCourtCheck:checked')].map((el) => Number(el.value));
     state.wizard.matchDuration = Math.max(1, Number(document.getElementById('wDuration').value) || 1);
     state.wizard.matchBuffer = Math.max(0, Number(document.getElementById('wBuffer').value) || 0);
-    state.wizard.scheduleCourts = document.getElementById('wScheduleCourts').checked;
     renderCreateLeague();
   }
 
@@ -3789,13 +4321,13 @@ async function submitCreateLeague() {
   btn.innerHTML = '<span class="spinner"></span> Creating…';
 
   const { leagueName, startDate, setupType, numRounds, blackoutDates,
-          matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts } = state.wizard;
+          matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
 
   let payload;
   if (setupType === 'modern') {
     payload = {
       name: leagueName, startDate, setup_type: 'modern',
-      numRounds, blackoutDates, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts,
+      numRounds, blackoutDates, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPlayers, dIdx) =>
         divPlayers.map((p, pIdx) => ({ playerId: p.id, rank: dIdx * 1000 + pIdx + 1 }))
       ),
@@ -3805,7 +4337,7 @@ async function submitCreateLeague() {
     payload = {
       name: leagueName, startDate, setup_type: 'traditional',
       numTeams, numDivisions, numRounds, blackoutDates, teamNames,
-      matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts,
+      matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
     };
   }
@@ -3860,8 +4392,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     navMyProfile.addEventListener('click', () => openPlayerProfile(state.currentUser.playerId));
   }
 
-  // Show "Club Settings" nav item for admins
+  // Show admin-only nav items
   if (state.currentUser?.role === 'admin') {
+    document.getElementById('navSchedule').style.display = '';
     document.getElementById('navClubSettings').style.display = '';
   }
 

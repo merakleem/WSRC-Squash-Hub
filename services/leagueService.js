@@ -21,11 +21,16 @@ function addMinutes(timeStr, minutes) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-async function createModernLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+async function createModernLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [] }) {
   const numDivisions = divisions.length;
+  const useNewCourts = courtIds.length > 0;
+  const effectiveCourts = useNewCourts ? courtIds.length : numCourts;
   const leagueId = await leagueModel.createLeagueRecord({
     name, startDate, numTeams: 0, numDivisions, setup_type: 'modern',
-    numRounds, blackoutDates, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts,
+    numRounds, blackoutDates, matchStartTime,
+    numCourts: effectiveCourts,
+    matchDuration, matchBuffer,
+    scheduleCourts: useNewCourts ? true : scheduleCourts,
   });
 
   // Create divisions
@@ -90,14 +95,22 @@ async function createModernLeague({ name, startDate, divisions, numRounds = 1, b
       [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
     }
     for (let i = 0; i < weekMatches.length; i++) {
-      const time = addMinutes(matchStartTime, Math.floor(i / numCourts) * slotMinutes);
-      await run(
-        'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
-        [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, (i % numCourts) + 1, time]
-      );
+      const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
+      if (useNewCourts) {
+        await run(
+          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_id, match_time) VALUES (?, ?, ?, ?, ?, ?)',
+          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtIds[i % effectiveCourts], time]
+        );
+      } else {
+        await run(
+          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
+          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, (i % effectiveCourts) + 1, time]
+        );
+      }
     }
   }
 
+  if (useNewCourts) await leagueModel.setLeagueCourts(leagueId, courtIds);
   return leagueId;
 }
 
@@ -106,7 +119,7 @@ async function createLeague(data) {
   return createTraditionalLeague(data);
 }
 
-async function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+async function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [] }) {
   const total = numTeams * numDivisions;
   if (total !== rankedPlayers.length) {
     throw new Error(
@@ -115,7 +128,13 @@ async function createTraditionalLeague({ name, startDate, rankedPlayers, numTeam
   }
 
   // --- League record ---
-  const leagueId = await leagueModel.createLeagueRecord({ name, startDate, numTeams, numDivisions, numRounds, blackoutDates, matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts });
+  const useNewCourts = courtIds.length > 0;
+  const effectiveCourts = useNewCourts ? courtIds.length : numCourts;
+  const leagueId = await leagueModel.createLeagueRecord({
+    name, startDate, numTeams, numDivisions, numRounds, blackoutDates, matchStartTime,
+    numCourts: effectiveCourts, matchDuration, matchBuffer,
+    scheduleCourts: useNewCourts ? true : scheduleCourts,
+  });
 
   // --- Teams ---
   const TEAM_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -217,20 +236,27 @@ async function createTraditionalLeague({ name, startDate, rankedPlayers, numTeam
       [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
     }
 
-    // Assign courts and times: stagger across numCourts
+    // Assign courts and times: stagger across courts
     for (let i = 0; i < weekMatches.length; i++) {
-      const courtIdx = i % numCourts;
-      const slotIdx  = Math.floor(i / numCourts);
+      const courtIdx = i % effectiveCourts;
+      const slotIdx  = Math.floor(i / effectiveCourts);
       const time = addMinutes(matchStartTime, slotIdx * slotMinutes);
-      const courtNumber = courtIdx + 1;
 
-      await run(
-        'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
-        [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtNumber, time]
-      );
+      if (useNewCourts) {
+        await run(
+          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_id, match_time) VALUES (?, ?, ?, ?, ?, ?)',
+          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtIds[courtIdx], time]
+        );
+      } else {
+        await run(
+          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
+          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtIdx + 1, time]
+        );
+      }
     }
   }
 
+  if (useNewCourts) await leagueModel.setLeagueCourts(leagueId, courtIds);
   return leagueId;
 }
 
@@ -243,11 +269,12 @@ async function getFullLeague(leagueId) {
 
   const isModern = league.setup_type === 'modern';
 
-  const [teams, divisions, players, weeks] = await Promise.all([
+  const [teams, divisions, players, weeks, courts] = await Promise.all([
     leagueModel.getTeams(leagueId),
     leagueModel.getDivisions(leagueId),
     leagueModel.getLeaguePlayers(leagueId),
     leagueModel.getWeeks(leagueId),
+    leagueModel.getLeagueCourts(leagueId),
   ]);
 
   const weeksWithData = await Promise.all(
@@ -266,7 +293,7 @@ async function getFullLeague(leagueId) {
     })
   );
 
-  return { ...league, teams, divisions, players, weeks: weeksWithData };
+  return { ...league, teams, divisions, players, weeks: weeksWithData, courts };
 }
 
 module.exports = { createLeague, getFullLeague };

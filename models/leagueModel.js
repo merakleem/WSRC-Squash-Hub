@@ -168,11 +168,28 @@ async function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
   return remaining.length;
 }
 
-async function updateMatchTiming(matchId, matchTime, courtNumber) {
+async function updateMatchTiming(matchId, matchTime, courtNumber, courtId = null) {
   return run(
-    'UPDATE matches SET match_time = ?, court_number = ? WHERE id = ?',
-    [matchTime || null, courtNumber || null, matchId]
+    'UPDATE matches SET match_time = ?, court_number = ?, court_id = ? WHERE id = ?',
+    [matchTime || null, courtNumber || null, courtId || null, matchId]
   );
+}
+
+async function getLeagueCourts(leagueId) {
+  return all(
+    `SELECT c.* FROM courts c
+     JOIN league_courts lc ON lc.court_id = c.id
+     WHERE lc.league_id = ?
+     ORDER BY c.sort_order ASC, c.id ASC`,
+    [leagueId]
+  );
+}
+
+async function setLeagueCourts(leagueId, courtIds) {
+  await run('DELETE FROM league_courts WHERE league_id = ?', [leagueId]);
+  for (const courtId of courtIds) {
+    await run('INSERT INTO league_courts (league_id, court_id) VALUES (?, ?)', [leagueId, courtId]);
+  }
 }
 
 async function replacePlayerInLeague(leagueId, oldPlayerId, newPlayerId) {
@@ -221,4 +238,6 @@ module.exports = {
   getWeekByes,
   replacePlayerInLeague,
   updateMatchTiming,
+  getLeagueCourts,
+  setLeagueCourts,
 };

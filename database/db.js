@@ -37,6 +37,10 @@ function initDB(dbPath) {
     `ALTER TABLE matches ADD COLUMN confirmed_at TEXT`,
     `ALTER TABLE matches ADD COLUMN submitted_by_player_id INTEGER`,
     `CREATE TABLE IF NOT EXISTS courts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1)`,
+    `CREATE TABLE IF NOT EXISTS booking_types (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#6b7589')`,
+    `CREATE TABLE IF NOT EXISTS bookings (id INTEGER PRIMARY KEY AUTOINCREMENT, court_id INTEGER NOT NULL, date TEXT NOT NULL, start_time TEXT NOT NULL, duration_minutes INTEGER NOT NULL DEFAULT 60, booking_type_id INTEGER, info TEXT, FOREIGN KEY (court_id) REFERENCES courts(id) ON DELETE CASCADE, FOREIGN KEY (booking_type_id) REFERENCES booking_types(id) ON DELETE SET NULL)`,
+    `CREATE TABLE IF NOT EXISTS league_courts (league_id INTEGER NOT NULL, court_id INTEGER NOT NULL, PRIMARY KEY (league_id, court_id), FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE, FOREIGN KEY (court_id) REFERENCES courts(id) ON DELETE CASCADE)`,
+    `ALTER TABLE matches ADD COLUMN court_id INTEGER`,
   ];
   for (const sql of migrations) {
     try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }

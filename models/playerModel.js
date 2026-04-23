@@ -172,6 +172,8 @@ async function getPlayerUpcomingMatches(id) {
       d.name        AS division_name,
       CASE WHEN m.player1_id = ? THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
       m.court_number,
+      m.court_id,
+      c.name AS court_name,
       m.match_time,
       l.schedule_courts
     FROM matches m
@@ -185,6 +187,7 @@ async function getPlayerUpcomingMatches(id) {
     JOIN weeks w          ON tm.week_id = w.id
     JOIN leagues l        ON w.league_id = l.id
     JOIN divisions d      ON m.division_id = d.id
+    LEFT JOIN courts c    ON c.id = m.court_id
     WHERE ((m.player1_id = ? AND s1.sub_player_id IS NULL)
        OR  (m.player2_id = ? AND s2.sub_player_id IS NULL))
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
@@ -200,6 +203,8 @@ async function getPlayerUpcomingMatches(id) {
       d.name        AS division_name,
       CASE WHEN s.original_player_id = m.player1_id THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
       m.court_number,
+      m.court_id,
+      c.name AS court_name,
       m.match_time,
       l.schedule_courts
     FROM match_subs s
@@ -214,6 +219,7 @@ async function getPlayerUpcomingMatches(id) {
     JOIN weeks w          ON tm.week_id = w.id
     JOIN leagues l        ON w.league_id = l.id
     JOIN divisions d      ON m.division_id = d.id
+    LEFT JOIN courts c    ON c.id = m.court_id
     WHERE s.sub_player_id = ?
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
 

@@ -10,6 +10,7 @@ const leagueService = require('./services/leagueService');
 const leagueModel = require('./models/leagueModel');
 const ladderModel = require('./models/ladderModel');
 const courtModel = require('./models/courtModel');
+const bookingModel = require('./models/bookingModel');
 const { getValidConfigurations } = require('./utils/helpers');
 
 function serverEsc(str) {
@@ -801,11 +802,10 @@ app.delete('/api/leagues/:id', requireAdmin, wrap(async (req, res) => {
 
 app.put('/api/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
   const matchId = Number(req.params.id);
-  const { matchTime, courtNumber } = req.body;
+  const { matchTime, courtNumber, courtId } = req.body;
 
   const db = getDB();
 
-  // Get league settings and week context for this match
   const ctx = db.prepare(`
     SELECT l.schedule_courts, l.num_courts, tm.week_id
     FROM matches m
@@ -820,8 +820,19 @@ app.put('/api/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
   let warning = null;
 
   if (matchTime) {
-    if (ctx.schedule_courts && courtNumber) {
-      // Hard block: same court + same time in same week (excluding this match)
+    if (courtId) {
+      // New court system: block same court_id + time in same week
+      const conflict = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM matches m
+        JOIN team_matchups tm ON m.matchup_id = tm.id
+        WHERE tm.week_id = ? AND m.court_id = ? AND m.match_time = ? AND m.id != ?
+      `).get(ctx.week_id, courtId, matchTime, matchId);
+      if (conflict.cnt > 0) {
+        const courtName = db.prepare('SELECT name FROM courts WHERE id = ?').get(courtId)?.name || `Court ${courtId}`;
+        return res.status(409).json({ error: `${courtName} is already booked at ${matchTime} this week.` });
+      }
+    } else if (ctx.schedule_courts && courtNumber) {
+      // Old court system: block same court_number + time in same week
       const conflict = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
         JOIN team_matchups tm ON m.matchup_id = tm.id
@@ -832,8 +843,7 @@ app.put('/api/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
       }
     }
 
-    if (ctx.num_courts > 0) {
-      // Count other matches at this time in the same week
+    if (!courtId && ctx.num_courts > 0) {
       const atSameTime = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
         JOIN team_matchups tm ON m.matchup_id = tm.id
@@ -845,7 +855,7 @@ app.put('/api/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
     }
   }
 
-  await leagueModel.updateMatchTiming(matchId, matchTime || null, courtNumber || null);
+  await leagueModel.updateMatchTiming(matchId, matchTime || null, courtId ? null : (courtNumber || null), courtId || null);
   res.json({ ok: true, warning });
 }));
 
@@ -1074,6 +1084,59 @@ app.get('/api/activity', wrap(async (req, res) => {
 
 app.get('/api/configs/:numPlayers', wrap(async (req, res) => {
   res.json(getValidConfigurations(Number(req.params.numPlayers)));
+}));
+
+// ===== SCHEDULE =====
+
+app.get('/api/schedule', wrap(async (req, res) => {
+  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  res.json(bookingModel.getScheduleForDate(date));
+}));
+
+// ===== BOOKING TYPES =====
+
+app.get('/api/booking-types', wrap(async (req, res) => {
+  res.json(await bookingModel.getAllBookingTypes());
+}));
+
+app.post('/api/booking-types', requireAdmin, wrap(async (req, res) => {
+  const { name, color } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
+  if (!color?.trim()) return res.status(400).json({ error: 'Color is required' });
+  res.json(await bookingModel.addBookingType({ name: name.trim(), color: color.trim() }));
+}));
+
+app.put('/api/booking-types/:id', requireAdmin, wrap(async (req, res) => {
+  const { name, color } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
+  if (!color?.trim()) return res.status(400).json({ error: 'Color is required' });
+  res.json(await bookingModel.updateBookingType({ id: req.params.id, name: name.trim(), color: color.trim() }));
+}));
+
+app.delete('/api/booking-types/:id', requireAdmin, wrap(async (req, res) => {
+  await bookingModel.deleteBookingType(req.params.id);
+  res.json({ ok: true });
+}));
+
+// ===== BOOKINGS =====
+
+app.post('/api/bookings', requireAdmin, wrap(async (req, res) => {
+  const { courtId, date, startTime, durationMinutes, bookingTypeId, info } = req.body;
+  if (!courtId) return res.status(400).json({ error: 'Court is required' });
+  if (!date) return res.status(400).json({ error: 'Date is required' });
+  if (!startTime) return res.status(400).json({ error: 'Start time is required' });
+  if (!durationMinutes) return res.status(400).json({ error: 'Duration is required' });
+  res.json(await bookingModel.addBooking({ courtId, date, startTime, durationMinutes, bookingTypeId, info }));
+}));
+
+app.put('/api/bookings/:id', requireAdmin, wrap(async (req, res) => {
+  const { courtId, date, startTime, durationMinutes, bookingTypeId, info } = req.body;
+  res.json(await bookingModel.updateBooking({ id: req.params.id, courtId, date, startTime, durationMinutes, bookingTypeId, info }));
+}));
+
+app.delete('/api/bookings/:id', requireAdmin, wrap(async (req, res) => {
+  await bookingModel.deleteBooking(req.params.id);
+  res.json({ ok: true });
 }));
 
 // ===== COURTS =====
