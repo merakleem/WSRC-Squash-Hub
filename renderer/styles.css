@@ -3182,6 +3182,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .sch-nav-btn:hover { background: var(--hover); }
 .sch-jump-btn {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;

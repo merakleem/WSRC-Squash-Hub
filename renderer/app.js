@@ -347,14 +347,16 @@ async function renderSchedule() {
   }).join('');
 
   // Time axis
-  const DAY_START = 7 * 60;
-  const DAY_END   = 22 * 60;
-  const SLOT_H    = 28;
+  const DAY_START = 5 * 60;
+  const DAY_END   = 24 * 60;
+  const SLOT_H    = 44;
   const SLOT_MIN  = 30;
   const totalSlots = (DAY_END - DAY_START) / SLOT_MIN;
   const gridH = totalSlots * SLOT_H;
 
   function fmtHour(h) {
+    if (h === 0 || h === 24) return '12am';
+    if (h === 12) return '12pm';
     const ampm = h >= 12 ? 'pm' : 'am';
     const hh = h % 12 === 0 ? 12 : h % 12;
     return `${hh}${ampm}`;
@@ -417,11 +419,11 @@ async function renderSchedule() {
           <button class="sch-nav-btn" id="schNext">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
-          <button class="sch-jump-btn" id="schJumpBtn">
+          <label class="sch-jump-btn">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>
             Jump to date
-          </button>
-          <input type="date" id="schDatePicker" style="position:fixed;top:-9999px;left:-9999px;opacity:0" value="${state.scheduleDate}">
+            <input type="date" id="schDatePicker" value="${state.scheduleDate}" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;border:none;padding:0;box-sizing:border-box">
+          </label>
         </div>
         <div class="sch-day-strip">${dayStripHTML}</div>
       </div>
@@ -453,10 +455,6 @@ async function renderSchedule() {
   });
   document.getElementById('schNext')?.addEventListener('click', () => {
     state.scheduleDate = _addDaysLocal(state.scheduleDate, 1); renderSchedule();
-  });
-  document.getElementById('schJumpBtn')?.addEventListener('click', () => {
-    const picker = document.getElementById('schDatePicker');
-    try { picker?.showPicker(); } catch (_) { picker?.click(); }
   });
   document.getElementById('schDatePicker')?.addEventListener('change', (e) => {
     if (e.target.value) { state.scheduleDate = e.target.value; renderSchedule(); }
