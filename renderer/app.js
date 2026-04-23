@@ -80,6 +80,7 @@ const state = {
   currentUser: null,      // { role: 'admin'|'player', playerId: number|null }
   scheduleDate: null,     // YYYY-MM-DD, null = today
   scheduleTool: 'add',   // 'add' | 'move'
+  scheduleZoom: 44,      // SLOT_H in px; levels: 22, 33, 44, 66, 88
   wizard: {
     step: 1,
     setupType: 'traditional',
@@ -353,7 +354,8 @@ async function renderSchedule() {
   // Time axis
   const DAY_START = 5 * 60;
   const DAY_END   = 24 * 60;
-  const SLOT_H    = 44;
+  const ZOOM_LEVELS = [22, 33, 44, 66, 88];
+  const SLOT_H    = ZOOM_LEVELS.includes(state.scheduleZoom) ? state.scheduleZoom : 44;
   const SLOT_MIN  = 30;
   const totalSlots = (DAY_END - DAY_START) / SLOT_MIN;
   const gridH = totalSlots * SLOT_H;
@@ -432,12 +434,27 @@ async function renderSchedule() {
       </div>
 
       ${isAdmin() && courts.length > 0 ? `<div class="sch-toolbar">
-        <button class="sch-tool-btn${state.scheduleTool !== 'move' ? ' active' : ''}" data-tool="add" title="Add booking">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-        <button class="sch-tool-btn${state.scheduleTool === 'move' ? ' active' : ''}" data-tool="move" title="Move bookings">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
-        </button>
+        <span class="sch-toolbar-label">Tools</span>
+        <div class="sch-tool-group">
+          <button class="sch-tool-btn${state.scheduleTool !== 'move' ? ' active' : ''}" data-tool="add" title="Add booking">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add
+          </button>
+          <button class="sch-tool-btn${state.scheduleTool === 'move' ? ' active' : ''}" data-tool="move" title="Move bookings">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+            Move
+          </button>
+        </div>
+        <div class="sch-toolbar-spacer"></div>
+        <div class="sch-zoom-group">
+          <button class="sch-zoom-btn" id="schZoomOut" title="Zoom out"${SLOT_H <= 22 ? ' disabled' : ''}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <span class="sch-zoom-pct">${Math.round(SLOT_H / 44 * 100)}%</span>
+          <button class="sch-zoom-btn" id="schZoomIn" title="Zoom in"${SLOT_H >= 88 ? ' disabled' : ''}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
       </div>` : ''}
 
       ${courts.length === 0
@@ -473,6 +490,16 @@ async function renderSchedule() {
   });
   document.getElementById('schGoSettings')?.addEventListener('click', (e) => {
     e.preventDefault(); navigate('clubSettings');
+  });
+  document.getElementById('schZoomOut')?.addEventListener('click', () => {
+    const levels = [22, 33, 44, 66, 88];
+    const idx = levels.indexOf(state.scheduleZoom);
+    if (idx > 0) { state.scheduleZoom = levels[idx - 1]; renderSchedule(); }
+  });
+  document.getElementById('schZoomIn')?.addEventListener('click', () => {
+    const levels = [22, 33, 44, 66, 88];
+    const idx = levels.indexOf(state.scheduleZoom);
+    if (idx < levels.length - 1) { state.scheduleZoom = levels[idx + 1]; renderSchedule(); }
   });
   document.getElementById('btnNewBooking')?.addEventListener('click', () => openNewBookingModal(courts));
   // Admin toolbar + all grid interaction

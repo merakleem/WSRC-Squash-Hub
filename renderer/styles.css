@@ -3291,27 +3291,70 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .sch-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   padding: 8px 28px;
   border-bottom: 1px solid var(--border);
   background: #fff;
   flex-shrink: 0;
 }
-.sch-tool-btn {
+.sch-toolbar-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.sch-tool-group {
   display: flex;
+  gap: 4px;
+}
+.sch-tool-btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid transparent;
+  gap: 5px;
+  padding: 5px 11px;
+  border: 1.5px solid var(--border);
   border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
 }
-.sch-tool-btn:hover { background: var(--hover); color: var(--primary); }
-.sch-tool-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.sch-tool-btn:hover { background: var(--hover); color: var(--primary); border-color: var(--primary); }
+.sch-tool-btn.active[data-tool="add"] { background: var(--primary); border-color: var(--primary); color: #fff; }
+.sch-tool-btn.active[data-tool="move"] { background: #f59e0b; border-color: #f59e0b; color: #fff; }
+.sch-toolbar-spacer { flex: 1; }
+.sch-zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sch-zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.sch-zoom-btn:hover:not(:disabled) { background: var(--hover); color: var(--primary); border-color: var(--primary); }
+.sch-zoom-btn:disabled { opacity: 0.35; cursor: default; }
+.sch-zoom-pct {
+  min-width: 40px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
 .sch-grid-scroll {
   flex: 1;
   overflow: auto;
