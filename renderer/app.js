@@ -53,6 +53,10 @@ if (typeof window !== 'undefined' && !window.api) {
     sendReset:         (id) => _apiFetch('POST', `/api/players/${id}/send-reset`),
     reportPlayerScore: (d)  => _apiFetch('PUT',  `/api/matches/${d.matchId}/player-score`, d),
     getActivity:        (days) => _apiFetch('GET', `/api/activity${days ? `?days=${days}` : ''}`),
+    getCourts:          ()        => _apiFetch('GET',    '/api/courts'),
+    addCourt:           (d)       => _apiFetch('POST',   '/api/courts', d),
+    updateCourt:        (id, d)   => _apiFetch('PUT',    `/api/courts/${id}`, d),
+    deleteCourt:        (id)      => _apiFetch('DELETE', `/api/courts/${id}`),
   };
 }
 
@@ -196,6 +200,7 @@ function renderPage() {
     case 'players':       renderPlayers(); break;
     case 'ladder':        renderLadder(); break;
     case 'activity':      renderClubActivity(); break;
+    case 'clubSettings':  renderClubSettings(); break;
     case 'leagues':       renderLeagues(); break;
     case 'leagueDetail':  renderLeagueDetail(); break;
     case 'createLeague':  renderCreateLeague(); break;
@@ -320,6 +325,131 @@ async function renderClubActivity(days = 7) {
   if (loadMoreLabel) {
     document.getElementById('btnLoadMore').addEventListener('click', () => renderClubActivity(loadMoreDays));
   }
+}
+
+// ===== CLUB SETTINGS =====
+async function renderClubSettings() {
+  document.getElementById('pageTitle').textContent = 'Club Settings';
+  document.getElementById('topbarActions').innerHTML = '';
+  const content = document.getElementById('mainContent');
+  content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
+
+  const courts = await window.api.getCourts();
+
+  content.innerHTML = `
+    <div class="settings-page">
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Courts</h2>
+          <button class="btn btn-primary btn-sm" id="btnAddCourt">+ Add Court</button>
+        </div>
+        <p class="settings-section-desc">Courts are used when scheduling matches in leagues.</p>
+        ${courts.length === 0
+          ? `<div class="settings-empty">No courts yet. Add your first court to get started.</div>`
+          : `<div class="court-list">
+              ${courts.map((c) => `
+                <div class="court-item">
+                  <span class="court-item-name">${esc(c.name)}</span>
+                  <div class="court-item-actions">
+                    <button class="btn btn-outline btn-sm" data-court-edit="${c.id}">Rename</button>
+                    <button class="btn btn-danger btn-sm" data-court-delete="${c.id}">Delete</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>`
+        }
+      </div>
+    </div>`;
+
+  document.getElementById('btnAddCourt').addEventListener('click', openAddCourtModal);
+
+  content.querySelectorAll('[data-court-edit]').forEach((btn) => {
+    const id = Number(btn.dataset.courtEdit);
+    const name = courts.find((c) => c.id === id)?.name || '';
+    btn.addEventListener('click', () => openEditCourtModal(id, name));
+  });
+
+  content.querySelectorAll('[data-court-delete]').forEach((btn) => {
+    const id = Number(btn.dataset.courtDelete);
+    const name = courts.find((c) => c.id === id)?.name || '';
+    btn.addEventListener('click', () => deleteCourtConfirm(id, name));
+  });
+}
+
+function openAddCourtModal() {
+  modal.open('Add Court', `
+    <form id="courtForm">
+      <div class="form-group">
+        <label class="form-label">Court Name</label>
+        <input class="form-control" type="text" id="fCourtName" placeholder="e.g. Court 1" maxlength="50" autofocus>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Court</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('courtForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('fCourtName').value.trim();
+    if (!name) return;
+    try {
+      await window.api.addCourt({ name });
+      modal.close();
+      toast('Court added');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function openEditCourtModal(id, name) {
+  modal.open('Rename Court', `
+    <form id="courtForm">
+      <div class="form-group">
+        <label class="form-label">Court Name</label>
+        <input class="form-control" type="text" id="fCourtName" value="${esc(name)}" maxlength="50">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('courtForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const newName = document.getElementById('fCourtName').value.trim();
+    if (!newName) return;
+    try {
+      await window.api.updateCourt(id, { name: newName });
+      modal.close();
+      toast('Court renamed');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function deleteCourtConfirm(id, name) {
+  modal.open('Delete Court', `
+    <p style="margin:0 0 16px">Are you sure you want to delete <strong>${esc(name)}</strong>?</p>
+    <div class="form-actions">
+      <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
+      <button type="button" class="btn btn-danger" id="btnConfirmDeleteCourt">Delete</button>
+    </div>
+  `);
+  document.getElementById('btnConfirmDeleteCourt').addEventListener('click', async () => {
+    try {
+      await window.api.deleteCourt(id);
+      modal.close();
+      toast('Court deleted');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
 }
 
 async function renderDashboard() {
@@ -3728,6 +3858,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     const navMyProfile = document.getElementById('navMyProfile');
     navMyProfile.style.display = '';
     navMyProfile.addEventListener('click', () => openPlayerProfile(state.currentUser.playerId));
+  }
+
+  // Show "Club Settings" nav item for admins
+  if (state.currentUser?.role === 'admin') {
+    document.getElementById('navClubSettings').style.display = '';
   }
 
   state.players = await window.api.getPlayers();

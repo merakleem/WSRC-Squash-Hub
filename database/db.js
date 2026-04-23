@@ -36,6 +36,7 @@ function initDB(dbPath) {
     `CREATE TABLE IF NOT EXISTS week_byes (id INTEGER PRIMARY KEY AUTOINCREMENT, week_id INTEGER NOT NULL, player_id INTEGER NOT NULL, division_id INTEGER NOT NULL, FOREIGN KEY (week_id) REFERENCES weeks(id) ON DELETE CASCADE, FOREIGN KEY (player_id) REFERENCES players(id), FOREIGN KEY (division_id) REFERENCES divisions(id))`,
     `ALTER TABLE matches ADD COLUMN confirmed_at TEXT`,
     `ALTER TABLE matches ADD COLUMN submitted_by_player_id INTEGER`,
+    `CREATE TABLE IF NOT EXISTS courts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1)`,
   ];
   for (const sql of migrations) {
     try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }

@@ -3059,3 +3059,61 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .dh-tu { font-size: 16px; }
   .dh-matchup { font-size: 20px; }
 }
+
+/* ===== CLUB SETTINGS ===== */
+.settings-page {
+  padding: 24px;
+  max-width: 640px;
+}
+.settings-section {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.settings-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.settings-section-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 16px 0;
+}
+.settings-empty {
+  font-size: 14px;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+.court-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.court-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.court-item-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+.court-item-actions {
+  display: flex;
+  gap: 8px;
+}

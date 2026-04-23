@@ -9,6 +9,7 @@ const playerService = require('./services/playerService');
 const leagueService = require('./services/leagueService');
 const leagueModel = require('./models/leagueModel');
 const ladderModel = require('./models/ladderModel');
+const courtModel = require('./models/courtModel');
 const { getValidConfigurations } = require('./utils/helpers');
 
 function serverEsc(str) {
@@ -1073,6 +1074,29 @@ app.get('/api/activity', wrap(async (req, res) => {
 
 app.get('/api/configs/:numPlayers', wrap(async (req, res) => {
   res.json(getValidConfigurations(Number(req.params.numPlayers)));
+}));
+
+// ===== COURTS =====
+
+app.get('/api/courts', wrap(async (req, res) => {
+  res.json(await courtModel.getAllCourts());
+}));
+
+app.post('/api/courts', requireAdmin, wrap(async (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Court name is required' });
+  res.json(await courtModel.addCourt({ name: name.trim() }));
+}));
+
+app.put('/api/courts/:id', requireAdmin, wrap(async (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Court name is required' });
+  res.json(await courtModel.updateCourt({ id: req.params.id, name: name.trim() }));
+}));
+
+app.delete('/api/courts/:id', requireAdmin, wrap(async (req, res) => {
+  await courtModel.deleteCourt(req.params.id);
+  res.json({ ok: true });
 }));
 
 // ===== START =====
