@@ -3288,6 +3288,30 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   border: 1px solid rgba(0,0,0,0.06);
   overflow: hidden;
 }
+.sch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+  background: #fafaf7;
+  flex-shrink: 0;
+}
+.sch-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.sch-tool-btn:hover { background: var(--hover); color: var(--primary); }
+.sch-tool-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 .sch-grid-scroll {
   flex: 1;
   overflow: auto;
@@ -3341,6 +3365,12 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .sch-courts-row--admin {
   cursor: crosshair;
 }
+.sch-courts-row--move {
+  cursor: grab;
+}
+.sch-courts-row--move .sch-booking {
+  cursor: grab;
+}
 .sch-court-col {
   flex: 1;
   min-width: var(--court-w, 200px);
@@ -3355,6 +3385,28 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   pointer-events: none;
   z-index: 10;
   box-sizing: border-box;
+}
+.sch-drag-overlay--select {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.55);
+}
+.sch-booking--selected {
+  outline: 2px solid rgba(255,255,255,0.9);
+  outline-offset: -2px;
+  filter: brightness(1.1);
+}
+.sch-booking--moving {
+  opacity: 0.25;
+  pointer-events: none;
+}
+.sch-move-preview {
+  position: absolute;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0.85;
+  box-sizing: border-box;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.22);
 }
 .sch-court-checks {
   display: flex;

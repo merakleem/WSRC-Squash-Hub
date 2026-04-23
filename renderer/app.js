@@ -434,6 +434,14 @@ async function renderSchedule() {
         ? `<div class="sch-no-courts">No courts configured.${isAdmin() ? ` <a href="#" id="schGoSettings">Add courts in Club Settings.</a>` : ''}</div>`
         : `<div class="sch-grid-area">
             <div class="sch-grid-card">
+              ${isAdmin() ? `<div class="sch-toolbar">
+                <button class="sch-tool-btn active" data-tool="add" title="Add booking">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button class="sch-tool-btn" data-tool="move" title="Move bookings">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+                </button>
+              </div>` : ''}
               <div class="sch-grid-scroll">
                 <div class="sch-grid-header">
                   <div class="sch-time-spacer" style="width:${TIME_COL_W}px"></div>
@@ -465,103 +473,249 @@ async function renderSchedule() {
     e.preventDefault(); navigate('clubSettings');
   });
   document.getElementById('btnNewBooking')?.addEventListener('click', () => openNewBookingModal(courts));
-  content.querySelectorAll('[data-booking-id]').forEach((el) => {
-    el.addEventListener('click', () => {
-      const slot = slots.find((s) => s.id === Number(el.dataset.bookingId));
-      if (slot) openEditBookingModal(slot, courts);
-    });
-  });
-
-  // Grid click/drag to create bookings (admin only)
+  // Admin toolbar + all grid interaction
   if (isAdmin()) {
     const courtsRow = content.querySelector('.sch-courts-row');
     if (courtsRow) {
       courtsRow.classList.add('sch-courts-row--admin');
+      const courtIdxById = new Map(courts.map((c, i) => [c.id, i]));
 
       function minutesToTimeStr(m) {
         return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
       }
-
       function getCourtIdxAtX(clientX) {
         const cols = [...courtsRow.querySelectorAll('.sch-court-col')];
-        return cols.findIndex((col) => {
-          const r = col.getBoundingClientRect();
-          return clientX >= r.left && clientX < r.right;
-        });
+        return cols.findIndex((col) => { const r = col.getBoundingClientRect(); return clientX >= r.left && clientX < r.right; });
       }
-
       function getTimeAtY(clientY) {
-        const rowRect = courtsRow.getBoundingClientRect();
-        const y = Math.max(0, Math.min(clientY - rowRect.top, gridH - 1));
+        const y = Math.max(0, Math.min(clientY - courtsRow.getBoundingClientRect().top, gridH - 1));
         return Math.round((DAY_START + (y / SLOT_H) * SLOT_MIN) / 15) * 15;
+      }
+      function getColRect(idx) {
+        return [...courtsRow.querySelectorAll('.sch-court-col')][idx]?.getBoundingClientRect();
+      }
+      function positionOverlay(el, minTime, maxTime, minIdx, maxIdx) {
+        const rowRect = courtsRow.getBoundingClientRect();
+        const s = getColRect(minIdx), e2 = getColRect(maxIdx);
+        if (!s || !e2) return;
+        const top = ((minTime - DAY_START) / SLOT_MIN) * SLOT_H;
+        const height = Math.max((maxTime - minTime) / SLOT_MIN, 15 / SLOT_MIN) * SLOT_H;
+        el.style.cssText = `top:${top}px;height:${height}px;left:${s.left - rowRect.left}px;width:${e2.right - s.left}px`;
+      }
+      function makePreview(slot, courtIdx) {
+        const el = document.createElement('div');
+        el.className = 'sch-move-preview';
+        el.dataset.color = slot.color || '#6b7589';
+        courtsRow.appendChild(el);
+        positionPreview(el, timeToMinutes(slot.startTime), slot.durationMinutes, courtIdx);
+        return el;
+      }
+      function positionPreview(el, startMin, durMin, courtIdx) {
+        const rowRect = courtsRow.getBoundingClientRect();
+        const cr = getColRect(courtIdx);
+        if (!cr) return;
+        const top = ((startMin - DAY_START) / SLOT_MIN) * SLOT_H;
+        const height = (durMin / SLOT_MIN) * SLOT_H;
+        el.style.cssText = `background:${el.dataset.color};top:${top}px;height:${height}px;left:${cr.left - rowRect.left + 6}px;width:${cr.width - 12}px`;
+      }
+      function getBookingsInRect(minTime, maxTime, minCourtIdx, maxCourtIdx) {
+        return slots.filter((s) => {
+          if (s.source !== 'custom') return false;
+          const ci = courtIdxById.get(s.courtId);
+          if (ci === undefined || ci < minCourtIdx || ci > maxCourtIdx) return false;
+          const sm = timeToMinutes(s.startTime);
+          return sm < maxTime && sm + s.durationMinutes > minTime;
+        }).map((s) => s.id);
+      }
+      function clampCourtIdx(clientX) {
+        const ci = getCourtIdxAtX(clientX);
+        if (ci !== -1) return ci;
+        return clientX < courtsRow.getBoundingClientRect().left ? 0 : courts.length - 1;
       }
 
       if (_scheduleListenerAC) _scheduleListenerAC.abort();
       _scheduleListenerAC = new AbortController();
       const { signal } = _scheduleListenerAC;
 
+      let currentTool = 'add';
+      let selectedIds = new Set();
       let drag = null;
 
-      courtsRow.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        if (e.target.closest('.sch-booking')) return;
-        const startIdx = getCourtIdxAtX(e.clientX);
-        if (startIdx === -1) return;
-        e.preventDefault();
+      function clearSelection() {
+        selectedIds.clear();
+        content.querySelectorAll('.sch-booking--selected').forEach((el) => el.classList.remove('sch-booking--selected'));
+      }
+      function setSelection(ids) {
+        selectedIds = new Set(ids);
+        content.querySelectorAll('[data-booking-id]').forEach((el) =>
+          el.classList.toggle('sch-booking--selected', selectedIds.has(Number(el.dataset.bookingId))));
+      }
 
-        const overlay = document.createElement('div');
-        overlay.className = 'sch-drag-overlay';
-        courtsRow.appendChild(overlay);
-
-        const t = getTimeAtY(e.clientY);
-        drag = { startX: e.clientX, startY: e.clientY, startIdx, startTime: t, overlay, moved: false,
-          minIdx: startIdx, maxIdx: startIdx, minTime: t, maxTime: t + 60 };
+      // Tool switching
+      content.querySelectorAll('.sch-tool-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (drag) return;
+          currentTool = btn.dataset.tool;
+          content.querySelectorAll('.sch-tool-btn').forEach((b) => b.classList.toggle('active', b === btn));
+          courtsRow.classList.toggle('sch-courts-row--move', currentTool === 'move');
+          if (currentTool !== 'move') clearSelection();
+        });
       });
 
+      // Booking click → edit modal (Add tool only)
+      content.querySelectorAll('[data-booking-id]').forEach((el) => {
+        el.addEventListener('click', () => {
+          if (currentTool !== 'add') return;
+          const slot = slots.find((s) => s.id === Number(el.dataset.bookingId));
+          if (slot) openEditBookingModal(slot, courts);
+        });
+      });
+
+      // Mousedown
+      courtsRow.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const bookingEl = e.target.closest('[data-booking-id]');
+        const anyBooking = e.target.closest('.sch-booking');
+
+        if (currentTool === 'add') {
+          if (bookingEl || anyBooking) return;
+          const si = getCourtIdxAtX(e.clientX);
+          if (si === -1) return;
+          const overlay = document.createElement('div');
+          overlay.className = 'sch-drag-overlay';
+          courtsRow.appendChild(overlay);
+          const t = getTimeAtY(e.clientY);
+          drag = { mode: 'add', startX: e.clientX, startY: e.clientY, startIdx: si, startTime: t, overlay, moved: false,
+            minIdx: si, maxIdx: si, minTime: t, maxTime: t + 60 };
+
+        } else if (currentTool === 'move') {
+          if (bookingEl) {
+            const bid = Number(bookingEl.dataset.bookingId);
+            const slot = slots.find((s) => s.id === bid);
+            if (!slot) return;
+
+            if (selectedIds.has(bid)) {
+              // Group drag
+              const dragSlots = slots.filter((s) => s.source === 'custom' && selectedIds.has(s.id)).map((s) => ({
+                ...s, _el: content.querySelector(`[data-booking-id="${s.id}"]`),
+                _origCourtIdx: courtIdxById.get(s.courtId), _origStartMin: timeToMinutes(s.startTime),
+              }));
+              dragSlots.forEach((s) => s._el?.classList.add('sch-booking--moving'));
+              const previews = dragSlots.map((s) => makePreview(s, s._origCourtIdx));
+              drag = { mode: 'move-group', dragSlots, previews, anchorTimeMin: timeToMinutes(slot.startTime),
+                anchorCourtIdx: courtIdxById.get(slot.courtId), startX: e.clientX, startY: e.clientY,
+                moved: false, deltaTime: 0, deltaCourtIdx: 0 };
+            } else {
+              // Single drag
+              clearSelection();
+              const courtIdx = courtIdxById.get(slot.courtId);
+              const offsetTimeMin = Math.max(0, Math.min(getTimeAtY(e.clientY) - timeToMinutes(slot.startTime), slot.durationMinutes - 15));
+              bookingEl.classList.add('sch-booking--moving');
+              const preview = makePreview(slot, courtIdx);
+              drag = { mode: 'move-single', slot, courtIdx, offsetTimeMin, el: bookingEl, preview,
+                startX: e.clientX, startY: e.clientY, moved: false,
+                targetTime: timeToMinutes(slot.startTime), targetCourtIdx: courtIdx };
+            }
+          } else if (!anyBooking) {
+            // Area select
+            clearSelection();
+            const si = getCourtIdxAtX(e.clientX);
+            if (si === -1) return;
+            const overlay = document.createElement('div');
+            overlay.className = 'sch-drag-overlay sch-drag-overlay--select';
+            courtsRow.appendChild(overlay);
+            const t = getTimeAtY(e.clientY);
+            drag = { mode: 'move-area', startX: e.clientX, startY: e.clientY, startIdx: si, startTime: t, overlay, moved: false,
+              minIdx: si, maxIdx: si, minTime: t, maxTime: t };
+          }
+        }
+      });
+
+      // Mousemove
       document.addEventListener('mousemove', (e) => {
         if (!drag) return;
         const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
-        if (!drag.moved && Math.sqrt(dx * dx + dy * dy) > 8) drag.moved = true;
+        if (!drag.moved && Math.sqrt(dx * dx + dy * dy) > 6) drag.moved = true;
         if (!drag.moved) return;
+        const ci = clampCourtIdx(e.clientX);
 
-        const rowRect = courtsRow.getBoundingClientRect();
-        const clampedIdx = getCourtIdxAtX(e.clientX) !== -1
-          ? getCourtIdxAtX(e.clientX)
-          : (e.clientX < rowRect.left ? 0 : courts.length - 1);
+        if (drag.mode === 'add' || drag.mode === 'move-area') {
+          drag.minIdx = Math.min(drag.startIdx, ci);
+          drag.maxIdx = Math.max(drag.startIdx, ci);
+          const t = getTimeAtY(e.clientY);
+          drag.minTime = Math.min(drag.startTime, t);
+          drag.maxTime = Math.max(drag.startTime, t);
+          if (drag.maxTime === drag.minTime) drag.maxTime = drag.minTime + 15;
+          positionOverlay(drag.overlay, drag.minTime, drag.maxTime, drag.minIdx, drag.maxIdx);
 
-        drag.minIdx = Math.min(drag.startIdx, clampedIdx);
-        drag.maxIdx = Math.max(drag.startIdx, clampedIdx);
+        } else if (drag.mode === 'move-single') {
+          const newStart = Math.round((getTimeAtY(e.clientY) - drag.offsetTimeMin) / 15) * 15;
+          drag.targetTime = Math.max(DAY_START, Math.min(newStart, DAY_END - drag.slot.durationMinutes));
+          drag.targetCourtIdx = ci;
+          positionPreview(drag.preview, drag.targetTime, drag.slot.durationMinutes, drag.targetCourtIdx);
 
-        const t = getTimeAtY(e.clientY);
-        drag.minTime = Math.min(drag.startTime, t);
-        drag.maxTime = Math.max(drag.startTime, t);
-        if (drag.maxTime === drag.minTime) drag.maxTime = drag.minTime + 15;
-
-        const cols = [...courtsRow.querySelectorAll('.sch-court-col')];
-        const startRect = cols[drag.minIdx].getBoundingClientRect();
-        const endRect = cols[drag.maxIdx].getBoundingClientRect();
-        const top = ((drag.minTime - DAY_START) / SLOT_MIN) * SLOT_H;
-        const height = ((drag.maxTime - drag.minTime) / SLOT_MIN) * SLOT_H;
-        const left = startRect.left - rowRect.left;
-        const width = endRect.right - startRect.left;
-        drag.overlay.style.cssText = `top:${top}px;height:${height}px;left:${left}px;width:${width}px`;
+        } else if (drag.mode === 'move-group') {
+          drag.deltaTime = getTimeAtY(e.clientY) - drag.anchorTimeMin;
+          drag.deltaCourtIdx = ci - drag.anchorCourtIdx;
+          drag.dragSlots.forEach((s, i) => {
+            const newStart = Math.max(DAY_START, Math.min(Math.round((s._origStartMin + drag.deltaTime) / 15) * 15, DAY_END - s.durationMinutes));
+            const newCI = Math.max(0, Math.min(s._origCourtIdx + drag.deltaCourtIdx, courts.length - 1));
+            positionPreview(drag.previews[i], newStart, s.durationMinutes, newCI);
+          });
+        }
       }, { signal });
 
-      document.addEventListener('mouseup', () => {
+      // Mouseup
+      document.addEventListener('mouseup', async () => {
         if (!drag) return;
-        const { moved, overlay, startIdx, startTime, minIdx, maxIdx, minTime, maxTime } = drag;
+        const d = drag;
         drag = null;
-        overlay.remove();
 
-        if (!moved) {
-          openNewBookingModal(courts, { courtId: courts[startIdx].id, startTime: minutesToTimeStr(startTime) });
-        } else {
-          const selectedCourts = courts.slice(minIdx, maxIdx + 1);
-          const duration = maxTime - minTime;
-          if (selectedCourts.length === 1) {
-            openNewBookingModal(courts, { courtId: selectedCourts[0].id, startTime: minutesToTimeStr(minTime), durationMinutes: duration });
+        if (d.mode === 'add') {
+          d.overlay.remove();
+          if (!d.moved) {
+            openNewBookingModal(courts, { courtId: courts[d.startIdx].id, startTime: minutesToTimeStr(d.startTime) });
           } else {
-            openNewBookingModal(courts, { selectedCourts, startTime: minutesToTimeStr(minTime), durationMinutes: duration });
+            const selCourts = courts.slice(d.minIdx, d.maxIdx + 1);
+            const dur = d.maxTime - d.minTime;
+            if (selCourts.length === 1) openNewBookingModal(courts, { courtId: selCourts[0].id, startTime: minutesToTimeStr(d.minTime), durationMinutes: dur });
+            else openNewBookingModal(courts, { selectedCourts: selCourts, startTime: minutesToTimeStr(d.minTime), durationMinutes: dur });
+          }
+
+        } else if (d.mode === 'move-single') {
+          d.el.classList.remove('sch-booking--moving');
+          d.preview.remove();
+          if (d.moved) {
+            try {
+              await window.api.updateBooking(d.slot.id, { courtId: courts[d.targetCourtIdx].id, date: d.slot.date || state.scheduleDate,
+                startTime: minutesToTimeStr(d.targetTime), durationMinutes: d.slot.durationMinutes,
+                bookingTypeId: d.slot.bookingTypeId || null, info: d.slot.info || null });
+              renderSchedule();
+            } catch (err) { toast(err.message, 'error'); }
+          }
+
+        } else if (d.mode === 'move-area') {
+          d.overlay.remove();
+          if (d.moved) {
+            const ids = getBookingsInRect(d.minTime, d.maxTime, d.minIdx, d.maxIdx);
+            if (ids.length) setSelection(ids);
+          }
+
+        } else if (d.mode === 'move-group') {
+          d.dragSlots.forEach((s) => s._el?.classList.remove('sch-booking--moving'));
+          d.previews.forEach((p) => p.remove());
+          if (d.moved) {
+            try {
+              for (const s of d.dragSlots) {
+                const newStart = Math.max(DAY_START, Math.min(Math.round((s._origStartMin + d.deltaTime) / 15) * 15, DAY_END - s.durationMinutes));
+                const newCI = Math.max(0, Math.min(s._origCourtIdx + d.deltaCourtIdx, courts.length - 1));
+                await window.api.updateBooking(s.id, { courtId: courts[newCI].id, date: s.date || state.scheduleDate,
+                  startTime: minutesToTimeStr(newStart), durationMinutes: s.durationMinutes,
+                  bookingTypeId: s.bookingTypeId || null, info: s.info || null });
+              }
+              renderSchedule();
+            } catch (err) { toast(err.message, 'error'); }
           }
         }
       }, { signal });
