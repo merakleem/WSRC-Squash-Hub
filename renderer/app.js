@@ -502,6 +502,17 @@ async function renderSchedule() {
     if (idx < levels.length - 1) { state.scheduleZoom = levels[idx + 1]; renderSchedule(); }
   });
   document.getElementById('btnNewBooking')?.addEventListener('click', () => openNewBookingModal(courts));
+
+  // Ctrl+scroll (or trackpad pinch) on the grid = zoom
+  content.querySelector('.sch-grid-scroll')?.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const levels = [22, 33, 44, 66, 88];
+    const idx = levels.indexOf(state.scheduleZoom);
+    if (e.deltaY < 0 && idx < levels.length - 1) { state.scheduleZoom = levels[idx + 1]; renderSchedule(); }
+    else if (e.deltaY > 0 && idx > 0) { state.scheduleZoom = levels[idx - 1]; renderSchedule(); }
+  }, { passive: false });
+
   // Admin toolbar + all grid interaction
   if (isAdmin()) {
     const courtsRow = content.querySelector('.sch-courts-row');
