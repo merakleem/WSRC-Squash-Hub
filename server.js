@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const { initDB, getDB } = require('./database/db');
 const playerService = require('./services/playerService');
 const leagueService = require('./services/leagueService');
@@ -42,6 +43,24 @@ const wrap = (fn) => (req, res) =>
     console.error(err);
     res.status(500).json({ error: 'An internal error occurred' });
   });
+
+// ===== RATE LIMITERS =====
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
+});
+
+const emailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' },
+});
 
 // ===== SESSION TOKENS =====
 
@@ -85,7 +104,8 @@ function getSession(req) {
 const SECURE_FLAG = process.env.NODE_ENV === 'production' ? '; Secure' : '';
 
 function setSessionCookie(res, payload) {
-  const token = signSession(payload);
+  const csrf = crypto.randomBytes(16).toString('hex');
+  const token = signSession({ ...payload, csrf });
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}`);
 }
 
@@ -112,6 +132,15 @@ function requireAdminPage(req, res, next) {
   if (!session) return res.redirect('/login');
   if (session.role !== 'admin') return res.redirect('/');
   req.session = session;
+  next();
+}
+
+function requireCsrf(req, res, next) {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const token = req.headers['x-csrf-token'];
+  if (!token || !req.session?.csrf || token !== req.session.csrf) {
+    return res.status(403).json({ error: 'Invalid or missing CSRF token.' });
+  }
   next();
 }
 
@@ -185,7 +214,7 @@ app.get('/login', (req, res) => {
   res.send(authPage({ title: 'Sign In', body: loginFormBody() }));
 });
 
-app.post('/login', wrap(async (req, res) => {
+app.post('/login', loginLimiter, wrap(async (req, res) => {
   const { email, password } = req.body;
 
   // Admin login — email blank, password matches env var
@@ -582,12 +611,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// CSRF validation on all mutating API calls
+app.use('/api', requireCsrf);
+
 app.use(express.static(path.join(__dirname, 'renderer'), { etag: false, lastModified: false, setHeaders: (res) => res.setHeader('Cache-Control', 'no-store') }));
 
 // ===== API: WHO AM I =====
 
 app.get('/api/me', (req, res) => {
-  res.json({ role: req.session.role, playerId: req.session.playerId || null });
+  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null });
 });
 
 // ===== PLAYERS =====
@@ -611,7 +643,7 @@ app.delete('/api/players/:id', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post('/api/players/:id/send-invite', requireAdmin, wrap(async (req, res) => {
+app.post('/api/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
   const db = getDB();
@@ -653,7 +685,7 @@ app.post('/api/players/:id/send-invite', requireAdmin, wrap(async (req, res) => 
   res.json({ ok: true, emailSent: false, inviteUrl });
 }));
 
-app.post('/api/players/:id/send-reset', requireAdmin, wrap(async (req, res) => {
+app.post('/api/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
   const db = getDB();

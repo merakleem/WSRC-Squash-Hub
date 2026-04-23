@@ -1,10 +1,25 @@
 // ===== WEB API SHIM (active when running in browser, not Electron) =====
 if (typeof window !== 'undefined' && !window.api) {
+  let _csrfToken = null;
+
+  async function _ensureCsrf() {
+    if (_csrfToken) return;
+    const r = await fetch('/api/me');
+    if (r.ok) {
+      const data = await r.json();
+      _csrfToken = data.csrf || null;
+    }
+  }
+
   async function _apiFetch(method, url, body = null) {
-    const opts = { method };
+    if (method !== 'GET' && method !== 'HEAD') await _ensureCsrf();
+    const opts = { method, headers: {} };
     if (body !== null) {
-      opts.headers = { 'Content-Type': 'application/json' };
+      opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
+    }
+    if (method !== 'GET' && method !== 'HEAD' && _csrfToken) {
+      opts.headers['X-CSRF-Token'] = _csrfToken;
     }
     const r = await fetch(url, opts);
     const data = await r.json();
