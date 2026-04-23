@@ -3292,9 +3292,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 7px 10px;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
-  background: #fafaf7;
+  padding: 8px 28px;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
   flex-shrink: 0;
 }
 .sch-tool-btn {

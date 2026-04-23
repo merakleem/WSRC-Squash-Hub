@@ -79,6 +79,7 @@ const state = {
   currentPlayer: null,    // { id, name, email, phone, wins, losses, history: [...] }
   currentUser: null,      // { role: 'admin'|'player', playerId: number|null }
   scheduleDate: null,     // YYYY-MM-DD, null = today
+  scheduleTool: 'add',   // 'add' | 'move'
   wizard: {
     step: 1,
     setupType: 'traditional',
@@ -430,18 +431,19 @@ async function renderSchedule() {
         <div class="sch-day-strip">${dayStripHTML}</div>
       </div>
 
+      ${isAdmin() && courts.length > 0 ? `<div class="sch-toolbar">
+        <button class="sch-tool-btn${state.scheduleTool !== 'move' ? ' active' : ''}" data-tool="add" title="Add booking">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="sch-tool-btn${state.scheduleTool === 'move' ? ' active' : ''}" data-tool="move" title="Move bookings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+        </button>
+      </div>` : ''}
+
       ${courts.length === 0
         ? `<div class="sch-no-courts">No courts configured.${isAdmin() ? ` <a href="#" id="schGoSettings">Add courts in Club Settings.</a>` : ''}</div>`
         : `<div class="sch-grid-area">
             <div class="sch-grid-card">
-              ${isAdmin() ? `<div class="sch-toolbar">
-                <button class="sch-tool-btn active" data-tool="add" title="Add booking">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                </button>
-                <button class="sch-tool-btn" data-tool="move" title="Move bookings">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
-                </button>
-              </div>` : ''}
               <div class="sch-grid-scroll">
                 <div class="sch-grid-header">
                   <div class="sch-time-spacer" style="width:${TIME_COL_W}px"></div>
@@ -537,9 +539,11 @@ async function renderSchedule() {
       _scheduleListenerAC = new AbortController();
       const { signal } = _scheduleListenerAC;
 
-      let currentTool = 'add';
+      let currentTool = state.scheduleTool || 'add';
       let selectedIds = new Set();
       let drag = null;
+
+      if (currentTool === 'move') courtsRow.classList.add('sch-courts-row--move');
 
       function clearSelection() {
         selectedIds.clear();
@@ -556,6 +560,7 @@ async function renderSchedule() {
         btn.addEventListener('click', () => {
           if (drag) return;
           currentTool = btn.dataset.tool;
+          state.scheduleTool = currentTool;
           content.querySelectorAll('.sch-tool-btn').forEach((b) => b.classList.toggle('active', b === btn));
           courtsRow.classList.toggle('sch-courts-row--move', currentTool === 'move');
           if (currentTool !== 'move') clearSelection();
