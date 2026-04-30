@@ -1,17 +1,17 @@
 const { run, all, get, getDB } = require('../database/db');
 const crypto = require('crypto');
 
-async function getAllLeagues() {
+function getAllLeagues() {
   return all('SELECT * FROM leagues ORDER BY created_at DESC');
 }
 
-async function getLeagueById(id) {
+function getLeagueById(id) {
   return get('SELECT * FROM leagues WHERE id = ?', [id]);
 }
 
-async function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_type = 'traditional', numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_type = 'traditional', numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
   const publicToken = crypto.randomBytes(2).toString('hex');
-  const result = await run(
+  const result = run(
     `INSERT INTO leagues (name, start_date, num_teams, num_divisions, setup_type, num_rounds, blackout_dates,
        match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -21,25 +21,25 @@ async function createLeagueRecord({ name, startDate, numTeams, numDivisions, set
   return result.lastID;
 }
 
-async function deleteLeague(id) {
+function deleteLeague(id) {
   return run('DELETE FROM leagues WHERE id = ?', [id]);
 }
 
-async function getTeams(leagueId) {
+function getTeams(leagueId) {
   return all(
     'SELECT * FROM teams WHERE league_id = ? ORDER BY team_order ASC',
     [leagueId]
   );
 }
 
-async function getDivisions(leagueId) {
+function getDivisions(leagueId) {
   return all(
     'SELECT * FROM divisions WHERE league_id = ? ORDER BY level ASC',
     [leagueId]
   );
 }
 
-async function getLeaguePlayers(leagueId) {
+function getLeaguePlayers(leagueId) {
   return all(
     `SELECT lp.*, p.name AS player_name, p.email AS player_email,
             t.name AS team_name, t.team_order,
@@ -54,14 +54,14 @@ async function getLeaguePlayers(leagueId) {
   );
 }
 
-async function getWeeks(leagueId) {
+function getWeeks(leagueId) {
   return all(
     'SELECT * FROM weeks WHERE league_id = ? ORDER BY week_number ASC',
     [leagueId]
   );
 }
 
-async function getMatchups(weekId) {
+function getMatchups(weekId) {
   return all(
     `SELECT tm.*,
             t1.name AS team1_name,
@@ -80,7 +80,7 @@ async function getMatchups(weekId) {
   );
 }
 
-async function getWeekByes(weekId) {
+function getWeekByes(weekId) {
   return all(
     `SELECT wb.*, p.name AS player_name, d.name AS division_name, d.level AS division_level
      FROM week_byes wb
@@ -92,7 +92,7 @@ async function getWeekByes(weekId) {
   );
 }
 
-async function getMatches(matchupId) {
+function getMatches(matchupId) {
   return all(
     `SELECT m.*,
             p1.name  AS player1_name,
@@ -117,7 +117,7 @@ async function getMatches(matchupId) {
   );
 }
 
-async function updateMatchScore({ matchId, player1Score, player2Score, winnerId, submittedByPlayerId = null }) {
+function updateMatchScore({ matchId, player1Score, player2Score, winnerId, submittedByPlayerId = null }) {
   return run(
     `UPDATE matches SET player1_score = ?, player2_score = ?, winner_id = ?,
      confirmed_at = datetime('now'), submitted_by_player_id = ? WHERE id = ?`,
@@ -125,7 +125,7 @@ async function updateMatchScore({ matchId, player1Score, player2Score, winnerId,
   );
 }
 
-async function setMatchSub(matchId, originalPlayerId, subPlayerId) {
+function setMatchSub(matchId, originalPlayerId, subPlayerId) {
   return run(
     `INSERT INTO match_subs (match_id, original_player_id, sub_player_id) VALUES (?, ?, ?)
      ON CONFLICT (match_id, original_player_id) DO UPDATE SET sub_player_id = excluded.sub_player_id`,
@@ -133,27 +133,26 @@ async function setMatchSub(matchId, originalPlayerId, subPlayerId) {
   );
 }
 
-async function removeMatchSub(matchId, originalPlayerId) {
+function removeMatchSub(matchId, originalPlayerId) {
   return run(
     'DELETE FROM match_subs WHERE match_id = ? AND original_player_id = ?',
     [matchId, originalPlayerId]
   );
 }
 
-async function skipMatch(matchId) {
+function skipMatch(matchId) {
   return run(
     'UPDATE matches SET skipped = 1, player1_score = NULL, player2_score = NULL, winner_id = NULL WHERE id = ?',
     [matchId]
   );
 }
 
-async function unskipMatch(matchId) {
+function unskipMatch(matchId) {
   return run('UPDATE matches SET skipped = 0 WHERE id = ?', [matchId]);
 }
 
-async function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
-  // Find all unscored matches in this league where the original player is involved
-  const remaining = await all(
+function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
+  const remaining = all(
     `SELECT m.id FROM matches m
      JOIN team_matchups tm ON m.matchup_id = tm.id
      JOIN weeks w ON tm.week_id = w.id
@@ -163,19 +162,19 @@ async function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
     [leagueId, originalPlayerId, originalPlayerId]
   );
   for (const m of remaining) {
-    await setMatchSub(m.id, originalPlayerId, subPlayerId);
+    setMatchSub(m.id, originalPlayerId, subPlayerId);
   }
   return remaining.length;
 }
 
-async function updateMatchTiming(matchId, matchTime, courtNumber, courtId = null) {
+function updateMatchTiming(matchId, matchTime, courtNumber, courtId = null) {
   return run(
     'UPDATE matches SET match_time = ?, court_number = ?, court_id = ? WHERE id = ?',
     [matchTime || null, courtNumber || null, courtId || null, matchId]
   );
 }
 
-async function getLeagueCourts(leagueId) {
+function getLeagueCourts(leagueId) {
   return all(
     `SELECT c.* FROM courts c
      JOIN league_courts lc ON lc.court_id = c.id
@@ -185,14 +184,14 @@ async function getLeagueCourts(leagueId) {
   );
 }
 
-async function setLeagueCourts(leagueId, courtIds) {
-  await run('DELETE FROM league_courts WHERE league_id = ?', [leagueId]);
+function setLeagueCourts(leagueId, courtIds) {
+  run('DELETE FROM league_courts WHERE league_id = ?', [leagueId]);
   for (const courtId of courtIds) {
-    await run('INSERT INTO league_courts (league_id, court_id) VALUES (?, ?)', [leagueId, courtId]);
+    run('INSERT INTO league_courts (league_id, court_id) VALUES (?, ?)', [leagueId, courtId]);
   }
 }
 
-async function replacePlayerInLeague(leagueId, oldPlayerId, newPlayerId) {
+function replacePlayerInLeague(leagueId, oldPlayerId, newPlayerId) {
   const db = getDB();
   db.transaction(() => {
     db.prepare('UPDATE league_players SET player_id = ? WHERE player_id = ? AND league_id = ?')

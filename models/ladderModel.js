@@ -1,4 +1,4 @@
-const { all } = require('../database/db');
+const { getDB } = require('../database/db');
 
 /**
  * Compute the current ladder ranking.
@@ -9,8 +9,10 @@ const { all } = require('../database/db');
  *     and everyone between shifts down one.
  *   - If the higher-ranked player wins, no change.
  */
-async function getLadder() {
-  const players = await all(`
+function getLadder() {
+  const db = getDB();
+
+  const players = db.prepare(`
     SELECT id, name, email, phone, exclude_from_ladder, club_locker_rating
     FROM players
     WHERE exclude_from_ladder = 0 OR exclude_from_ladder IS NULL
@@ -18,9 +20,9 @@ async function getLadder() {
       CASE WHEN club_locker_rating IS NULL THEN 1 ELSE 0 END ASC,
       club_locker_rating DESC,
       name ASC
-  `);
+  `).all();
 
-  const matches = await all(`
+  const leagueMatches = db.prepare(`
     SELECT
       m.winner_id,
       m.player1_id,
@@ -35,8 +37,35 @@ async function getLadder() {
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     WHERE m.winner_id IS NOT NULL
       AND (m.skipped = 0 OR m.skipped IS NULL)
-    ORDER BY sort_key ASC, m.id ASC
-  `);
+  `).all();
+
+  const tournamentMatches = db.prepare(`
+    SELECT
+      winner_id,
+      player1_id,
+      player2_id,
+      player1_id AS eff_p1_id,
+      player2_id AS eff_p2_id,
+      COALESCE(confirmed_at, match_date) AS sort_key
+    FROM tournament_matches
+    WHERE winner_id IS NOT NULL
+      AND player1_id IS NOT NULL
+      AND player2_id IS NOT NULL
+  `).all();
+
+  const pickupMatches = db.prepare(`
+    SELECT
+      winner_id,
+      player1_id,
+      player2_id,
+      player1_id AS eff_p1_id,
+      player2_id AS eff_p2_id,
+      played_at AS sort_key
+    FROM pickup_matches
+  `).all();
+
+  const matches = [...leagueMatches, ...tournamentMatches, ...pickupMatches]
+    .sort((a, b) => (a.sort_key || '').localeCompare(b.sort_key || '') || 0);
 
   const playerIds = new Set(players.map((p) => p.id));
   let ranking = players.map((p) => p.id);
@@ -45,16 +74,14 @@ async function getLadder() {
     const effWinnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
     const effLoserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
 
-    // Skip if either player is excluded from ladder
     if (!playerIds.has(effWinnerId) || !playerIds.has(effLoserId)) continue;
 
     const winnerIdx = ranking.indexOf(effWinnerId);
     const loserIdx  = ranking.indexOf(effLoserId);
 
     if (winnerIdx === -1 || loserIdx === -1) continue;
-    if (winnerIdx <= loserIdx) continue; // winner already ranked higher — no change
+    if (winnerIdx <= loserIdx) continue;
 
-    // Lower-ranked player won: move them up to the loser's position
     ranking.splice(winnerIdx, 1);
     ranking.splice(loserIdx, 0, effWinnerId);
   }
@@ -64,7 +91,6 @@ async function getLadder() {
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   let rankingSevenDaysAgo = null;
 
-  // Replay again from the top, this time stopping at the cutoff
   let replayRanking = players.map((p) => p.id);
   for (const match of matches) {
     if (rankingSevenDaysAgo === null && (match.sort_key || '') >= cutoff) {
@@ -84,7 +110,7 @@ async function getLadder() {
   const playerMap = Object.fromEntries(players.map((p) => [p.id, p]));
   return ranking.map((id, i) => {
     const oldIdx = rankingSevenDaysAgo.indexOf(id);
-    const rankChange = oldIdx !== -1 ? (oldIdx + 1) - (i + 1) : 0; // positive = moved up
+    const rankChange = oldIdx !== -1 ? (oldIdx + 1) - (i + 1) : 0;
     return { ...playerMap[id], position: i + 1, rank_change: rankChange };
   });
 }

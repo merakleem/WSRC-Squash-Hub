@@ -1,41 +1,44 @@
 const playerModel = require('../models/playerModel');
 
-async function getAllPlayers() {
+function getAllPlayers() {
   return playerModel.getAllPlayers();
 }
 
-async function addPlayer(data) {
-  if (!data.name || !data.name.trim()) {
-    throw new Error('Player name is required');
-  }
+function addPlayer(data) {
+  if (!data.name || !data.name.trim()) throw new Error('Player name is required');
   return playerModel.addPlayer({ ...data, name: data.name.trim() });
 }
 
-async function updatePlayer(data) {
-  if (!data.name || !data.name.trim()) {
-    throw new Error('Player name is required');
-  }
+function updatePlayer(data) {
+  if (!data.name || !data.name.trim()) throw new Error('Player name is required');
   return playerModel.updatePlayer({ ...data, name: data.name.trim() });
 }
 
-async function deletePlayer(id) {
+function deletePlayer(id) {
   return playerModel.deletePlayer(id);
 }
 
-async function getPlayerById(id) {
+function getPlayerById(id) {
   return playerModel.getPlayerById(id);
 }
 
-async function getPlayerMatchHistory(id) {
+function getPlayerMatchHistory(id) {
   return playerModel.getPlayerMatchHistory(id);
 }
 
-async function getPlayerUpcomingMatches(id) {
+function getPickupMatchHistory(id) {
+  return playerModel.getPickupMatchHistory(id);
+}
+
+function getPlayerUpcomingMatches(id) {
   return playerModel.getPlayerUpcomingMatches(id);
 }
 
-async function getAllPlayerRecords() {
+function getAllPlayerRecords() {
   return playerModel.getAllPlayerRecords();
 }
 
-module.exports = { getAllPlayers, addPlayer, updatePlayer, deletePlayer, getPlayerById, getPlayerMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords };
+module.exports = {
+  getAllPlayers, addPlayer, updatePlayer, deletePlayer,
+  getPlayerById, getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
+};
