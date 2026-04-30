@@ -118,10 +118,11 @@ function getMatches(matchupId) {
 }
 
 function updateMatchScore({ matchId, player1Score, player2Score, winnerId, submittedByPlayerId = null }) {
+  const clearing = player1Score == null && player2Score == null;
   return run(
     `UPDATE matches SET player1_score = ?, player2_score = ?, winner_id = ?,
-     confirmed_at = datetime('now'), submitted_by_player_id = ? WHERE id = ?`,
-    [player1Score, player2Score, winnerId || null, submittedByPlayerId ?? null, matchId]
+     confirmed_at = ${clearing ? 'NULL' : "datetime('now')"}, submitted_by_player_id = ? WHERE id = ?`,
+    [player1Score ?? null, player2Score ?? null, winnerId ?? null, submittedByPlayerId ?? null, matchId]
   );
 }
 

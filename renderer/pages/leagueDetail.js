@@ -597,6 +597,23 @@ async function saveMatchScore(btn) {
   const s1 = Number(row.querySelector('[data-score="p1"]').value);
   const s2 = Number(row.querySelector('[data-score="p2"]').value);
 
+  // 0–0 clears the score back to unscored
+  if (s1 === 0 && s2 === 0) {
+    await window.api.updateMatchScore({ matchId, player1Score: null, player2Score: null, winnerId: null });
+    toast('Score cleared', 'success');
+    const playerSpans = row.querySelectorAll('.match-player');
+    playerSpans[0].className = 'match-player';
+    playerSpans[1].className = 'match-player';
+    row.querySelector('.match-score').innerHTML = `
+      ${bo5ScoreInputHTML()}
+      <button class="btn btn-success btn-sm score-save-btn" style="font-size:11px"
+        data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="true">Save</button>`;
+    row.querySelector('.score-save-btn').addEventListener('click', () =>
+      saveMatchScore(row.querySelector('.score-save-btn'))
+    );
+    return;
+  }
+
   // Validate Bo5: one player must win exactly 3, the other 0–2
   const valid = Number.isInteger(s1) && Number.isInteger(s2)
     && s1 >= 0 && s1 <= 3 && s2 >= 0 && s2 <= 3

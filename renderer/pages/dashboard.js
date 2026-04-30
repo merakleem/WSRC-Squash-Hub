@@ -152,7 +152,6 @@ export async function renderClubSettings() {
           <h2 class="settings-section-title">Courts</h2>
           <button class="btn btn-primary btn-sm" id="btnAddCourt">+ Add Court</button>
         </div>
-        <p class="settings-section-desc">Courts are used when scheduling matches in leagues.</p>
         ${courts.length === 0
           ? `<div class="settings-empty">No courts yet. Add your first court to get started.</div>`
           : `<div class="court-list">
@@ -174,7 +173,7 @@ export async function renderClubSettings() {
           <h2 class="settings-section-title">Booking Types</h2>
           <button class="btn btn-primary btn-sm" id="btnAddBookingType">+ Add Type</button>
         </div>
-        <p class="settings-section-desc">Custom booking types appear in the court schedule. League matches are shown automatically.</p>
+        <p class="settings-section-desc">Custom booking types appear in the court schedule.</p>
         ${bookingTypes.length === 0
           ? `<div class="settings-empty">No booking types yet.</div>`
           : `<div class="court-list">
