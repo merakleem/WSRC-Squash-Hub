@@ -4,3 +4,5 @@ storage/*.db
 *.db
 .DS_Store
 .claude/
+CLAUDE.md
+squash.db*
