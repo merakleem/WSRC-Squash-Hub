@@ -398,6 +398,10 @@ function deleteBookingTypeConfirm(bt) {
 }
 
 // ===== ADMIN DASHBOARD HELPERS =====
+function _localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function _parseTimeMins(t) {
   if (!t) return null;
   const [h, m] = t.split(':').map(Number);
@@ -463,7 +467,7 @@ export async function renderDashboard() {
   const user = state.currentUser;
 
   if (!user || user.role === 'admin') {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = _localDateStr();
     const [scheduleData, activity] = await Promise.all([
       window.api.getSchedule(todayStr),
       window.api.getActivity(1),
@@ -552,7 +556,7 @@ export async function renderDashboard() {
   const ladderPos = ladderVisible.findIndex((p) => p.id === playerId);
   const rank = ladderPos >= 0 ? ladderPos + 1 : null;
   const totalPlayers = ladderVisible.length;
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = _localDateStr();
   const nextMatch = upcoming.find((m) => m.week_date >= todayStr) || null;
   const wins = playerData.wins || 0;
   const losses = playerData.losses || 0;
