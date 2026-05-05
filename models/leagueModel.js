@@ -97,6 +97,7 @@ function getMatches(matchupId) {
     `SELECT m.*,
             p1.name  AS player1_name,
             p2.name  AS player2_name,
+            d.id     AS division_id,
             d.name   AS division_name,
             d.level  AS division_level,
             s1.sub_player_id AS sub1_id,

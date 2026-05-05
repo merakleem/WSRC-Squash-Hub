@@ -1353,13 +1353,15 @@ tbody td {
 }
 
 .match-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 115px 1fr 26px 1fr 90px;
   align-items: center;
-  padding: 10px 14px;
-  gap: 12px;
+  padding: 10px 16px;
+  gap: 0 10px;
   border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
+.schedule-list.is-admin .match-row { grid-template-columns: 115px 1fr 26px 1fr 320px; }
 .match-row:last-child { border-bottom: none; }
 .match-row-skipped { background: #fafafa; opacity: 0.65; }
 .match-skipped-label {
@@ -1374,8 +1376,6 @@ tbody td {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 80px;
-  flex-shrink: 0;
 }
 
 .match-div-label {
@@ -1406,19 +1406,26 @@ span.match-court-label.timing-btn-empty {
 }
 span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 
-.match-players {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-}
-
-.match-player {
-  flex: 1;
-  font-weight: 500;
+.match-p1 {
   display: flex;
   align-items: center;
   gap: 5px;
+  justify-content: flex-end;
+  text-align: right;
+}
+.match-vs {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.match-p2 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.match-player {
+  font-weight: 500;
 }
 .match-player.winner { color: var(--success); font-weight: 600; }
 
@@ -1445,6 +1452,12 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+.sch-filter {
+  display: flex;
+  gap: 6px;
+  padding: 0 0 12px;
+  flex-wrap: wrap;
 }
 .score-display {
   background: var(--surface-2);
@@ -1891,9 +1904,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .roster-grid { grid-template-columns: 1fr 1fr; }
 
   /* Schedule / match rows */
-  .match-row { flex-wrap: wrap; gap: 8px; padding: 10px 10px; }
+  .match-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
   .match-meta { width: 100%; flex-direction: row; gap: 8px; }
-  .match-players { width: 100%; }
+  .match-p1 { flex: 1; justify-content: flex-end; }
+  .match-p2 { flex: 1; }
   .match-actions { width: 100%; justify-content: flex-end; }
 
   /* Profile header */

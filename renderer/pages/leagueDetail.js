@@ -128,7 +128,8 @@ export function renderLeagueDetail() {
 
     <div class="section">
       <div class="section-title">Schedule <div class="divider"></div></div>
-      <div class="schedule-list" id="scheduleList">
+      ${renderScheduleFilter(league)}
+      <div class="schedule-list${adminMode ? ' is-admin' : ''}" id="scheduleList">
         ${(league.weeks || []).map((w) => renderWeekCard(w, league, adminMode)).join('')}
       </div>
     </div>
@@ -138,11 +139,35 @@ export function renderLeagueDetail() {
       ${renderStandings(league)}
     </div>`;
 
-  // Standings tab switching
-  content.querySelectorAll('.std-tab').forEach((tab) => {
+  // Schedule division filter
+  const schFilter = content.querySelector('#schFilter');
+  if (schFilter) {
+    schFilter.addEventListener('click', (e) => {
+      const pill = e.target.closest('.std-tab');
+      if (!pill) return;
+      const divId = pill.dataset.divId;
+      schFilter.querySelectorAll('.std-tab').forEach((p) => p.classList.toggle('active', p === pill));
+      const isAll = divId === 'all';
+      if (isModern) {
+        content.querySelectorAll('#scheduleList .matchup-block[data-division-id]').forEach((block) => {
+          block.hidden = !isAll && block.dataset.divisionId !== divId;
+        });
+      } else {
+        content.querySelectorAll('#scheduleList .match-row').forEach((row) => {
+          row.hidden = !isAll && row.dataset.divisionId !== divId;
+        });
+        content.querySelectorAll('#scheduleList .matchup-block').forEach((block) => {
+          block.hidden = !isAll && !block.querySelector('.match-row:not([hidden])');
+        });
+      }
+    });
+  }
+
+  // Standings tab switching (scoped to .std-container to avoid colliding with schedule filter pills)
+  content.querySelectorAll('.std-container .std-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const divId = tab.dataset.divId;
-      content.querySelectorAll('.std-tab').forEach((t) => t.classList.toggle('active', t === tab));
+      content.querySelectorAll('.std-container .std-tab').forEach((t) => t.classList.toggle('active', t === tab));
       content.querySelectorAll('.std-panel').forEach((p) => p.classList.toggle('active', p.dataset.divId === divId));
     });
   });
@@ -526,6 +551,16 @@ function openReplacePlayerModal(leagueId, oldPlayerId, oldPlayerName) {
   });
 }
 
+function renderScheduleFilter(league) {
+  const divs = (league.divisions || []).slice().sort((a, b) => a.level - b.level);
+  if (divs.length <= 1) return '';
+  const pills = divs.map((d) => `<button class="std-tab" data-div-id="${d.id}">${esc(d.name)}</button>`).join('');
+  return `<div class="sch-filter" id="schFilter">
+    <button class="std-tab active" data-div-id="all">All</button>
+    ${pills}
+  </div>`;
+}
+
 function renderWeekCard(week, league, adminMode = true) {
   if (league.setup_type === 'modern') return renderWeekCardModern(week, league, adminMode);
 
@@ -567,7 +602,7 @@ function renderWeekCardModern(week, league, adminMode = true) {
     const byesHTML = divByes.length
       ? `<div class="matchup-byes">Bye: ${divByes.map((b) => esc(b.player_name)).join(', ')}</div>` : '';
     return `
-      <div class="matchup-block">
+      <div class="matchup-block" data-division-id="${mu.division_id}">
         <div class="matchup-title">${esc(mu.division_name)}</div>
         ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
         ${byesHTML}
@@ -644,15 +679,13 @@ function renderMatchRow(match, league, adminMode = true) {
 
   if (isSkipped) {
     return `
-      <div class="match-row match-row-skipped" data-match-id="${match.id}">
+      <div class="match-row match-row-skipped" data-match-id="${match.id}" data-division-id="${match.division_id}">
         <div class="match-meta">
           <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
         </div>
-        <div class="match-players" style="opacity:0.4">
-          <span class="match-player">${esc(eff1Name)}</span>
-          <span class="text-muted" style="font-size:11px">vs</span>
-          <span class="match-player">${esc(eff2Name)}</span>
-        </div>
+        <span class="match-p1 match-player" style="opacity:0.4">${esc(eff1Name)}</span>
+        <span class="match-vs" style="opacity:0.4">vs</span>
+        <span class="match-p2 match-player" style="opacity:0.4">${esc(eff2Name)}</span>
         <div class="match-actions">
           <span class="match-skipped-label">Skipped</span>
           ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn" style="font-size:11px" data-match-id="${match.id}">Undo</button>` : ''}
@@ -678,16 +711,14 @@ function renderMatchRow(match, league, adminMode = true) {
   }
 
   return `
-    <div class="match-row" data-match-id="${match.id}">
+    <div class="match-row" data-match-id="${match.id}" data-division-id="${match.division_id}">
       <div class="match-meta">
         <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
         ${courtInfo}
       </div>
-      <div class="match-players">
-        <span class="match-player${p1Won ? ' winner' : ''}">${p1SubBadge}${esc(eff1Name)}</span>
-        <span class="text-muted" style="font-size:11px">vs</span>
-        <span class="match-player${p2Won ? ' winner' : ''}">${p2SubBadge}${esc(eff2Name)}</span>
-      </div>
+      <span class="match-p1 match-player${p1Won ? ' winner' : ''}">${p1SubBadge}${esc(eff1Name)}</span>
+      <span class="match-vs">vs</span>
+      <span class="match-p2 match-player${p2Won ? ' winner' : ''}">${p2SubBadge}${esc(eff2Name)}</span>
       <div class="match-actions">
         ${scoreSection}
         ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn" style="font-size:11px"
