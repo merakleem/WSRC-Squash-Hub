@@ -103,13 +103,13 @@ export async function renderLadder() {
 
   content.innerHTML = `
     <div class="ldr-player-wrap" id="ladderList">
-      <div class="ldr-section-block">
+      <div class="ldr-section-block section">
         <div class="section-title">TOP 10 <span class="divider"></span></div>
         <div class="ldr-top10-scroll">
           ${top10HTML}
         </div>
       </div>
-      <div class="ldr-section-block">
+      <div class="ldr-section-block section">
         <div class="section-title">ALL MEMBERS <span class="divider"></span> <span class="ldr-total">${ladder.length} players</span></div>
         <div class="ldr-all-table">
           <div class="ldr-all-header">

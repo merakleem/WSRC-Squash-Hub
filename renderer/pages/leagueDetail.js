@@ -119,13 +119,33 @@ export function renderLeagueDetail() {
       </div>
     </div>
 
-    <div class="section-title">${isModern ? 'Divisions' : 'Rosters'} <div class="divider"></div></div>
-    ${isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
+    ${adminMode ? `
+    <div class="section">
+      <div class="section-title">${isModern ? 'Divisions' : 'Rosters'} <div class="divider"></div></div>
+      ${isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
+    </div>
+    ` : ''}
 
-    <div class="section-title">Schedule <div class="divider"></div></div>
-    <div class="schedule-list" id="scheduleList">
-      ${(league.weeks || []).map((w) => renderWeekCard(w, league, adminMode)).join('')}
+    <div class="section">
+      <div class="section-title">Schedule <div class="divider"></div></div>
+      <div class="schedule-list" id="scheduleList">
+        ${(league.weeks || []).map((w) => renderWeekCard(w, league, adminMode)).join('')}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Standings <div class="divider"></div></div>
+      ${renderStandings(league)}
     </div>`;
+
+  // Standings tab switching
+  content.querySelectorAll('.std-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const divId = tab.dataset.divId;
+      content.querySelectorAll('.std-tab').forEach((t) => t.classList.toggle('active', t === tab));
+      content.querySelectorAll('.std-panel').forEach((p) => p.classList.toggle('active', p.dataset.divId === divId));
+    });
+  });
 
   // Week toggle
   content.querySelectorAll('.week-header').forEach((header) => {
@@ -226,6 +246,116 @@ function renderRostersModern(league, editMode = false) {
         </div>`;
     }).join('')}
   </div>`;
+}
+
+// ===== STANDINGS =====
+export function computeStandings(league) {
+  const stats = {};
+  for (const p of (league.players || [])) {
+    stats[p.player_id] = {
+      playerId: p.player_id,
+      name: p.player_name,
+      divisionId: p.division_id,
+      skillRank: p.skill_rank,
+      wins: 0, losses: 0, gamesWon: 0, gamesLost: 0,
+    };
+  }
+
+  for (const week of (league.weeks || [])) {
+    for (const mu of (week.matchups || [])) {
+      for (const match of (mu.matches || [])) {
+        if (match.skipped) continue;
+        if (match.player1_score == null || match.player2_score == null) continue;
+        const p1 = stats[match.player1_id];
+        const p2 = stats[match.player2_id];
+        if (!p1 || !p2) continue;
+        p1.gamesWon  += match.player1_score;
+        p1.gamesLost += match.player2_score;
+        p2.gamesWon  += match.player2_score;
+        p2.gamesLost += match.player1_score;
+        if (match.winner_id === match.player1_id) { p1.wins++; p2.losses++; }
+        else if (match.winner_id === match.player2_id) { p2.wins++; p1.losses++; }
+      }
+    }
+  }
+
+  const divMap = {};
+  for (const d of (league.divisions || [])) divMap[d.id] = d;
+
+  const result = {};
+  for (const s of Object.values(stats)) {
+    const div = divMap[s.divisionId];
+    if (!div) continue;
+    if (!result[s.divisionId]) result[s.divisionId] = { division: div, players: [] };
+    result[s.divisionId].players.push({
+      ...s,
+      gameDiff: s.gamesWon - s.gamesLost,
+      played: s.wins + s.losses,
+    });
+  }
+
+  for (const divData of Object.values(result)) {
+    divData.players.sort((a, b) =>
+      b.wins !== a.wins ? b.wins - a.wins :
+      b.gameDiff !== a.gameDiff ? b.gameDiff - a.gameDiff :
+      a.skillRank - b.skillRank
+    );
+  }
+
+  return result;
+}
+
+function renderStandings(league) {
+  const standings = computeStandings(league);
+  const divIds = Object.keys(standings).sort(
+    (a, b) => standings[a].division.level - standings[b].division.level
+  );
+
+  if (divIds.length === 0) {
+    return '<p style="color:var(--text-muted);padding:8px 0 24px">No standings available.</p>';
+  }
+
+  const tabsHTML = divIds.map((id, i) => `
+    <button class="std-tab${i === 0 ? ' active' : ''}" data-div-id="${id}">
+      ${esc(standings[id].division.name)}
+    </button>`).join('');
+
+  const panelsHTML = divIds.map((id, i) => {
+    const players = standings[id].players;
+    const rows = players.map((p, idx) => {
+      const sign = p.gameDiff > 0 ? '+' : '';
+      const gdClass = p.gameDiff > 0 ? ' std-gd-pos' : p.gameDiff < 0 ? ' std-gd-neg' : '';
+      return `
+        <tr>
+          <td class="std-rank">${idx + 1}</td>
+          <td class="std-player">${esc(p.name)}</td>
+          <td class="std-stat">${p.wins}</td>
+          <td class="std-stat">${p.losses}</td>
+          <td class="std-stat${gdClass}">${sign}${p.gameDiff}</td>
+          <td class="std-stat">${p.played}</td>
+        </tr>`;
+    }).join('');
+    return `
+      <div class="std-panel${i === 0 ? ' active' : ''}" data-div-id="${id}">
+        <table class="std-table">
+          <thead><tr>
+            <th class="std-rank">#</th>
+            <th class="std-player">Player</th>
+            <th class="std-stat">W</th>
+            <th class="std-stat">L</th>
+            <th class="std-stat">GD</th>
+            <th class="std-stat">GP</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="std-container">
+      <div class="std-tabs">${tabsHTML}</div>
+      ${panelsHTML}
+    </div>`;
 }
 
 function openTimingModal(btn) {

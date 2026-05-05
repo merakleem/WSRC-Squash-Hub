@@ -578,14 +578,20 @@ export function renderPlayerProfile() {
       </div>
     </div>
 
-    <div class="section-title">Upcoming Matches <div class="divider"></div></div>
-    <div class="table-card">${upcomingHTML}</div>
+    <div class="section">
+      <div class="section-title">Upcoming Matches <div class="divider"></div></div>
+      <div class="table-card">${upcomingHTML}</div>
+    </div>
 
-    <div class="section-title" style="margin-top:32px">Match History <div class="divider"></div></div>
-    <div class="table-card">${historyHTML}</div>
+    <div class="section">
+      <div class="section-title">Match History <div class="divider"></div></div>
+      <div class="table-card">${historyHTML}</div>
+    </div>
 
-    <div class="section-title" style="margin-top:32px">Tournament Results <div class="divider"></div></div>
-    <div class="table-card">${tournamentResultsHTML}</div>`;
+    <div class="section">
+      <div class="section-title">Tournament Results <div class="divider"></div></div>
+      <div class="table-card">${tournamentResultsHTML}</div>
+    </div>`;
 }
 
 function showAuthLinkModal(title, url) {

@@ -105,7 +105,7 @@ export async function renderClubActivity(days = 7) {
     : '';
 
   content.innerHTML = `
-    <div class="ca-wrap">
+    <div class="ca-wrap section">
       <div class="section-title">
         Last ${days} day${days !== 1 ? 's' : ''}
         <span class="divider"></span>
@@ -523,8 +523,10 @@ export async function renderDashboard() {
             </div>
 
             ${courts.length > 0 ? `
-              <div class="section-title">Court Status <div class="divider"></div></div>
-              <div class="adm-courts-grid">${courtCardsHTML}</div>
+              <div class="section">
+                <div class="section-title">Court Status <div class="divider"></div></div>
+                <div class="adm-courts-grid">${courtCardsHTML}</div>
+              </div>
             ` : ''}
           </div>
           <div class="dp-right">
