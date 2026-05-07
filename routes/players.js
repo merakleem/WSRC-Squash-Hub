@@ -8,8 +8,15 @@ const { buildTournamentTiers } = require('../utils/tournamentHelpers');
 
 const router = express.Router();
 
+function _stripContact(player) {
+  const { email, phone, member_number, ...rest } = player;
+  return rest;
+}
+
 router.get('/players', wrap(async (req, res) => {
-  res.json(await playerService.getAllPlayers());
+  const players = await playerService.getAllPlayers();
+  const isAdmin = req.session?.role === 'admin';
+  res.json(isAdmin ? players : players.map(_stripContact));
 }));
 
 // /records must be registered before /:id to avoid Express matching "records" as an id
@@ -73,7 +80,9 @@ router.get('/players/:id/history', wrap(async (req, res) => {
     });
   }
 
-  res.json({ ...player, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming, accountStatus, tournamentResults });
+  const isAdmin = req.session?.role === 'admin';
+  const playerData = isAdmin ? player : _stripContact(player);
+  res.json({ ...playerData, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming, accountStatus, tournamentResults });
 }));
 
 router.post('/players', requireAdmin, wrap(async (req, res) => {

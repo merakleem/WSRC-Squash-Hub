@@ -37,8 +37,8 @@ function playerRowsHTML(players, filtered) {
   return filtered.map((p) => `
     <tr>
       <td><a class="player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a></td>
-      <td class="text-muted player-col-email">${esc(p.email) || '—'}</td>
-      <td class="text-muted player-col-phone">${esc(p.phone) || '—'}</td>
+      ${isAdmin() ? `<td class="text-muted player-col-email">${esc(p.email) || '—'}</td>` : ''}
+      ${isAdmin() ? `<td class="text-muted player-col-phone">${esc(p.phone) || '—'}</td>` : ''}
       ${isAdmin() ? `<td><div class="td-actions"><button class="btn btn-outline btn-sm" data-action="edit" data-id="${p.id}">Edit</button></div></td>` : ''}
     </tr>`).join('');
 }
@@ -69,7 +69,7 @@ function renderPlayerTable(players) {
       <table class="players-table">
         <thead>
           <tr>
-            <th>Name</th><th class="player-col-email">Email</th><th class="player-col-phone">Phone</th>${isAdmin() ? '<th style="text-align:right">Actions</th>' : ''}
+            <th>Name</th>${isAdmin() ? '<th class="player-col-email">Email</th><th class="player-col-phone">Phone</th><th style="text-align:right">Actions</th>' : ''}
           </tr>
         </thead>
         <tbody id="playerTbody">${playerRowsHTML(players, filtered)}</tbody>
@@ -565,8 +565,8 @@ export function renderPlayerProfile() {
         <div class="profile-avatar">${esc(p.name.charAt(0).toUpperCase())}</div>
         <div>
           <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">${esc(p.name)}</h2>
-          ${p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
-          ${p.phone ? `<div class="text-muted" style="font-size:13px">${esc(p.phone)}</div>` : ''}
+          ${adminMode && p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
+          ${adminMode && p.phone ? `<div class="text-muted" style="font-size:13px">${esc(p.phone)}</div>` : ''}
           ${acctBadgeHTML}
         </div>
       </div>
