@@ -420,13 +420,7 @@ export function openMessagePlayersModal(league) {
     document.getElementById('fSend').disabled = true;
     document.getElementById('fSend').textContent = 'Sending…';
     try {
-      const res = await fetch(`/api/leagues/${league.id}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, body, attachments }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to send');
+      const data = await window.api.messageLeaguePlayers(league.id, { subject, body, attachments });
       modal.close();
       toast(`Email sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}`, 'success');
     } catch (e) {

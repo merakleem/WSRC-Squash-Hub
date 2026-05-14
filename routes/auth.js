@@ -110,6 +110,7 @@ router.get('/login', (req, res) => {
 });
 
 router.post('/login', loginLimiter, wrap(async (req, res) => {
+  if (!req.body) return res.status(400).send(authPage({ title: 'Sign In', error: 'Bad request.', body: loginFormBody() }));
   const { email, password } = req.body;
 
   // Admin login — email blank, password matches env var

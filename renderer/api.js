@@ -74,6 +74,7 @@ if (typeof window !== 'undefined' && !window.api) {
     updateTournamentScore:         (id, d) => _apiFetch('PUT',    `/api/tournament-matches/${id}/score`, d),
     reportTournamentPlayerScore:   (id, d) => _apiFetch('PUT',    `/api/tournament-matches/${id}/player-score`, d),
     clearTournamentScore:          (id)    => _apiFetch('DELETE', `/api/tournament-matches/${id}/score`),
+    messageLeaguePlayers: (id, d) => _apiFetch('POST',   `/api/leagues/${id}/message`, d),
     addBooking:         (d)       => _apiFetch('POST',   '/api/bookings', d),
     addRepeatBookings:  (d)       => _apiFetch('POST',   '/api/bookings/repeat', d),
     updateBooking:      (id, d)   => _apiFetch('PUT',    `/api/bookings/${id}`, d),
