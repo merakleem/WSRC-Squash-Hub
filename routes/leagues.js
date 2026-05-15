@@ -74,23 +74,28 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
   const recipients = players.filter((p) => p.player_email);
   if (recipients.length === 0) return res.json({ sent: 0 });
 
+  const htmlBody = body
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+
+  // Resend batch API: up to 100 emails per request, avoiding per-email rate limits
+  const BATCH_SIZE = 100;
   let sent = 0;
-  for (const player of recipients) {
-    const htmlBody = body
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/\n/g, '<br>');
-    const response = await fetch('https://api.resend.com/emails', {
+  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+    const chunk = recipients.slice(i, i + BATCH_SIZE);
+    const batch = chunk.map((player) => ({
+      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      to: [player.player_email],
+      subject,
+      html: `<p>${htmlBody}</p>`,
+      ...(attachments && attachments.length ? { attachments } : {}),
+    }));
+    const response = await fetch('https://api.resend.com/emails/batch', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: 'Play WSRC <no-reply@playwsrc.ca>',
-        to: [player.player_email],
-        subject,
-        html: `<p>${htmlBody}</p>`,
-        ...(attachments && attachments.length ? { attachments } : {}),
-      }),
+      body: JSON.stringify(batch),
     });
-    if (response.ok) sent++;
+    if (response.ok) sent += chunk.length;
   }
   res.json({ sent });
 }));
