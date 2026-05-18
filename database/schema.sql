@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS players (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_players_email ON players (LOWER(email)) WHERE email IS NOT NULL AND email != '';
+
 CREATE TABLE IF NOT EXISTS ladder (
     player_id INTEGER PRIMARY KEY,
     position INTEGER NOT NULL,

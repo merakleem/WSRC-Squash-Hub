@@ -24,8 +24,8 @@ export async function renderPlayers() {
   }
 }
 
-function playerRowsHTML(players, filtered) {
-  const cols = isAdmin() ? 4 : 3;
+function playerRowsHTML(players, filtered, selectedIds = new Set()) {
+  const cols = isAdmin() ? 5 : 1;
   if (filtered.length === 0) {
     return `<tr><td colspan="${cols}">
       <div class="empty-state">
@@ -36,6 +36,7 @@ function playerRowsHTML(players, filtered) {
   }
   return filtered.map((p) => `
     <tr>
+      ${isAdmin() ? `<td style="width:36px;text-align:center"><input type="checkbox" class="player-checkbox" data-id="${p.id}" ${selectedIds.has(p.id) ? 'checked' : ''}></td>` : ''}
       <td><a class="player-link" data-action="view-profile" data-id="${p.id}">${esc(p.name)}</a></td>
       ${isAdmin() ? `<td class="text-muted player-col-email">${esc(p.email) || '—'}</td>` : ''}
       ${isAdmin() ? `<td class="text-muted player-col-phone">${esc(p.phone) || '—'}</td>` : ''}
@@ -55,30 +56,92 @@ function attachPlayerTableListeners(content) {
   });
 }
 
+function updateBulkBar(selectedPlayerIds) {
+  const bar = document.getElementById('bulkActionsBar');
+  if (!bar) return;
+  bar.style.display = selectedPlayerIds.size > 0 ? 'flex' : 'none';
+  const countEl = document.getElementById('bulkSelCount');
+  if (countEl) countEl.textContent = `${selectedPlayerIds.size} selected`;
+}
+
+function updateSelectAllState() {
+  const selectAll = document.getElementById('selectAllPlayers');
+  if (!selectAll) return;
+  const allCbs = document.querySelectorAll('.player-checkbox');
+  const checkedCount = document.querySelectorAll('.player-checkbox:checked').length;
+  selectAll.checked = allCbs.length > 0 && checkedCount === allCbs.length;
+  selectAll.indeterminate = checkedCount > 0 && checkedCount < allCbs.length;
+}
+
+function attachCheckboxListeners(scope, selectedPlayerIds) {
+  scope.querySelectorAll('.player-checkbox').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedPlayerIds.add(Number(cb.dataset.id));
+      else selectedPlayerIds.delete(Number(cb.dataset.id));
+      updateBulkBar(selectedPlayerIds);
+      updateSelectAllState();
+    });
+  });
+}
+
 function renderPlayerTable(players) {
   const content = document.getElementById('mainContent');
+  const selectedPlayerIds = new Set();
 
-  // Full render (first time or after a data change)
-  const filtered = players; // show all on initial render; search will filter live
   content.innerHTML = `
     <div class="table-card">
       <div class="table-toolbar">
         <span class="text-muted" id="playerCount">${players.length} player${players.length !== 1 ? 's' : ''}</span>
+        ${isAdmin() ? `
+        <div id="bulkActionsBar" style="display:none;align-items:center;gap:8px">
+          <span class="text-muted" id="bulkSelCount" style="font-size:13px"></span>
+          <div class="options-menu" id="bulkMenu">
+            <button class="btn btn-outline btn-sm" id="bulkMenuBtn">Bulk Actions <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" style="vertical-align:middle;margin-left:2px"><path d="M0 0l5 6 5-6z"/></svg></button>
+            <div class="options-dropdown" id="bulkMenuDropdown">
+              <button class="options-item" data-bulk-action="edit">Edit</button>
+            </div>
+          </div>
+        </div>` : ''}
         <input class="search-input" id="playerSearch" placeholder="Search players..." autocomplete="off">
       </div>
       <table class="players-table">
         <thead>
           <tr>
+            ${isAdmin() ? '<th style="width:36px"><input type="checkbox" id="selectAllPlayers" title="Select all"></th>' : ''}
             <th>Name</th>${isAdmin() ? '<th class="player-col-email">Email</th><th class="player-col-phone">Phone</th><th style="text-align:right">Actions</th>' : ''}
           </tr>
         </thead>
-        <tbody id="playerTbody">${playerRowsHTML(players, filtered)}</tbody>
+        <tbody id="playerTbody">${playerRowsHTML(players, players, selectedPlayerIds)}</tbody>
       </table>
     </div>`;
 
   attachPlayerTableListeners(content);
 
-  // On search: only replace tbody — never touch the input, preserving cursor/selection
+  if (isAdmin()) {
+    attachCheckboxListeners(content, selectedPlayerIds);
+
+    document.getElementById('selectAllPlayers').addEventListener('change', (e) => {
+      document.querySelectorAll('.player-checkbox').forEach((cb) => {
+        cb.checked = e.target.checked;
+        if (e.target.checked) selectedPlayerIds.add(Number(cb.dataset.id));
+        else selectedPlayerIds.delete(Number(cb.dataset.id));
+      });
+      updateBulkBar(selectedPlayerIds);
+    });
+
+    document.getElementById('bulkMenuBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('bulkMenuDropdown').classList.toggle('open');
+    });
+    document.getElementById('bulkMenuDropdown').addEventListener('click', (e) => {
+      const action = e.target.dataset.bulkAction;
+      if (!action) return;
+      document.getElementById('bulkMenuDropdown').classList.remove('open');
+      if (action === 'edit') openBulkEditModal(new Set(selectedPlayerIds));
+    });
+    document.addEventListener('click', () => document.getElementById('bulkMenuDropdown')?.classList.remove('open'));
+  }
+
   document.getElementById('playerSearch').addEventListener('input', (e) => {
     const input = e.target;
     const start = input.selectionStart;
@@ -86,8 +149,10 @@ function renderPlayerTable(players) {
     const val = input.value.toLowerCase();
     const f = val ? players.filter((p) => p.name.toLowerCase().includes(val)) : players;
     const tbody = document.getElementById('playerTbody');
-    tbody.innerHTML = playerRowsHTML(players, f);
+    tbody.innerHTML = playerRowsHTML(players, f, selectedPlayerIds);
     attachPlayerTableListeners(tbody);
+    if (isAdmin()) attachCheckboxListeners(tbody, selectedPlayerIds);
+    updateSelectAllState();
     input.setSelectionRange(start, end);
   });
 }
@@ -192,6 +257,7 @@ function confirmDeletePlayer(id, name) {
     window.navigate('players');
   });
 }
+
 
 function exportPlayersCsv() {
   const headers = ['name', 'email', 'phone'];
@@ -305,28 +371,43 @@ function openBulkAddModal() {
   const renderRows = (count) => Array.from({ length: count }, (_, i) => `
     <div class="bulk-row" data-row="${i}">
       <span class="bulk-row-num">${i + 1}</span>
-      <input class="form-control bulk-name" placeholder="Name *" data-field="name" data-row="${i}">
-      <input class="form-control bulk-email" placeholder="Email" data-field="email" data-row="${i}">
-      <input class="form-control bulk-phone" placeholder="Phone" data-field="phone" data-row="${i}">
+      <input class="form-control bulk-name" placeholder="Name *" data-row="${i}">
+      <input class="form-control bulk-email" type="email" placeholder="Email" data-row="${i}">
+      <input class="form-control bulk-phone" placeholder="Phone" data-row="${i}">
+      <input class="form-control bulk-rating" type="number" step="0.01" min="0" placeholder="Rating" data-row="${i}">
+      <label class="bulk-excl-label"><input type="checkbox" class="bulk-exclude" data-row="${i}"> Excl.</label>
       <button class="btn btn-ghost btn-sm bulk-remove" data-row="${i}" title="Remove row">&times;</button>
     </div>`).join('');
 
   let rowCount = 5;
+
+  const getValues = () => ({
+    names:   [...document.querySelectorAll('.bulk-name')].map(el => el.value),
+    emails:  [...document.querySelectorAll('.bulk-email')].map(el => el.value),
+    phones:  [...document.querySelectorAll('.bulk-phone')].map(el => el.value),
+    ratings: [...document.querySelectorAll('.bulk-rating')].map(el => el.value),
+    excls:   [...document.querySelectorAll('.bulk-exclude')].map(el => el.checked),
+  });
+
+  const restoreValues = ({ names, emails, phones, ratings, excls }) => {
+    document.querySelectorAll('.bulk-name').forEach((el, i)   => { el.value = names[i]   || ''; });
+    document.querySelectorAll('.bulk-email').forEach((el, i)  => { el.value = emails[i]  || ''; });
+    document.querySelectorAll('.bulk-phone').forEach((el, i)  => { el.value = phones[i]  || ''; });
+    document.querySelectorAll('.bulk-rating').forEach((el, i) => { el.value = ratings[i] || ''; });
+    document.querySelectorAll('.bulk-exclude').forEach((el, i) => { el.checked = excls[i] || false; });
+  };
 
   const rebuild = () => {
     document.getElementById('bulkRows').innerHTML = renderRows(rowCount);
     document.querySelectorAll('.bulk-remove').forEach((btn) => {
       btn.addEventListener('click', () => {
         const idx = Number(btn.dataset.row);
-        const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
-        const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
-        const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
-        names.splice(idx, 1); emails.splice(idx, 1); phones.splice(idx, 1);
+        const vals = getValues();
+        vals.names.splice(idx, 1); vals.emails.splice(idx, 1); vals.phones.splice(idx, 1);
+        vals.ratings.splice(idx, 1); vals.excls.splice(idx, 1);
         rowCount = Math.max(1, rowCount - 1);
         rebuild();
-        document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
-        document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
-        document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
+        restoreValues(vals);
       });
     });
   };
@@ -334,7 +415,7 @@ function openBulkAddModal() {
   modal.open('Add Multiple Players', `
     <p class="text-muted" style="font-size:13px;margin-bottom:16px">Fill in each player's details. Rows without a name will be skipped.</p>
     <div class="bulk-header">
-      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span></span>
+      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span>Rating</span><span>Excl.</span><span></span>
     </div>
     <div id="bulkRows">${renderRows(rowCount)}</div>
     <button class="btn btn-outline btn-sm" id="bulkAddRow" style="margin-top:10px">+ Add Row</button>
@@ -347,24 +428,26 @@ function openBulkAddModal() {
   rebuild();
 
   document.getElementById('bulkAddRow').addEventListener('click', () => {
-    const names  = [...document.querySelectorAll('.bulk-name')].map(el => el.value);
-    const emails = [...document.querySelectorAll('.bulk-email')].map(el => el.value);
-    const phones = [...document.querySelectorAll('.bulk-phone')].map(el => el.value);
+    const vals = getValues();
     rowCount++;
     rebuild();
-    document.querySelectorAll('.bulk-name').forEach((el, i)  => { el.value = names[i]  || ''; });
-    document.querySelectorAll('.bulk-email').forEach((el, i) => { el.value = emails[i] || ''; });
-    document.querySelectorAll('.bulk-phone').forEach((el, i) => { el.value = phones[i] || ''; });
+    restoreValues(vals);
   });
 
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const rows = [];
     document.querySelectorAll('.bulk-row').forEach((row) => {
-      const name  = row.querySelector('.bulk-name').value.trim();
-      const email = row.querySelector('.bulk-email').value.trim();
-      const phone = row.querySelector('.bulk-phone').value.trim();
-      if (name) rows.push({ name, email, phone });
+      const name = row.querySelector('.bulk-name').value.trim();
+      if (!name) return;
+      const ratingRaw = row.querySelector('.bulk-rating').value.trim();
+      rows.push({
+        name,
+        email: row.querySelector('.bulk-email').value.trim(),
+        phone: row.querySelector('.bulk-phone').value.trim(),
+        club_locker_rating: ratingRaw !== '' ? parseFloat(ratingRaw) : null,
+        exclude_from_ladder: row.querySelector('.bulk-exclude').checked,
+      });
     });
     if (rows.length === 0) {
       document.getElementById('fError').textContent = 'Enter at least one player name.';
@@ -383,6 +466,68 @@ function openBulkAddModal() {
       btn.disabled = false;
       btn.textContent = 'Add Players';
     }
+  });
+}
+
+function openBulkEditModal(playerIds) {
+  const players = state.players.filter((p) => playerIds.has(p.id));
+  if (players.length === 0) return;
+
+  const renderRows = () => players.map((p, i) => `
+    <div class="bulk-row bulk-edit-row" data-row="${i}" data-id="${p.id}">
+      <span class="bulk-row-num">${i + 1}</span>
+      <input class="form-control bulk-name" placeholder="Name *" value="${esc(p.name)}" data-row="${i}">
+      <input class="form-control bulk-email" type="email" placeholder="Email" value="${esc(p.email || '')}" data-row="${i}">
+      <input class="form-control bulk-phone" placeholder="Phone" value="${esc(p.phone || '')}" data-row="${i}">
+      <input class="form-control bulk-rating" type="number" step="0.01" min="0" placeholder="Rating" value="${esc(p.club_locker_rating != null ? p.club_locker_rating : '')}" data-row="${i}">
+      <label class="bulk-excl-label">
+        <input type="checkbox" class="bulk-exclude" data-row="${i}" ${p.exclude_from_ladder ? 'checked' : ''}> Excl. ladder
+      </label>
+    </div>`).join('');
+
+  modal.open(`Edit ${players.length} Player${players.length !== 1 ? 's' : ''}`, `
+    <p class="text-muted" style="font-size:13px;margin-bottom:16px">Edit details for the selected players. All changes will be saved when you click Save.</p>
+    <div class="bulk-header bulk-edit-header">
+      <span></span><span>Name *</span><span>Email</span><span>Phone</span><span>Rating</span><span>Excl.</span>
+    </div>
+    <div id="bulkRows">${renderRows()}</div>
+    <div id="fError" class="form-error" style="margin-top:12px"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit">Save Changes</button>
+    </div>`, { wide: true });
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fSubmit').addEventListener('click', async () => {
+    const updates = [];
+    let valid = true;
+    document.querySelectorAll('#bulkRows .bulk-row').forEach((row) => {
+      const name = row.querySelector('.bulk-name').value.trim();
+      if (!name) { valid = false; return; }
+      const ratingRaw = row.querySelector('.bulk-rating').value.trim();
+      updates.push({
+        id: Number(row.dataset.id),
+        name,
+        email: row.querySelector('.bulk-email').value.trim(),
+        phone: row.querySelector('.bulk-phone').value.trim(),
+        club_locker_rating: ratingRaw !== '' ? parseFloat(ratingRaw) : null,
+        exclude_from_ladder: row.querySelector('.bulk-exclude').checked,
+      });
+    });
+    if (!valid) { document.getElementById('fError').textContent = 'All players must have a name.'; return; }
+    const btn = document.getElementById('fSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    const errors = [];
+    for (const u of updates) {
+      try { await window.api.updatePlayer(u); }
+      catch (e) { errors.push(e.message || `Failed to update ${u.name}`); }
+    }
+    modal.close();
+    if (errors.length) toast(`Some updates failed: ${errors[0]}`, 'error');
+    else toast(`${updates.length} player${updates.length !== 1 ? 's' : ''} updated`, 'success');
+    state.players = await window.api.getPlayers();
+    renderPlayerTable(state.players);
   });
 }
 

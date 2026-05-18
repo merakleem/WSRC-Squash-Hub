@@ -1,9 +1,10 @@
 const express = require('express');
+const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
-const { wrap, requireAdmin } = require('../middleware');
+const { wrap, requireAdmin, emailLimiter } = require('../middleware');
 
 const router = express.Router();
 
@@ -97,6 +98,57 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
     });
     if (response.ok) sent += chunk.length;
   }
+  res.json({ sent });
+}));
+
+router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+
+  const db = getDB();
+  const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
+
+  const eligible = players.filter((p) => {
+    if (!p.player_email) return false;
+    const account = db.prepare('SELECT password_hash FROM user_accounts WHERE player_id = ?').get(p.player_id);
+    return !account?.password_hash;
+  });
+
+  if (eligible.length === 0) return res.json({ sent: 0 });
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+
+  const batch = eligible.map((p) => {
+    const token = crypto.randomBytes(32).toString('hex');
+    db.prepare(`
+      INSERT INTO user_accounts (player_id, invite_token, invite_expires)
+      VALUES (?, ?, ?)
+      ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires
+    `).run(p.player_id, token, expires);
+    return {
+      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      to: [p.player_email],
+      subject: 'Activate your Play WSRC account',
+      html: `<p>Hi ${p.player_name},</p>
+<p>You've been invited to create an account on Play WSRC.</p>
+<p><a href="${baseUrl}/invite/${token}">Click here to activate your account</a></p>
+<p>This link expires in 72 hours.</p>`,
+    };
+  });
+
+  const BATCH_SIZE = 100;
+  let sent = 0;
+  for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+    const chunk = batch.slice(i, i + BATCH_SIZE);
+    const response = await fetch('https://api.resend.com/emails/batch', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(chunk),
+    });
+    if (response.ok) sent += chunk.length;
+  }
+
   res.json({ sent });
 }));
 

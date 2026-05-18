@@ -431,6 +431,45 @@ export function openMessagePlayersModal(league) {
   });
 }
 
+// ===== BULK INVITE =====
+export function openBulkInviteModal(league) {
+  const players = (league.players || []).filter((p) => p.player_email);
+  modal.open('Send Account Invites', `
+    <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px">
+      This will send a personalized account activation email to every player in this league
+      who has an email on file and has not yet activated their account.
+    </p>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">
+      Players who already have an account will be skipped automatically.
+    </p>
+    <div id="fBulkError" style="color:var(--danger);font-size:13px;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" id="fBulkCancel">Cancel</button>
+      <button class="btn btn-primary" id="fBulkSend">Send Invites</button>
+    </div>
+  `);
+  document.getElementById('fBulkCancel').addEventListener('click', () => modal.close());
+  document.getElementById('fBulkSend').addEventListener('click', async () => {
+    const errEl = document.getElementById('fBulkError');
+    const btn = document.getElementById('fBulkSend');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const data = await window.api.bulkInviteLeague(league.id);
+      modal.close();
+      if (data.sent === 0) {
+        toast('All players already have accounts — no invites sent.', 'info');
+      } else {
+        toast(`Invites sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}.`, 'success');
+      }
+    } catch (e) {
+      errEl.textContent = e.message || 'Failed to send invites.';
+      btn.disabled = false;
+      btn.textContent = 'Send Invites';
+    }
+  });
+}
+
 // ===== PRINT SCHEDULE (Modern leagues) =====
 export function printSchedule(league) {
   const weeks = league.weeks || [];

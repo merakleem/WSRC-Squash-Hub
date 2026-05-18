@@ -1,7 +1,7 @@
 const express = require('express');
 const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
-const { wrap, requireAdmin, requireAuth } = require('../middleware');
+const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
 
 const router = express.Router();
 
@@ -165,6 +165,66 @@ router.put('/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
 router.delete('/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
   const { originalPlayerId } = req.body;
   await leagueModel.removeMatchSub(Number(req.params.id), originalPlayerId);
+  res.json({ ok: true });
+}));
+
+router.post('/matches/:id/message-opponent', requireAuth, emailLimiter, wrap(async (req, res) => {
+  const playerId = req.session.playerId;
+  if (!playerId) return res.status(403).json({ error: 'Admin accounts cannot use this feature.' });
+
+  const { message } = req.body;
+  if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required.' });
+
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) return res.status(500).json({ error: 'Email service is not configured.' });
+
+  const db = getDB();
+  const match = db.prepare(`
+    SELECT m.player1_id, m.player2_id,
+           p1.name AS p1_name, p1.email AS p1_email,
+           p2.name AS p2_name, p2.email AS p2_email
+    FROM matches m
+    JOIN players p1 ON p1.id = m.player1_id
+    JOIN players p2 ON p2.id = m.player2_id
+    WHERE m.id = ?
+  `).get(Number(req.params.id));
+
+  if (!match) return res.status(404).json({ error: 'Match not found.' });
+
+  const isP1 = playerId === match.player1_id;
+  const isP2 = playerId === match.player2_id;
+  if (!isP1 && !isP2) return res.status(403).json({ error: 'You are not a player in this match.' });
+
+  const sender   = isP1 ? { name: match.p1_name, email: match.p1_email } : { name: match.p2_name, email: match.p2_email };
+  const opponent = isP1 ? { name: match.p2_name, email: match.p2_email } : { name: match.p1_name, email: match.p1_email };
+
+  if (!sender.email)   return res.status(400).json({ error: 'Your account does not have an email on file. Contact your administrator.' });
+  if (!opponent.email) return res.status(400).json({ error: 'Your opponent does not have an email address on file.' });
+
+  const htmlMessage = message.trim()
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      reply_to: sender.email,
+      to: [opponent.email],
+      subject: `Message from ${sender.name} — Play WSRC`,
+      html: `<p>Hi ${opponent.name},</p>
+<p>${sender.name} sent you a message through Play WSRC:</p>
+<blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
+<p style="color:#6b7e93;font-size:12px">Reply to this email to respond directly to ${sender.name}. This message was sent through Play WSRC.</p>`,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    return res.status(502).json({ error: err.message || 'Failed to send message.' });
+  }
+
   res.json({ ok: true });
 }));
 

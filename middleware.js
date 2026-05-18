@@ -12,6 +12,7 @@ function wrap(fn) {
   return (req, res) =>
     fn(req, res).catch((err) => {
       console.error(err);
+      if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message });
       res.status(500).json({ error: 'An internal error occurred' });
     });
 }

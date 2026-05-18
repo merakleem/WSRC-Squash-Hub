@@ -52,6 +52,7 @@ function initDB(dbPath) {
     `CREATE TABLE IF NOT EXISTS tournament_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, tournament_id INTEGER NOT NULL, round TEXT NOT NULL, group_id INTEGER, bracket_slot TEXT, player1_id INTEGER, player2_id INTEGER, court_id INTEGER, match_date TEXT, match_time TEXT, scores TEXT, winner_id INTEGER, FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE, FOREIGN KEY (group_id) REFERENCES tournament_groups(id), FOREIGN KEY (player1_id) REFERENCES players(id), FOREIGN KEY (player2_id) REFERENCES players(id), FOREIGN KEY (court_id) REFERENCES courts(id), FOREIGN KEY (winner_id) REFERENCES players(id))`,
     `ALTER TABLE tournament_matches ADD COLUMN confirmed_at TEXT`,
     `CREATE TABLE IF NOT EXISTS pickup_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, player1_id INTEGER NOT NULL, player2_id INTEGER NOT NULL, player1_score INTEGER NOT NULL, player2_score INTEGER NOT NULL, winner_id INTEGER NOT NULL, submitted_by_player_id INTEGER, played_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (player1_id) REFERENCES players(id), FOREIGN KEY (player2_id) REFERENCES players(id), FOREIGN KEY (winner_id) REFERENCES players(id), FOREIGN KEY (submitted_by_player_id) REFERENCES players(id))`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_players_email ON players (LOWER(email)) WHERE email IS NOT NULL AND email != ''`,
   ];
   for (const sql of migrations) {
     try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }

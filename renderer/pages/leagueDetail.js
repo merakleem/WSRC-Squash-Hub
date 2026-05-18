@@ -1,6 +1,6 @@
 import { state, isAdmin } from '../state.js';
 import { esc, formatDate, formatShortDate, toast, modal } from '../utils.js';
-import { printBoxes, copyPublicLink, openMessagePlayersModal, printSchedule, confirmDeleteLeague } from './leagues.js';
+import { printBoxes, copyPublicLink, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague } from './leagues.js';
 
 let leagueEditMode = false;
 export function resetLeagueEditMode() { leagueEditMode = false; }
@@ -47,6 +47,7 @@ export function renderLeagueDetail() {
         ${league.setup_type === 'modern' ? `<button class="options-item" data-action="print-schedule">Print Schedule</button>` : ''}
         <button class="options-item" data-action="copy-link">Get Public Link</button>
         <button class="options-item" data-action="message-players">Message Players</button>
+        <button class="options-item" data-action="bulk-invite">Send Account Invites</button>
         <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
       </div>
     </div>` : '';
@@ -78,6 +79,9 @@ export function renderLeagueDetail() {
       } else if (action === 'message-players') {
         document.getElementById('optionsDropdown').classList.remove('open');
         openMessagePlayersModal(league);
+      } else if (action === 'bulk-invite') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        openBulkInviteModal(league);
       } else if (action === 'delete-league') {
         document.getElementById('optionsDropdown').classList.remove('open');
         confirmDeleteLeague(Number(e.target.dataset.id), e.target.dataset.name);
@@ -230,6 +234,11 @@ export function renderLeagueDetail() {
       });
     });
   }
+
+  // Message opponent (non-admin players on their own matches)
+  content.querySelectorAll('.msg-opponent-btn').forEach((btn) => {
+    btn.addEventListener('click', () => openMessageOpponentModal(Number(btn.dataset.matchId), btn.dataset.opponent));
+  });
 }
 
 function renderRosters(league, editMode = false) {
@@ -677,6 +686,12 @@ function renderMatchRow(match, league, adminMode = true) {
   const isSkipped = !!match.skipped;
   const leagueId = league ? league.id : '';
 
+  const myId = state.currentUser?.playerId;
+  const isMyMatch = !adminMode && myId && (myId === match.player1_id || myId === match.player2_id);
+  const opponentName = isMyMatch
+    ? (myId === match.player1_id ? (match.sub2_name || match.player2_name) : (match.sub1_name || match.player1_name))
+    : null;
+
   if (isSkipped) {
     return `
       <div class="match-row match-row-skipped" data-match-id="${match.id}" data-division-id="${match.division_id}">
@@ -707,7 +722,13 @@ function renderMatchRow(match, league, adminMode = true) {
            data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="true">Save</button>
        </div>`;
   } else {
-    scoreSection = `<div class="match-score"><span class="text-muted" style="font-size:13px">—</span></div>`;
+    const msgBtn = isMyMatch
+      ? `<button class="btn btn-ghost btn-sm msg-opponent-btn" style="font-size:11px" data-match-id="${match.id}" data-opponent="${esc(opponentName)}">Message</button>`
+      : '';
+    scoreSection = `<div class="match-score" style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+      <span class="text-muted" style="font-size:13px">—</span>
+      ${msgBtn}
+    </div>`;
   }
 
   return `
@@ -1111,6 +1132,39 @@ async function openSubModal(btn) {
       reloadLeagueDetail();
     } catch (e) {
       document.getElementById('fError').textContent = e.message || 'Failed to save subs.';
+    }
+  });
+}
+
+function openMessageOpponentModal(matchId, opponentName) {
+  modal.open(`Message ${opponentName}`, `
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+      Your message will be sent to <strong>${esc(opponentName)}</strong> via email.
+      They can reply directly to your email address.
+    </p>
+    <textarea class="form-control" id="fOppMsg" rows="5" placeholder="Write your message…" style="resize:vertical;margin-bottom:4px"></textarea>
+    <div id="fOppMsgError" style="color:var(--danger);font-size:13px;min-height:20px;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" id="fOppMsgCancel">Cancel</button>
+      <button class="btn btn-primary" id="fOppMsgSend">Send</button>
+    </div>
+  `);
+  document.getElementById('fOppMsgCancel').addEventListener('click', () => modal.close());
+  document.getElementById('fOppMsgSend').addEventListener('click', async () => {
+    const message = document.getElementById('fOppMsg').value.trim();
+    const errEl = document.getElementById('fOppMsgError');
+    const btn = document.getElementById('fOppMsgSend');
+    if (!message) { errEl.textContent = 'Please write a message.'; return; }
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      await window.api.messageOpponent(matchId, { message });
+      modal.close();
+      toast(`Message sent to ${opponentName}.`, 'success');
+    } catch (e) {
+      errEl.textContent = e.message || 'Failed to send message.';
+      btn.disabled = false;
+      btn.textContent = 'Send';
     }
   });
 }
