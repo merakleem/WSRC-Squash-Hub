@@ -475,6 +475,7 @@ function getPlayerTournamentUpcoming(playerId) {
       week_date: m.match_date,
       league_name: m.tournament_name,
       opponent_name: isP1 ? (m.p2_name || 'TBD') : (m.p1_name || 'TBD'),
+      opponent_id: isP1 ? m.player2_id : m.player1_id,
       match_time: m.match_time,
       court_name: m.court_name,
       round_label: roundLabel,

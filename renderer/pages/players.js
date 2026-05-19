@@ -671,7 +671,7 @@ export function renderPlayerProfile() {
             <tr>
               <td class="text-muted">${formatShortDate(m.week_date)}</td>
               <td class="text-muted">${details}</td>
-              <td>${esc(m.opponent_name)}</td>
+              <td><span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span></td>
               <td style="text-align:center;font-weight:600">${m.my_score} – ${m.their_score}</td>
               <td style="text-align:center">
                 <span class="result-badge ${m.result === 'W' ? 'result-win' : 'result-loss'}">${m.result}</span>
@@ -706,7 +706,7 @@ export function renderPlayerProfile() {
             <tr>
               <td class="text-muted">${formatShortDate(m.week_date)}</td>
               <td class="text-muted">${details}</td>
-              <td>${esc(m.opponent_name)}</td>
+              <td>${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</td>
               <td class="text-muted">${esc(timeInfo)}</td>
             </tr>`;
           }).join('')}
@@ -777,6 +777,10 @@ export function renderPlayerProfile() {
       <div class="section-title">Tournament Results <div class="divider"></div></div>
       <div class="table-card">${tournamentResultsHTML}</div>
     </div>`;
+
+  document.getElementById('mainContent').querySelectorAll('.nav-player-link').forEach((el) => {
+    el.addEventListener('click', () => window.openPlayerProfile(Number(el.dataset.playerId)));
+  });
 }
 
 function showAuthLinkModal(title, url) {

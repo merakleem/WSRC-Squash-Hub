@@ -216,6 +216,7 @@ function getPlayerUpcomingMatches(id) {
       l.name        AS league_name,
       d.name        AS division_name,
       CASE WHEN m.player1_id = ? THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
+      CASE WHEN m.player1_id = ? THEN COALESCE(s2.sub_player_id, m.player2_id) ELSE COALESCE(s1.sub_player_id, m.player1_id) END AS opponent_id,
       m.court_number,
       m.court_id,
       c.name AS court_name,
@@ -247,6 +248,7 @@ function getPlayerUpcomingMatches(id) {
       l.name        AS league_name,
       d.name        AS division_name,
       CASE WHEN s.original_player_id = m.player1_id THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
+      CASE WHEN s.original_player_id = m.player1_id THEN COALESCE(s2.sub_player_id, m.player2_id) ELSE COALESCE(s1.sub_player_id, m.player1_id) END AS opponent_id,
       m.court_number,
       m.court_id,
       c.name AS court_name,
@@ -269,7 +271,7 @@ function getPlayerUpcomingMatches(id) {
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
 
     ORDER BY week_date ASC, match_time ASC
-  `).all(numId, numId, numId, numId);
+  `).all(numId, numId, numId, numId, numId);
 }
 
 module.exports = {
