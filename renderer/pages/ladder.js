@@ -29,7 +29,6 @@ export async function renderLadder() {
   }
 
   const myId  = state.currentUser?.playerId;
-  const top10 = ladder.slice(0, 10);
   const playerInitials = (name) => {
     if (!name) return '?';
     const parts = name.trim().split(/\s+/);
@@ -42,44 +41,6 @@ export async function renderLadder() {
     if (change > 0) return `<span class="ldr-change ldr-change-up">↑${change}</span>`;
     return `<span class="ldr-change ldr-change-down">↓${Math.abs(change)}</span>`;
   };
-
-  const top10HTML = top10.map((p, i) => {
-    const rec   = records[p.id] || { wins: 0, losses: 0 };
-    const total = rec.wins + rec.losses;
-    const pct   = total > 0 ? Math.round(rec.wins / total * 100) : 0;
-    const isMe  = p.id === myId;
-    const nameParts = (p.name || '').trim().split(/\s+/);
-    const firstName = nameParts.slice(0, -1).join(' ') || nameParts[0];
-    const lastName  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
-    const posClass  = i < 3 ? ` ldr-card-pos-${i + 1}` : (isMe ? ' ldr-card-me' : '');
-    return `
-      <div class="ldr-card${posClass}" data-action="view-profile" data-id="${p.id}">
-        <div class="ldr-card-avatar-wrap">
-          <div class="ldr-avatar ldr-avatar-lg">${playerInitials(p.name)}</div>
-        </div>
-        <div class="ldr-card-rank-row">
-          <span class="ldr-card-rank">#${i + 1}</span>
-          ${rankChangeBadge(p.rank_change)}
-          ${isMe ? '<span class="ldr-card-you">YOU</span>' : ''}
-        </div>
-        <div class="ldr-card-fname">${esc(firstName)}</div>
-        ${lastName ? `<div class="ldr-card-lname">${esc(lastName)}</div>` : ''}
-        <div class="ldr-card-stats">
-          <div class="ldr-stat ldr-stat-w">
-            <span class="ldr-stat-num">${rec.wins}</span>
-            <span class="ldr-stat-label">WON</span>
-          </div>
-          <div class="ldr-stat ldr-stat-l">
-            <span class="ldr-stat-num">${rec.losses}</span>
-            <span class="ldr-stat-label">LOST</span>
-          </div>
-        </div>
-        <div class="ldr-card-pct-row">
-          <span class="ldr-pct-val">${total > 0 ? pct + '%' : '—'}</span>
-          <div class="ldr-pct-bar"><div class="ldr-pct-fill" style="width:${pct}%"></div></div>
-        </div>
-      </div>`;
-  }).join('');
 
   const allRowHTML = (p, rank) => {
     const rec   = records[p.id] || { wins: 0, losses: 0 };
@@ -103,14 +64,7 @@ export async function renderLadder() {
 
   content.innerHTML = `
     <div class="ldr-player-wrap" id="ladderList">
-      <div class="ldr-section-block section">
-        <div class="section-title">TOP 10 <span class="divider"></span></div>
-        <div class="ldr-top10-scroll">
-          ${top10HTML}
-        </div>
-      </div>
-      <div class="ldr-section-block section">
-        <div class="section-title">ALL MEMBERS <span class="divider"></span> <span class="ldr-total">${ladder.length} players</span></div>
+      <div class="ldr-section-block">
         <div class="ldr-all-table">
           <div class="ldr-all-header">
             <span class="ldr-all-rank">#</span>
