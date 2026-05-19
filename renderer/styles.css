@@ -1918,8 +1918,14 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   /* Profile header */
   .profile-header-card { padding: 18px 16px; flex-direction: column; align-items: flex-start; }
   .profile-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
-  .stat { background: rgba(255,255,255,.15); border-radius: 8px; padding: 10px 14px; border-right: none; margin-right: 0; padding-right: 14px; }
+  .profile-stats .stat { background: rgba(255,255,255,.15); border-radius: 8px; padding: 10px 14px; border-right: none; margin-right: 0; padding-right: 14px; }
   .stat-val { font-size: 18px; }
+
+  /* League hero stats */
+  .league-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; }
+  .league-stats .stat { background: rgba(255,255,255,.15); border-radius: 8px; padding: 10px 12px; border-right: none; margin-right: 0; padding-right: 12px; }
+  .league-stats .stat:last-child:nth-child(4) { grid-column: 1 / -1; }
+  .league-stats .stat:last-child:nth-child(5) { grid-column: 2 / -1; }
 
   /* Profile tables — horizontal scroll instead of hiding columns */
   .profile-header-card ~ .table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
