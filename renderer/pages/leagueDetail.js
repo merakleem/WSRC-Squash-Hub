@@ -131,16 +131,16 @@ export function renderLeagueDetail() {
     ` : ''}
 
     <div class="section">
+      <div class="section-title">Standings <div class="divider"></div></div>
+      ${renderStandings(league)}
+    </div>
+
+    <div class="section">
       <div class="section-title">Schedule <div class="divider"></div></div>
       ${renderScheduleFilter(league)}
       <div class="schedule-list${adminMode ? ' is-admin' : ''}" id="scheduleList">
         ${(league.weeks || []).map((w) => renderWeekCard(w, league, adminMode)).join('')}
       </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">Standings <div class="divider"></div></div>
-      ${renderStandings(league)}
     </div>`;
 
   // Schedule division filter
@@ -189,6 +189,11 @@ export function renderLeagueDetail() {
       e.preventDefault();
       window.openPlayerProfile(Number(a.dataset.playerId));
     });
+  });
+
+  // Standings + schedule player name links
+  content.querySelectorAll('.nav-player-link').forEach((el) => {
+    el.addEventListener('click', () => window.openPlayerProfile(Number(el.dataset.playerId)));
   });
 
   // Replace player buttons (admin, edit mode only)
@@ -358,7 +363,7 @@ function renderStandings(league) {
       return `
         <tr>
           <td class="std-rank">${idx + 1}</td>
-          <td class="std-player">${esc(p.name)}</td>
+          <td class="std-player"><span class="nav-player-link" data-player-id="${p.playerId}">${esc(p.name)}</span></td>
           <td class="std-stat">${p.wins}</td>
           <td class="std-stat">${p.losses}</td>
           <td class="std-stat${gdClass}">${sign}${p.gameDiff}</td>
@@ -694,9 +699,9 @@ function renderMatchRow(match, league, adminMode = true) {
         <div class="match-meta">
           <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
         </div>
-        <span class="match-p1 match-player" style="opacity:0.4">${esc(eff1Name)}</span>
+        <span class="match-p1 match-player nav-player-link" style="opacity:0.4" data-player-id="${match.sub1_id || match.player1_id}">${esc(eff1Name)}</span>
         <span class="match-vs" style="opacity:0.4">vs</span>
-        <span class="match-p2 match-player" style="opacity:0.4">${esc(eff2Name)}</span>
+        <span class="match-p2 match-player nav-player-link" style="opacity:0.4" data-player-id="${match.sub2_id || match.player2_id}">${esc(eff2Name)}</span>
         <div class="match-actions">
           <span class="match-skipped-label">Skipped</span>
           ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn" style="font-size:11px" data-match-id="${match.id}">Undo</button>` : ''}
@@ -729,9 +734,9 @@ function renderMatchRow(match, league, adminMode = true) {
         <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
         ${courtInfo}
       </div>
-      <span class="match-p1 match-player${p1Won ? ' winner' : ''}">${p1SubBadge}${esc(eff1Name)}</span>
+      <span class="match-p1 match-player nav-player-link${p1Won ? ' winner' : ''}" data-player-id="${match.sub1_id || match.player1_id}">${p1SubBadge}${esc(eff1Name)}</span>
       <span class="match-vs">vs</span>
-      <span class="match-p2 match-player${p2Won ? ' winner' : ''}">${p2SubBadge}${esc(eff2Name)}</span>
+      <span class="match-p2 match-player nav-player-link${p2Won ? ' winner' : ''}" data-player-id="${match.sub2_id || match.player2_id}">${p2SubBadge}${esc(eff2Name)}</span>
       <div class="match-actions">
         ${scoreSection}
         ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn" style="font-size:11px"
