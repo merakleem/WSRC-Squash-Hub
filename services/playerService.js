@@ -29,7 +29,12 @@ function addPlayer(data) {
 function updatePlayer(data) {
   if (!data.name || !data.name.trim()) throw _validationError('Player name is required');
   _checkEmailUnique(data.email, data.id);
-  return playerModel.updatePlayer({ ...data, name: data.name.trim() });
+  const db = getDB();
+  const before = db.prepare('SELECT email FROM players WHERE id = ?').get(data.id);
+  const result = playerModel.updatePlayer({ ...data, name: data.name.trim() });
+  const emailRemoved = before?.email && !data.email?.trim();
+  if (emailRemoved) db.prepare('DELETE FROM user_accounts WHERE player_id = ?').run(data.id);
+  return result;
 }
 
 function deletePlayer(id) {
