@@ -1761,6 +1761,8 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .result-win  { background: var(--success-light); color: var(--success); }
 .result-loss { background: var(--danger-light);  color: var(--danger); }
+.history-won  { font-weight: 600; color: var(--success); }
+.history-lost { font-weight: 600; color: var(--danger); }
 
 /* ===== SCORE HINT ===== */
 .score-hint {

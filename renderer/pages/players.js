@@ -653,9 +653,7 @@ export function renderPlayerProfile() {
           <tr>
             <th>Date</th>
             <th>Details</th>
-            <th>Opponent</th>
-            <th style="text-align:center">Score</th>
-            <th style="text-align:center">Result</th>
+            <th>Result</th>
           </tr>
         </thead>
         <tbody>
@@ -667,15 +665,16 @@ export function renderPlayerProfile() {
               : isPu
               ? `<span class="pickup-history-badge">Pickup</span>`
               : [esc(m.league_name), `Wk ${m.week_number}`, m.division_name ? esc(m.division_name.replace(/^Division\s*/i, 'Div ')) : null].filter(Boolean).join(' • ');
+            const won = m.result === 'W';
+            const opponent = m.opponent_id
+              ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
+              : esc(m.opponent_name);
+            const resultText = `<span class="${won ? 'history-won' : 'history-lost'}">${won ? 'Won' : 'Lost'}</span> ${m.my_score}–${m.their_score} ${won ? 'against' : 'to'} ${opponent}`;
             return `
             <tr>
               <td class="text-muted">${formatShortDate(m.week_date)}</td>
               <td class="text-muted">${details}</td>
-              <td><span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span></td>
-              <td style="text-align:center;font-weight:600">${m.my_score} – ${m.their_score}</td>
-              <td style="text-align:center">
-                <span class="result-badge ${m.result === 'W' ? 'result-win' : 'result-loss'}">${m.result}</span>
-              </td>
+              <td>${resultText}</td>
             </tr>`;
           }).join('')}
         </tbody>
