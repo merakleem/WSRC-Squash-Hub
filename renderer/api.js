@@ -76,6 +76,7 @@ if (typeof window !== 'undefined' && !window.api) {
     clearTournamentScore:          (id)    => _apiFetch('DELETE', `/api/tournament-matches/${id}/score`),
     messageLeaguePlayers: (id, d) => _apiFetch('POST',   `/api/leagues/${id}/message`, d),
     messageOpponent:      (id, d) => _apiFetch('POST',   `/api/matches/${id}/message-opponent`, d),
+    messagePlayer:        (id, d) => _apiFetch('POST',   `/api/players/${id}/message`, d),
     bulkInviteLeague:     (id)    => _apiFetch('POST',   `/api/leagues/${id}/bulk-invite`),
     addBooking:         (d)       => _apiFetch('POST',   '/api/bookings', d),
     addRepeatBookings:  (d)       => _apiFetch('POST',   '/api/bookings/repeat', d),

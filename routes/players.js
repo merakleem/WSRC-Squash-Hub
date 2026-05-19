@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
-const { wrap, requireAdmin, emailLimiter } = require('../middleware');
+const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
 const playerService = require('../services/playerService');
 const tournamentModel = require('../models/tournamentModel');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
@@ -182,6 +182,55 @@ router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (r
   }
 
   res.json({ ok: true, emailSent: false, resetUrl });
+}));
+
+router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, res) => {
+  const senderId = req.session.playerId;
+  if (!senderId) return res.status(403).json({ error: 'Admin accounts cannot use this feature.' });
+
+  const recipientId = Number(req.params.id);
+  if (senderId === recipientId) return res.status(400).json({ error: 'You cannot message yourself.' });
+
+  const { message } = req.body;
+  if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required.' });
+
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) return res.status(500).json({ error: 'Email service is not configured.' });
+
+  const db = getDB();
+  const sender    = db.prepare('SELECT name, email FROM players WHERE id = ?').get(senderId);
+  const recipient = db.prepare('SELECT name, email FROM players WHERE id = ?').get(recipientId);
+
+  if (!sender)    return res.status(404).json({ error: 'Sender not found.' });
+  if (!recipient) return res.status(404).json({ error: 'Player not found.' });
+  if (!sender.email)    return res.status(400).json({ error: 'Your account does not have an email on file. Contact your administrator.' });
+  if (!recipient.email) return res.status(400).json({ error: 'This player does not have an email address on file.' });
+
+  const htmlMessage = message.trim()
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      reply_to: sender.email,
+      to: [recipient.email],
+      subject: `Message from ${sender.name} — Play WSRC`,
+      html: `<p>Hi ${recipient.name},</p>
+<p>${sender.name} sent you a message through Play WSRC:</p>
+<blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
+<p style="color:#6b7e93;font-size:12px">Reply to this email to respond directly to ${sender.name}. This message was sent through Play WSRC.</p>`,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    return res.status(502).json({ error: err.message || 'Failed to send message.' });
+  }
+
+  res.json({ ok: true });
 }));
 
 module.exports = router;

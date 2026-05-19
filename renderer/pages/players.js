@@ -531,6 +531,40 @@ function openBulkEditModal(playerIds) {
   });
 }
 
+function openMessagePlayerModal(playerId, playerName) {
+  modal.open(`Message ${playerName}`, `
+    <p class="text-muted" style="font-size:13px;margin-bottom:12px">
+      Your message will be sent to ${esc(playerName)} by email. They can reply directly to your email address.
+    </p>
+    <div class="form-group">
+      <textarea class="form-control" id="msgBody" rows="5" placeholder="Write your message…" style="resize:vertical"></textarea>
+    </div>
+    <div id="fError" class="form-error"></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSubmit">Send Message</button>
+    </div>`);
+
+  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('msgBody').focus();
+  document.getElementById('fSubmit').addEventListener('click', async () => {
+    const message = document.getElementById('msgBody').value.trim();
+    if (!message) { document.getElementById('fError').textContent = 'Message is required.'; return; }
+    const btn = document.getElementById('fSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      await window.api.messagePlayer(playerId, { message });
+      modal.close();
+      toast('Message sent!', 'success');
+    } catch (e) {
+      document.getElementById('fError').textContent = e.message || 'Failed to send message.';
+      btn.disabled = false;
+      btn.textContent = 'Send Message';
+    }
+  });
+}
+
 // ===== PLAYER PROFILE =====
 export async function openPlayerProfile(id) {
   const backPage = state.page;   // capture before async — navigate may change state.page
@@ -548,6 +582,7 @@ export function renderPlayerProfile() {
   const acctStatus = p.accountStatus || 'none'; // 'verified' | 'pending' | 'none'
   const hasEmail = !!p.email;
 
+  const isOwnProfile = !adminMode && state.currentUser?.playerId === p.id;
   document.getElementById('topbarActions').innerHTML = adminMode ? `
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
@@ -557,7 +592,8 @@ export function renderPlayerProfile() {
         ${hasEmail && acctStatus === 'verified' ? `<button class="options-item" data-action="send-reset">Send Password Reset</button>` : ''}
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
       </div>
-    </div>` : '';
+    </div>`
+  : !isOwnProfile ? `<button class="btn btn-outline" id="btnMessagePlayer">Message</button>` : '';
 
   if (adminMode) {
     document.getElementById('optionsBtn').addEventListener('click', (e) => {
@@ -601,6 +637,10 @@ export function renderPlayerProfile() {
       document.getElementById('optionsDropdown')?.classList.remove('open');
       document.removeEventListener('click', closeOptions);
     }, { once: false });
+  } else if (!isOwnProfile) {
+    document.getElementById('btnMessagePlayer')?.addEventListener('click', () => {
+      openMessagePlayerModal(p.id, p.name);
+    });
   }
 
   const played = (p.wins || 0) + (p.losses || 0);
