@@ -212,7 +212,7 @@ router.post('/matches/:id/message-opponent', requireAuth, emailLimiter, wrap(asy
       from: 'Play WSRC <no-reply@playwsrc.ca>',
       reply_to: sender.email,
       to: [opponent.email],
-      subject: `Message from ${sender.name} — Play WSRC`,
+      subject: `Message from ${sender.name} via Play WSRC`,
       html: `<p>Hi ${opponent.name},</p>
 <p>${sender.name} sent you a message through Play WSRC:</p>
 <blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
