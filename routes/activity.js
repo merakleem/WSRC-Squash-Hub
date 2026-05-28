@@ -72,7 +72,8 @@ router.get('/activity', wrap(async (req, res) => {
       AND tm.player1_id IS NOT NULL
       AND tm.player2_id IS NOT NULL
   `).all().map((m) => {
-    const sc = m.scores ? JSON.parse(m.scores) : { p1: 0, p2: 0 };
+    let sc = { p1: 0, p2: 0 };
+    try { if (m.scores) sc = JSON.parse(m.scores); } catch (_) {}
     return { ...m, player1_score: sc.p1, player2_score: sc.p2, scores: undefined };
   });
 

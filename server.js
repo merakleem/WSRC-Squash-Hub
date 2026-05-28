@@ -71,6 +71,9 @@ app.use('/api', require('./routes/bookings'));
 app.use('/api', require('./routes/courts'));
 app.use('/api', require('./routes/tournaments'));
 
+// ===== 404 =====
+app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+
 // ===== START =====
 async function start() {
   await initDB(DB_PATH);

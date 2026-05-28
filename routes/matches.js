@@ -2,6 +2,7 @@ const express = require('express');
 const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
+const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
 
 const router = express.Router();
 
@@ -209,7 +210,7 @@ router.post('/matches/:id/message-opponent', requireAuth, emailLimiter, wrap(asy
     method: 'POST',
     headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      from: RESEND_FROM,
       reply_to: sender.email,
       to: [opponent.email],
       subject: `Message from ${sender.name} via Play WSRC`,

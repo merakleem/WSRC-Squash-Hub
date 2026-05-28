@@ -5,6 +5,7 @@ const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
+const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
 
 const router = express.Router();
 
@@ -85,7 +86,7 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
   for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
     const chunk = recipients.slice(i, i + BATCH_SIZE);
     const batch = chunk.map((player) => ({
-      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      from: RESEND_FROM,
       to: [player.player_email],
       subject,
       html: `<p>${htmlBody}</p>`,
@@ -127,7 +128,7 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
       ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires
     `).run(p.player_id, token, expires);
     return {
-      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      from: RESEND_FROM,
       to: [p.player_email],
       subject: 'Activate your Play WSRC account',
       html: `<p>Hi ${p.player_name},</p>

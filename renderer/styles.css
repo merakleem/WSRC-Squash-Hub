@@ -827,7 +827,7 @@ tbody td {
 }
 .rsc-submit-btn { width: 100%; justify-content: center; }
 
-/* ===== PICKUP GAME MODAL ===== */
+/* ===== LADDER MATCH MODAL ===== */
 .pu-modal { display: flex; flex-direction: column; gap: 20px; }
 .pu-selectors-row { display: flex; align-items: flex-end; gap: 12px; }
 .pu-selector-col { flex: 1; min-width: 0; }
@@ -856,16 +856,6 @@ tbody td {
 .pu-search-option { padding: 9px 12px; font-size: 13px; cursor: pointer; }
 .pu-search-option:hover { background: var(--surface-2); }
 .pu-search-empty { padding: 10px 12px; font-size: 13px; color: var(--text-muted); }
-.pickup-history-badge {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 10px;
-  background: #e8f4fd;
-  color: #2980b9;
-  letter-spacing: 0.3px;
-}
 
 /* ===== FORMS ===== */
 .form-group {
@@ -3033,7 +3023,35 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   letter-spacing: .08em;
   text-transform: uppercase;
   color: #6b7e93;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+.info-bubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1.5px solid #9aabbf;
+  color: #9aabbf;
+  font-size: 9px;
+  font-style: italic;
+  font-weight: 700;
+  font-family: Georgia, serif;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: border-color 0.15s, color 0.15s;
+}
+.info-bubble:hover { border-color: #1e2758; color: #1e2758; }
+.info-modal-section { margin-bottom: 18px; }
+.info-modal-section:last-child { margin-bottom: 0; }
+.info-modal-section h4 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+.info-modal-section p { font-size: 13px; color: var(--text-muted); line-height: 1.55; margin: 0; }
 .db-card-link {
   background: none;
   border: none;

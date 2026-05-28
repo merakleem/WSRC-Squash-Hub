@@ -12,9 +12,11 @@ import { renderCreateLeague } from './pages/createLeague.js';
 import { renderTournaments, renderTournamentDetail, renderCreateTournament } from './pages/tournaments.js';
 
 // ===== NAVIGATION =====
-function navigate(page, params = {}) {
+function navigate(page, params = {}, { pushHistory = true } = {}) {
   if (page !== 'leagueDetail') resetLeagueEditMode();
-  state.prevPage = state.page;
+  if (pushHistory) {
+    state.navHistory.push({ page: state.page, currentPlayer: state.currentPlayer, currentLeague: state.currentLeague, currentTournamentId: state.currentTournamentId });
+  }
   state.page = page;
   if (params.league) state.currentLeague = params.league;
   if (params.player) state.currentPlayer = params.player;
@@ -48,17 +50,22 @@ function navigate(page, params = {}) {
 }
 
 document.getElementById('btnBack').addEventListener('click', () => {
-  if (state.page === 'leagueDetail' || state.page === 'createLeague') {
-    navigate('leagues');
-  } else if (state.page === 'tournamentDetail' || state.page === 'createTournament') {
-    navigate('tournaments');
-  } else if (state.page === 'playerProfile') {
-    navigate(state.prevPage || 'players');
+  const prev = state.navHistory.pop();
+  if (prev) {
+    state.currentPlayer     = prev.currentPlayer;
+    state.currentLeague     = prev.currentLeague;
+    state.currentTournamentId = prev.currentTournamentId;
+    navigate(prev.page, {}, { pushHistory: false });
+  } else {
+    navigate('players', {}, { pushHistory: false });
   }
 });
 
 document.querySelectorAll('.nav-item').forEach((el) => {
-  el.addEventListener('click', () => navigate(el.dataset.page));
+  el.addEventListener('click', () => {
+    state.navHistory = [];
+    navigate(el.dataset.page);
+  });
 });
 
 function renderPage() {

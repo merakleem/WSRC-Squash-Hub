@@ -1,7 +1,7 @@
 // ===== STATE =====
 export const state = {
   page: 'players',        // 'players' | 'ladder' | 'leagues' | 'leagueDetail' | 'createLeague' | 'playerProfile' | 'schedule' | 'tournaments' | 'tournamentDetail' | 'createTournament'
-  prevPage: null,
+  navHistory: [],         // stack of { page, currentPlayer, currentLeague, currentTournamentId }
   players: [],
   ladder: [],             // [{ id, name, position }] in ladder order
   leagues: [],

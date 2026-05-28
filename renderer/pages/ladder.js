@@ -1,9 +1,9 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast } from '../utils.js';
+import { esc, toast, modal } from '../utils.js';
 
 // ===== LADDER PAGE =====
 export async function renderLadder() {
-  document.getElementById('pageTitle').textContent = 'Ladder';
+  document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>`;
   document.getElementById('topbarActions').innerHTML = '';
 
   const [ladder, recordsArr] = await Promise.all([
@@ -82,5 +82,25 @@ export async function renderLadder() {
   document.getElementById('ladderList').addEventListener('click', (e) => {
     const el = e.target.closest('[data-action="view-profile"]');
     if (el) window.openPlayerProfile(Number(el.dataset.id));
+  });
+
+  document.getElementById('btnLadderInfo')?.addEventListener('click', () => {
+    modal.open('How the Ladder Works', `
+      <div class="info-modal-section">
+        <h4>Starting positions</h4>
+        <p>Players are initially ranked based on their Club Locker rating. Players without a rating are placed at the bottom.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>Moving up</h4>
+        <p>Beat a player ranked above you and you jump straight to their position. They drop one spot, and everyone between you shifts down to fill the gap. Win an upset and you climb immediately.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>No change</h4>
+        <p>Beating someone already ranked below you doesn't move anyone. Positions only shift when a lower-ranked player wins.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>What counts</h4>
+        <p>All recorded matches count. League matches and ladder matches reported through Quick Actions.</p>
+      </div>`);
   });
 }

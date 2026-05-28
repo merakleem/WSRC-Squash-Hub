@@ -121,10 +121,10 @@ export async function renderClubActivity(days = 7) {
 
   content.querySelectorAll('.ca-delete-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Delete this pickup game? This cannot be undone.')) return;
+      if (!confirm('Delete this ladder match? This cannot be undone.')) return;
       try {
         await window.api.deletePickupMatch(Number(btn.dataset.id));
-        toast('Pickup game deleted.', 'success');
+        toast('Ladder match deleted.', 'success');
         renderClubActivity(days);
       } catch (err) {
         toast(err.message || 'Failed to delete.', 'error');
@@ -625,7 +625,7 @@ export async function renderDashboard() {
           ${nextMatch ? `
             <div class="dh-hero-left">
               <div class="dh-match-label">${esc(leagueLabel)}</div>
-              <div class="dh-matchup">${esc(playerData.name)} <span class="dh-vs">vs</span> ${esc(nextMatch.opponent_name)}</div>
+              <div class="dh-matchup">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}</div>
               <div class="dh-pills">${pills}</div>
             </div>
             ${countdownInnerHTML ? `
@@ -707,7 +707,7 @@ export async function renderDashboard() {
             ${upcoming.slice(0, 5).map((m) => `
               <div class="db-upcoming-row">
                 <div class="db-upcoming-date">${fmtShortDate(m.week_date)}</div>
-                <div class="db-upcoming-opp">${esc(m.opponent_name)}</div>
+                <div class="db-upcoming-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</div>
                 <div class="db-upcoming-time">${m.match_time ? esc(m.match_time) : '—'}</div>
               </div>`).join('')}
           </div>
@@ -718,7 +718,7 @@ export async function renderDashboard() {
   // Quick actions bento card
   const quickBento = `
     <div class="db-card db-quick-card">
-      <div class="db-card-title">Quick Actions</div>
+      <div class="db-card-title">Quick Actions <button class="info-bubble" id="btnQuickActionsInfo">i</button></div>
       <div class="db-quick-list">
         <button class="db-quick-item" onclick="openPlayerProfile(${playerId})">
           <svg class="db-quick-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" fill="#5b7cf9"><g transform="translate(-180,-2159)"><g transform="translate(56,160)"><path d="M134,2008.99998 C131.783496,2008.99998 129.980955,2007.20598 129.980955,2004.99998 C129.980955,2002.79398 131.783496,2000.99998 134,2000.99998 C136.216504,2000.99998 138.019045,2002.79398 138.019045,2004.99998 C138.019045,2007.20598 136.216504,2008.99998 134,2008.99998 M137.775893,2009.67298 C139.370449,2008.39598 140.299854,2006.33098 139.958235,2004.06998 C139.561354,2001.44698 137.368965,1999.34798 134.722423,1999.04198 C131.070116,1998.61898 127.971432,2001.44898 127.971432,2004.99998 C127.971432,2006.88998 128.851603,2008.57398 130.224107,2009.67298 C126.852128,2010.93398 124.390463,2013.89498 124.004634,2017.89098 C123.948368,2018.48198 124.411563,2018.99998 125.008391,2018.99998 C125.519814,2018.99998 125.955881,2018.61598 126.001095,2018.10898 C126.404004,2013.64598 129.837274,2010.99998 134,2010.99998 C138.162726,2010.99998 141.595996,2013.64598 141.998905,2018.10898 C142.044119,2018.61598 142.480186,2018.99998 142.991609,2018.99998 C143.588437,2018.99998 144.051632,2018.48198 143.995366,2017.89098 C143.609537,2013.89498 141.147872,2010.93398 137.775893,2009.67298"/></g></g></svg>
@@ -730,7 +730,7 @@ export async function renderDashboard() {
         </button>
         <button class="db-quick-item" onclick="openPickupGameModal()">
           <svg class="db-quick-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="#ff7300"><path d="M23.5 13.187h-7.5v-12.187l-7.5 17.813h7.5v12.187l7.5-17.813z"/></svg>
-          Log Pickup Game
+          Report Ladder Match Score
         </button>
       </div>
     </div>`;
@@ -747,7 +747,7 @@ export async function renderDashboard() {
           return `
             <div class="db-result-card ${win ? 'db-result-win' : 'db-result-loss'}">
               <div class="db-result-badge">${win ? 'WIN' : 'LOSS'}</div>
-              <div class="db-result-opp">${esc(m.opponent_name)}</div>
+              <div class="db-result-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</div>
               ${scoreStr ? `<div class="db-result-score">${scoreStr}</div>` : ''}
               <div class="db-result-date">${fmtShortDate(m.week_date)}</div>
             </div>`;
@@ -773,4 +773,20 @@ export async function renderDashboard() {
         </div>
       </div>
     </div>`;
+
+  content.querySelectorAll('.nav-player-link').forEach((el) => {
+    el.addEventListener('click', () => window.openPlayerProfile(Number(el.dataset.playerId)));
+  });
+
+  document.getElementById('btnQuickActionsInfo')?.addEventListener('click', () => {
+    modal.open('Quick Actions', `
+      <div class="info-modal-section">
+        <h4>Report Score</h4>
+        <p>Use this after playing a scheduled league match. It submits the result for your match in the current season.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>Report Ladder Match Score</h4>
+        <p>Playing a casual game at the club? Record the result here and it counts toward your ladder ranking and appears in your match history. A simple way to add a little extra stakes to any friendly match.</p>
+      </div>`);
+  });
 }

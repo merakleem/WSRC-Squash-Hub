@@ -230,9 +230,7 @@ function openEditPlayerModal(player) {
       state.players = await window.api.getPlayers();
       // If we edited from a player profile, reload the profile with fresh data
       if (state.page === 'playerProfile') {
-        const savedPrevPage = state.prevPage;
-        await openPlayerProfile(player.id);
-        state.prevPage = savedPrevPage;
+        await openPlayerProfile(player.id, { pushHistory: false });
       } else {
         renderPlayerTable(state.players);
       }
@@ -566,11 +564,9 @@ function openMessagePlayerModal(playerId, playerName) {
 }
 
 // ===== PLAYER PROFILE =====
-export async function openPlayerProfile(id) {
-  const backPage = state.page;   // capture before async — navigate may change state.page
+export async function openPlayerProfile(id, { pushHistory = true } = {}) {
   const player = await window.api.getPlayerHistory(id);
-  window.navigate('playerProfile', { player });
-  state.prevPage = backPage;     // override what navigate set, ensuring back goes to the right place
+  window.navigate('playerProfile', { player }, { pushHistory });
 }
 
 export function renderPlayerProfile() {
@@ -663,7 +659,7 @@ export function renderPlayerProfile() {
             const details = isTr
               ? `${esc(m.league_name)} • ${esc(m.round_label || '')}`
               : isPu
-              ? `<span class="pickup-history-badge">Pickup</span>`
+              ? 'Ladder Match'
               : [esc(m.league_name), `Wk ${m.week_number}`, m.division_name ? esc(m.division_name.replace(/^Division\s*/i, 'Div ')) : null].filter(Boolean).join(' • ');
             const won = m.result === 'W';
             const opponent = m.opponent_id
@@ -807,12 +803,12 @@ function showAuthLinkModal(title, url) {
   document.getElementById('authLinkCloseBtn').addEventListener('click', modal.close);
 }
 
-// ===== PICKUP GAME MODAL =====
+// ===== LADDER MATCH MODAL =====
 export async function openPickupGameModal() {
   const adminMode = isAdmin();
   const myId = state.currentUser?.playerId;
 
-  modal.open('Log Pickup Game', '<div class="modal-loading">Loading players…</div>', { medium: true });
+  modal.open('Report Ladder Match Score', '<div class="modal-loading">Loading players…</div>', { medium: true });
 
   const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
   const myName = adminMode ? '' : (allPlayers.find((p) => p.id === myId)?.name || 'Me');
@@ -983,7 +979,7 @@ export async function openPickupGameModal() {
     btn.textContent = 'Submitting…';
     try {
       await window.api.logPickupGame({ player1Id: p1Id, player2Id: p2Id, player1Score: selected.p1, player2Score: selected.p2 });
-      toast('Pickup game logged!', 'success');
+      toast('Ladder match recorded!', 'success');
       modal.close();
       if (state.page === 'ladder') window.renderLadder();
       else if (state.page === 'dashboard') window.renderDashboard();

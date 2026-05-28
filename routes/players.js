@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
+const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
 const playerService = require('../services/playerService');
 const tournamentModel = require('../models/tournamentModel');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
@@ -123,7 +124,7 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
       method: 'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: 'Play WSRC <no-reply@playwsrc.ca>',
+        from: RESEND_FROM,
         to: player.email,
         subject: 'Activate your Play WSRC account',
         html: `<p>Hi ${player.name},</p>
@@ -165,7 +166,7 @@ router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (r
       method: 'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: 'Play WSRC <no-reply@playwsrc.ca>',
+        from: RESEND_FROM,
         to: player.email,
         subject: 'Reset your Play WSRC password',
         html: `<p>Hi ${player.name},</p>
@@ -214,7 +215,7 @@ router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, 
     method: 'POST',
     headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'Play WSRC <no-reply@playwsrc.ca>',
+      from: RESEND_FROM,
       reply_to: sender.email,
       to: [recipient.email],
       subject: `Message from ${sender.name} via Play WSRC`,

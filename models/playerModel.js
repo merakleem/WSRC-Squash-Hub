@@ -195,7 +195,7 @@ function getPickupMatchHistory(id) {
       pm.played_at AS week_date,
       NULL AS week_number,
       NULL AS league_id,
-      'Pickup Game' AS league_name,
+      'Ladder Match' AS league_name,
       NULL AS division_name,
       'pickup' AS source
     FROM pickup_matches pm
