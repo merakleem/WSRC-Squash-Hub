@@ -468,9 +468,10 @@ export async function renderDashboard() {
 
   if (!user || user.role === 'admin') {
     const todayStr = _localDateStr();
-    const [scheduleData, activity] = await Promise.all([
+    const [scheduleData, activity, verifiedData] = await Promise.all([
       window.api.getSchedule(todayStr),
       window.api.getActivity(1),
+      window.api.getVerifiedPlayerCount(),
     ]);
 
     const { courts, slots } = scheduleData;
@@ -478,6 +479,7 @@ export async function renderDashboard() {
     const nowMins = now.getHours() * 60 + now.getMinutes();
 
     const totalPlayers = (state.players || []).length;
+    const verifiedPlayers = verifiedData?.count ?? 0;
     const bookingsToday = slots.filter((s) => s.source === 'custom').length;
     const matchesToday = activity.length;
 
@@ -520,6 +522,7 @@ export async function renderDashboard() {
                 <div class="adm-hero-divider"></div>
                 <div class="league-stats">
                   <div class="stat"><span class="stat-val">${totalPlayers}</span><span class="stat-label">Total Players</span></div>
+                  <div class="stat"><span class="stat-val">${verifiedPlayers}</span><span class="stat-label">Verified Players</span></div>
                   <div class="stat"><span class="stat-val">${bookingsToday}</span><span class="stat-label">Court Bookings Today</span></div>
                   <div class="stat"><span class="stat-val">${matchesToday}</span><span class="stat-label">Matches Recorded Today</span></div>
                 </div>

@@ -20,7 +20,13 @@ router.get('/players', wrap(async (req, res) => {
   res.json(isAdmin ? players : players.map(_stripContact));
 }));
 
-// /records must be registered before /:id to avoid Express matching "records" as an id
+// /records and /verified-count must be registered before /:id to avoid Express matching them as an id
+router.get('/players/verified-count', requireAdmin, wrap(async (req, res) => {
+  const db = getDB();
+  const row = db.prepare('SELECT COUNT(*) AS count FROM user_accounts WHERE password_hash IS NOT NULL').get();
+  res.json({ count: row.count });
+}));
+
 router.get('/players/records', wrap(async (req, res) => {
   const rows = await playerService.getAllPlayerRecords();
   const map = {};

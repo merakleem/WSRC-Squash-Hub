@@ -47,7 +47,8 @@ if (typeof window !== 'undefined' && !window.api) {
 
     getLadder:        ()    => _apiFetch('GET', '/api/ladder'),
     getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
-    getPlayerRecords: ()    => _apiFetch('GET', '/api/players/records'),
+    getPlayerRecords:       ()  => _apiFetch('GET', '/api/players/records'),
+    getVerifiedPlayerCount: ()  => _apiFetch('GET', '/api/players/verified-count'),
     replacePlayer:    (d)   => _apiFetch('POST', `/api/leagues/${d.leagueId}/replace-player`, d),
     updateMatchTiming:(d)   => _apiFetch('PUT',  `/api/matches/${d.matchId}/timing`, d),
     sendInvite:        (id) => _apiFetch('POST', `/api/players/${id}/send-invite`),
