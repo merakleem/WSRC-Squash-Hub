@@ -16,6 +16,7 @@ function navigate(page, params = {}, { pushHistory = true } = {}) {
   if (page !== 'leagueDetail') resetLeagueEditMode();
   if (pushHistory) {
     state.navHistory.push({ page: state.page, currentPlayer: state.currentPlayer, currentLeague: state.currentLeague, currentTournamentId: state.currentTournamentId });
+    history.pushState({ inApp: true }, '');
   }
   state.page = page;
   if (params.league) state.currentLeague = params.league;
@@ -49,22 +50,38 @@ function navigate(page, params = {}, { pushHistory = true } = {}) {
   renderPage();
 }
 
-document.getElementById('btnBack').addEventListener('click', () => {
+function _goBack() {
   const prev = state.navHistory.pop();
   if (prev) {
-    state.currentPlayer     = prev.currentPlayer;
-    state.currentLeague     = prev.currentLeague;
+    state.currentPlayer       = prev.currentPlayer;
+    state.currentLeague       = prev.currentLeague;
     state.currentTournamentId = prev.currentTournamentId;
     navigate(prev.page, {}, { pushHistory: false });
   } else {
     navigate('players', {}, { pushHistory: false });
   }
+}
+
+// In-app back button
+document.getElementById('btnBack').addEventListener('click', () => {
+  if (state.navHistory.length > 0) {
+    history.back(); // moves browser history back, which fires popstate → _goBack()
+  }
+});
+
+// Native back gesture (iOS swipe, Android back button)
+window.addEventListener('popstate', () => {
+  if (state.navHistory.length > 0) {
+    _goBack();
+  }
+  // If navHistory is empty the browser has navigated past our app — let it proceed
 });
 
 document.querySelectorAll('.nav-item').forEach((el) => {
   el.addEventListener('click', () => {
     state.navHistory = [];
-    navigate(el.dataset.page);
+    history.replaceState({ inApp: false }, ''); // reset browser history anchor; swipe-back from here exits the app
+    navigate(el.dataset.page, {}, { pushHistory: false });
   });
 });
 
@@ -125,6 +142,10 @@ window.renderDashboard = renderDashboard;
 
 // ===== INIT =====
 window.addEventListener('DOMContentLoaded', async () => {
+  // Mark the initial browser history entry as the app base so that
+  // swiping back past all in-app pages exits to the previous URL (login).
+  history.replaceState({ inApp: false }, '');
+
   try {
     state.currentUser = await fetch('/api/me').then((r) => r.json());
   } catch (_) {}
