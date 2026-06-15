@@ -16,10 +16,10 @@ function addPlayer({ name, email, phone, club_locker_rating, exclude_from_ladder
   return getPlayerById(result.lastInsertRowid);
 }
 
-function updatePlayer({ id, name, email, phone, club_locker_rating, exclude_from_ladder }) {
+function updatePlayer({ id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester }) {
   getDB().prepare(
-    'UPDATE players SET name = ?, email = ?, phone = ?, club_locker_rating = ?, exclude_from_ladder = ? WHERE id = ?'
-  ).run(name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0, Number(id));
+    'UPDATE players SET name = ?, email = ?, phone = ?, club_locker_rating = ?, exclude_from_ladder = ?, is_tester = ? WHERE id = ?'
+  ).run(name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0, is_tester ? 1 : 0, Number(id));
   return getPlayerById(id);
 }
 

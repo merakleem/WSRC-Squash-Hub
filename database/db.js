@@ -53,6 +53,7 @@ function initDB(dbPath) {
     `ALTER TABLE tournament_matches ADD COLUMN confirmed_at TEXT`,
     `CREATE TABLE IF NOT EXISTS pickup_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, player1_id INTEGER NOT NULL, player2_id INTEGER NOT NULL, player1_score INTEGER NOT NULL, player2_score INTEGER NOT NULL, winner_id INTEGER NOT NULL, submitted_by_player_id INTEGER, played_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (player1_id) REFERENCES players(id), FOREIGN KEY (player2_id) REFERENCES players(id), FOREIGN KEY (winner_id) REFERENCES players(id), FOREIGN KEY (submitted_by_player_id) REFERENCES players(id))`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_players_email ON players (LOWER(email)) WHERE email IS NOT NULL AND email != ''`,
+    `ALTER TABLE players ADD COLUMN is_tester INTEGER NOT NULL DEFAULT 0`,
   ];
   for (const sql of migrations) {
     try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }

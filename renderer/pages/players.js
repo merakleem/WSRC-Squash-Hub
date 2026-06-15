@@ -1,4 +1,4 @@
-import { state, isAdmin } from '../state.js';
+import { state, isAdmin, isTester } from '../state.js';
 import { esc, formatDate, formatShortDate, toast, modal } from '../utils.js';
 
 // ===== PLAYERS PAGE =====
@@ -159,6 +159,13 @@ function renderPlayerTable(players) {
 
 function playerFormHTML(player = {}) {
   const excluded = player.id ? !!player.exclude_from_ladder : false;
+  const testerCheck = (player.id && isAdmin()) ? `
+    <div class="form-group form-group-check">
+      <label class="check-label">
+        <input type="checkbox" id="fTester" ${player.is_tester ? 'checked' : ''}>
+        Is Tester
+      </label>
+    </div>` : '';
   return `
     <div class="form-group">
       <label>Name *</label>
@@ -181,7 +188,7 @@ function playerFormHTML(player = {}) {
         <input type="checkbox" id="fExclude" ${excluded ? 'checked' : ''}>
         Exclude from ladder
       </label>
-    </div>
+    </div>${testerCheck}
     <div id="fError" class="form-error"></div>
     <div class="form-actions">
       <button class="btn btn-outline" id="fCancel">Cancel</button>
@@ -222,9 +229,10 @@ function openEditPlayerModal(player) {
     const ratingRaw = document.getElementById('fRating').value.trim();
     const club_locker_rating = ratingRaw !== '' ? parseFloat(ratingRaw) : null;
     const exclude_from_ladder = document.getElementById('fExclude').checked;
+    const is_tester = document.getElementById('fTester')?.checked ?? false;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.updatePlayer({ id: player.id, name, email, phone, club_locker_rating, exclude_from_ladder });
+      await window.api.updatePlayer({ id: player.id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester });
       modal.close();
       toast('Player updated', 'success');
       state.players = await window.api.getPlayers();

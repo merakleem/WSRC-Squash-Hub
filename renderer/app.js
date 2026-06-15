@@ -1,5 +1,5 @@
 import './api.js';
-import { state } from './state.js';
+import { state, _setConflictCursor } from './state.js';
 import { modal } from './utils.js';
 import { renderSchedule } from './schedule.js';
 
@@ -10,6 +10,7 @@ import { renderLeagues } from './pages/leagues.js';
 import { renderLeagueDetail, resetLeagueEditMode } from './pages/leagueDetail.js';
 import { renderCreateLeague } from './pages/createLeague.js';
 import { renderTournaments, renderTournamentDetail, renderCreateTournament } from './pages/tournaments.js';
+import { renderCourtBooking } from './pages/courtBooking.js';
 
 // ===== NAVIGATION =====
 function navigate(page, params = {}, { pushHistory = true } = {}) {
@@ -87,7 +88,8 @@ document.querySelectorAll('.nav-item').forEach((el) => {
 
 function renderPage() {
   const contentEl = document.querySelector('.content');
-  contentEl.classList.remove('content--dashboard', 'content--schedule');
+  contentEl.classList.remove('content--dashboard', 'content--schedule', 'content--court-booking');
+  _setConflictCursor(false); // clear any stuck drag cursor from the schedule page
   switch (state.page) {
     case 'dashboard':        renderDashboard(); break;
     case 'players':          renderPlayers(); break;
@@ -102,6 +104,7 @@ function renderPage() {
     case 'tournaments':      renderTournaments(); break;
     case 'tournamentDetail': renderTournamentDetail(); break;
     case 'createTournament': renderCreateTournament(); break;
+    case 'courtBooking':     renderCourtBooking(); break;
   }
 }
 
@@ -155,6 +158,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     const navMyProfile = document.getElementById('navMyProfile');
     navMyProfile.style.display = '';
     navMyProfile.addEventListener('click', () => openPlayerProfile(state.currentUser.playerId));
+  }
+
+  // Show tester-only nav items
+  if (state.currentUser?.is_tester) {
+    document.getElementById('navCourtBooking').style.display = '';
   }
 
   // Show admin-only nav items

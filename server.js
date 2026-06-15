@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { initDB } = require('./database/db');
+const { initDB, getDB } = require('./database/db');
 const { getSession, requireCsrf } = require('./middleware');
 
 const PORT = process.env.PORT || 8080;
@@ -57,7 +57,12 @@ app.use(express.static(path.join(__dirname, 'renderer'), {
 
 // ===== API: WHO AM I =====
 app.get('/api/me', (req, res) => {
-  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null });
+  let is_tester = 0;
+  if (req.session.playerId) {
+    const player = getDB().prepare('SELECT is_tester FROM players WHERE id = ?').get(req.session.playerId);
+    is_tester = player?.is_tester || 0;
+  }
+  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester });
 });
 
 // ===== API ROUTES =====

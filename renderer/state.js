@@ -40,6 +40,7 @@ export const state = {
 
 // ===== ROLE HELPERS =====
 export const isAdmin = () => state.currentUser?.role === 'admin';
+export const isTester = () => !!state.currentUser?.is_tester;
 
 // ===== CONFLICT CURSOR =====
 // Injects a <style> override to show not-allowed cursor during conflicting drags.
