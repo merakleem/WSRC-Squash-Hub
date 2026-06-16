@@ -218,6 +218,11 @@ function _render() {
     <div class="cb-court-bar" id="cbCourtBar">${_buildCourtBar()}</div>
 
     <div class="cb-grid-wrap" id="cbGridWrap">
+      ${!isMobile() && cb.courts.length > 0 ? `
+      <div class="cb-col-header-row">
+        <div style="width:${TIME_W}px;flex-shrink:0"></div>
+        ${cb.courts.map(c => `<div class="cb-col-header-cell">${esc(c.name)}</div>`).join('')}
+      </div>` : ''}
       <div id="cbGrid">${_buildGrid()}</div>
     </div>
   `;
@@ -227,7 +232,7 @@ function _render() {
 
 // ── Court Bar ─────────────────────────────────────────────────────────────────
 function _buildCourtBar() {
-  if (!cb.courts.length) return '';
+  if (!cb.courts.length || !isMobile()) return '';
 
   return cb.courts.map(c => `
     <button class="cb-court-tab${c.id === cb.courtId ? ' cb-court-tab--active' : ''}" data-court="${c.id}">
@@ -235,6 +240,7 @@ function _buildCourtBar() {
     </button>
   `).join('');
 }
+
 
 function _refreshCourtBar() {
   const bar = document.getElementById('cbCourtBar');
@@ -245,30 +251,8 @@ function _refreshCourtBar() {
 }
 
 // ── Grid ──────────────────────────────────────────────────────────────────────
-function _buildGrid() {
-  const isToday = cb.date === todayStr();
-  const isPast  = cb.date < todayStr();
-  const slots   = getCourtSlots(cb.date, cb.courtId);
-  const nm = nowMin();
-
-  if (cb.status === 'loading') {
-    return `<div class="cb-centered"><div class="cb-spinner"></div></div>`;
-  }
-  if (cb.status === 'error') {
-    return `<div class="cb-centered"><div style="color:#cf4444;font-size:14px">Couldn't load the schedule. Please try again.</div></div>`;
-  }
-  if (!cb.courtId) {
-    return `<div class="cb-centered"><div style="font-size:17px;color:${NAVY}">No courts available.</div></div>`;
-  }
-  if (isPast && slots.length === 0) {
-    return `<div class="cb-centered"><div style="font-size:17px;color:${NAVY}">No bookings on this date.</div></div>`;
-  }
-
-  // Barlow kept for grid time labels — matches schedule page uppercase time marker pattern
-  const hourLabels = Array.from({length: 18}, (_, i) => i + 6).map(hr => {
-    const label = `${hr % 12 || 12} ${hr < 12 ? 'AM' : 'PM'}`;
-    return `<div style="position:absolute;top:${topFor(hr*60)-7}px;right:10px;font-family:'Barlow',sans-serif;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9aa4b8">${label}</div>`;
-  }).join('');
+function _buildCourtGrid(courtId, isToday, isPast, nm) {
+  const slots = getCourtSlots(cb.date, courtId);
 
   const gridLines = Array.from({length: 35}, (_, i) => i).map(i => {
     const m = DAY_START + i * SLOT_MIN;
@@ -278,7 +262,6 @@ function _buildGrid() {
   const nowLine = isToday ? `
     <div style="position:absolute;left:0;right:0;top:${topFor(nm)}px;border-top:2px solid ${ACC};z-index:3">
       <div style="position:absolute;left:-4px;top:-5px;width:8px;height:8px;border-radius:50%;background:${ACC}"></div>
-      <div style="position:absolute;right:6px;top:-18px;font-family:'Barlow',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${ACC};background:#fff;padding:1px 5px;border-radius:4px">Now · ${fmtTime(nm)}</div>
     </div>
   ` : '';
 
@@ -294,7 +277,7 @@ function _buildGrid() {
       ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="${barColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`
       : '';
     return `
-      <div class="cb-block${canEdit ? ' cb-block--mine' : ''}" data-bid="${s.id}"
+      <div class="cb-block${canEdit ? ' cb-block--mine' : ''}" data-bid="${s.id}" data-court="${courtId}"
         style="position:absolute;left:8px;right:10px;top:${topFor(s.startMin)}px;height:${h-4}px;background:${bgColor};border-radius:9px;border-left:3px solid ${barColor};padding:8px 12px;overflow:hidden;cursor:${canEdit?'pointer':'default'};${mine?`outline:1px solid ${barColor}55`:''}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <div style="font-size:13px;font-weight:700;color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(s.title)}</div>
@@ -313,7 +296,7 @@ function _buildGrid() {
       if (covered) continue;
       const slotPast = isToday && m < nm;
       openSlots += `
-        <div class="${slotPast ? 'cb-slot-past' : 'cb-slot-open'}" data-start="${m}"
+        <div class="${slotPast ? 'cb-slot-past' : 'cb-slot-open'}" data-start="${m}" data-court="${courtId}"
           style="position:absolute;left:8px;right:10px;top:${topFor(m)}px;height:${ROW_H-4}px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;cursor:${slotPast?'default':'pointer'};border:${slotPast?'1px dashed '+LINE:'1px solid transparent'}">
           ${slotPast
             ? `<span style="font-size:11.5px;color:#aab4c5;font-style:italic">No longer available</span>`
@@ -323,20 +306,61 @@ function _buildGrid() {
     }
   }
 
-  const pastBanner = isPast && slots.length > 0
-    ? `<div class="cb-past-banner">Past date · View only</div>`
-    : '';
+  return `${gridLines}${nowLine}${openSlots}${blocks}`;
+}
+
+function _buildGrid() {
+  const isToday = cb.date === todayStr();
+  const isPast  = cb.date < todayStr();
+  const nm = nowMin();
+
+  if (cb.status === 'loading') {
+    return `<div class="cb-centered"><div class="cb-spinner"></div></div>`;
+  }
+  if (cb.status === 'error') {
+    return `<div class="cb-centered"><div style="color:#cf4444;font-size:14px">Couldn't load the schedule. Please try again.</div></div>`;
+  }
+  if (!cb.courts.length) {
+    return `<div class="cb-centered"><div style="font-size:17px;color:${NAVY}">No courts available.</div></div>`;
+  }
+
+  // Barlow kept for grid time labels — matches schedule page uppercase time marker pattern
+  const nowLabel = isToday ? `<div style="position:absolute;top:${topFor(nm)}px;right:8px;transform:translateY(-50%);font-family:'Barlow',sans-serif;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${ACC};background:#fff;border:1px solid ${ACC};border-radius:3px;padding:1px 5px;white-space:nowrap;line-height:1.5;pointer-events:none;z-index:4">Now</div>` : '';
+  const hourLabels = Array.from({length: 18}, (_, i) => i + 6).map(hr => {
+    const label = `${hr % 12 || 12} ${hr < 12 ? 'AM' : 'PM'}`;
+    return `<div style="position:absolute;top:${topFor(hr*60)-7}px;right:10px;font-family:'Barlow',sans-serif;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9aa4b8">${label}</div>`;
+  }).join('') + nowLabel;
+
+  const pastBanner = isPast ? `<div class="cb-past-banner">Past date · View only</div>` : '';
+
+  if (isMobile()) {
+    const slots = getCourtSlots(cb.date, cb.courtId);
+    if (isPast && slots.length === 0) {
+      return `<div class="cb-centered"><div style="font-size:17px;color:${NAVY}">No bookings on this date.</div></div>`;
+    }
+    return `
+      ${pastBanner}
+      <div style="display:flex;position:relative;min-height:${GRID_H}px">
+        <div style="width:${TIME_W}px;flex-shrink:0;position:relative;height:${GRID_H}px">${hourLabels}</div>
+        <div style="flex:1;position:relative;height:${GRID_H}px;border-left:1px solid ${LINE}">
+          ${_buildCourtGrid(cb.courtId, isToday, isPast, nm)}
+        </div>
+      </div>
+    `;
+  }
+
+  // Desktop: all courts side-by-side
+  const courtCols = cb.courts.map(c => `
+    <div style="flex:1;position:relative;height:${GRID_H}px;border-left:1px solid ${LINE};min-width:160px">
+      ${_buildCourtGrid(c.id, isToday, isPast, nm)}
+    </div>
+  `).join('');
 
   return `
     ${pastBanner}
     <div style="display:flex;position:relative;min-height:${GRID_H}px">
       <div style="width:${TIME_W}px;flex-shrink:0;position:relative;height:${GRID_H}px">${hourLabels}</div>
-      <div style="flex:1;position:relative;height:${GRID_H}px;border-left:1px solid ${LINE}">
-        ${gridLines}
-        ${nowLine}
-        ${openSlots}
-        ${blocks}
-      </div>
+      ${courtCols}
     </div>
   `;
 }
@@ -579,11 +603,15 @@ function _attachGridListeners() {
   if (isPast) return;
 
   document.querySelectorAll('.cb-slot-open').forEach(slot => {
-    slot.addEventListener('click', () => _startReservation(Number(slot.dataset.start)));
+    slot.addEventListener('click', () => {
+      if (slot.dataset.court) cb.courtId = Number(slot.dataset.court);
+      _startReservation(Number(slot.dataset.start));
+    });
   });
 
   document.querySelectorAll('.cb-block--mine').forEach(block => {
     block.addEventListener('click', () => {
+      if (block.dataset.court) cb.courtId = Number(block.dataset.court);
       const slots   = getCourtSlots(cb.date, cb.courtId);
       const booking = slots.find(s => String(s.id) === String(block.dataset.bid));
       if (booking) _openPanel('edit', { booking });

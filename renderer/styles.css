@@ -4422,6 +4422,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   flex-shrink: 0;
   overflow-x: auto;
 }
+.cb-court-bar:empty {
+  display: none;
+}
 
 .cb-court-tab {
   font-family: Barlow, sans-serif;
@@ -4448,16 +4451,37 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 
 
+/* Court column headers (desktop multi-court view) */
+.cb-col-header-row {
+  display: flex;
+  background: #fff;
+  border-bottom: 1px solid #e7ebf2;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+.cb-col-header-cell {
+  flex: 1;
+  min-width: 160px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  padding: 8px 0;
+  border-left: 1px solid #e7ebf2;
+  color: #1a2150;
+  letter-spacing: .01em;
+}
+
 /* Grid wrap */
 .cb-grid-wrap {
   flex: 1;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   background: #fff;
   position: relative;
 }
 
-#cbGrid { padding: 10px 0; }
+#cbGrid { padding: 0 0 10px; }
 
 /* Booking blocks */
 .cb-block { transition: filter .12s; }
