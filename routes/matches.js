@@ -76,14 +76,19 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   const db = getDB();
   const match = db.prepare(`
     SELECT m.id, m.player1_id, m.player2_id, m.player1_score,
-           s1.sub_player_id AS p1_sub, s2.sub_player_id AS p2_sub
+           s1.sub_player_id AS p1_sub, s2.sub_player_id AS p2_sub,
+           l.status AS league_status
     FROM matches m
     LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+    JOIN team_matchups tm ON tm.id = m.matchup_id
+    JOIN weeks w ON w.id = tm.week_id
+    JOIN leagues l ON l.id = w.league_id
     WHERE m.id = ?
   `).get(matchId);
 
   if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.league_status === 'completed') return res.status(403).json({ error: 'This league has ended — scores can no longer be reported.' });
   if (match.player1_score !== null) return res.status(409).json({ error: 'Score has already been reported for this match' });
 
   const effP1 = match.p1_sub ?? match.player1_id;

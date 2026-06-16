@@ -38,6 +38,7 @@ if (typeof window !== 'undefined' && !window.api) {
     getLeague:        (id)=> _apiFetch('GET',    `/api/leagues/${id}`),
     createLeague:     (d) => _apiFetch('POST',   '/api/leagues', d),
     deleteLeague:     (id)=> _apiFetch('DELETE', `/api/leagues/${id}`),
+    endLeague:        (id)=> _apiFetch('PUT',    `/api/leagues/${id}/end`),
 
     updateMatchScore: (d) => _apiFetch('PUT',    `/api/matches/${d.matchId}/score`, d),
     setMatchSub:      (d) => _apiFetch('PUT',    `/api/matches/${d.matchId}/sub`, d),

@@ -52,6 +52,27 @@ router.delete('/leagues/:id', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+router.put('/leagues/:id/end', requireAdmin, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const db = getDB();
+  const league = db.prepare('SELECT id, status FROM leagues WHERE id = ?').get(id);
+  if (!league) return res.status(404).json({ error: 'League not found' });
+  if (league.status === 'completed') return res.status(400).json({ error: 'League is already completed' });
+
+  db.prepare('UPDATE leagues SET status = ? WHERE id = ?').run('completed', id);
+  const skipped = db.prepare(`
+    UPDATE matches SET skipped = 1
+    WHERE (player1_score IS NULL) AND (skipped IS NULL OR skipped = 0)
+      AND matchup_id IN (
+        SELECT tm.id FROM team_matchups tm
+        JOIN weeks w ON tm.week_id = w.id
+        WHERE w.league_id = ?
+      )
+  `).run(id);
+
+  res.json({ ok: true, matchesSkipped: skipped.changes });
+}));
+
 router.post('/leagues/:id/replace-player', requireAdmin, wrap(async (req, res) => {
   const { oldPlayerId, newPlayerId } = req.body;
   if (!oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'oldPlayerId and newPlayerId are required' });

@@ -48,6 +48,7 @@ export function renderLeagueDetail() {
         <button class="options-item" data-action="copy-link">Get Public Link</button>
         <button class="options-item" data-action="message-players">Message Players</button>
         <button class="options-item" data-action="bulk-invite">Send Account Invites</button>
+        ${league.status !== 'completed' ? `<button class="options-item options-item-danger" data-action="end-league">End League</button>` : ''}
         <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
       </div>
     </div>` : '';
@@ -82,6 +83,25 @@ export function renderLeagueDetail() {
       } else if (action === 'bulk-invite') {
         document.getElementById('optionsDropdown').classList.remove('open');
         openBulkInviteModal(league);
+      } else if (action === 'end-league') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        modal.open('End League', `
+          <p>End <strong>${esc(league.name)}</strong>? All unreported matches will be skipped, and players will no longer be able to report scores. Reported scores will not be affected.</p>
+          <div class="form-actions">
+            <button class="btn btn-outline" id="fCancel">Cancel</button>
+            <button class="btn btn-danger" id="fConfirm">End League</button>
+          </div>`);
+        document.getElementById('fCancel').addEventListener('click', modal.close);
+        document.getElementById('fConfirm').addEventListener('click', async () => {
+          try {
+            await window.api.endLeague(league.id);
+            modal.close();
+            toast('League ended');
+            await reloadLeagueDetail();
+          } catch (err) {
+            toast(err.message || 'Failed to end league', 'error');
+          }
+        });
       } else if (action === 'delete-league') {
         document.getElementById('optionsDropdown').classList.remove('open');
         confirmDeleteLeague(Number(e.target.dataset.id), e.target.dataset.name);
@@ -117,7 +137,7 @@ export function renderLeagueDetail() {
   content.innerHTML = `
     <div class="league-header-card">
       <div class="league-header-inner">
-        <h2>${esc(league.name)}</h2>
+        <h2>${esc(league.name)}${league.status === 'completed' ? ' <span class="league-completed-badge">Completed</span>' : ''}</h2>
         <div class="league-header-divider"></div>
         <div class="league-stats">${statsHTML}</div>
       </div>
