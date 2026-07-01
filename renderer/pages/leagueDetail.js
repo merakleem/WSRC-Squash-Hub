@@ -686,9 +686,9 @@ function renderMatchRow(match, league, adminMode = true) {
     ? leagueCourts.find((c) => c.id === match.court_id)?.name
     : null;
   const showCourt = newCourtName != null || (league?.schedule_courts && match.court_number);
-  const timingLabel = newCourtName
+  const timingLabel = adminMode && newCourtName
     ? `${newCourtName}${match.match_time ? ' · ' + match.match_time : ''}`
-    : (league?.schedule_courts && match.court_number
+    : (adminMode && league?.schedule_courts && match.court_number
         ? `Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}`
         : (match.match_time || ''));
   const canEditTiming = adminMode && !match.skipped;

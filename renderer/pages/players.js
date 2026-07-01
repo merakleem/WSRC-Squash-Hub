@@ -701,7 +701,7 @@ export function renderPlayerProfile() {
             const details = isTr
               ? `${esc(m.league_name)} • ${esc(m.round_label || '')}`
               : [esc(m.league_name), `Wk ${m.week_number}`, m.division_name ? esc(m.division_name.replace(/^Division\s*/i, 'Div ')) : null].filter(Boolean).join(' • ');
-            const courtLabel = m.court_name || (m.schedule_courts && m.court_number ? `Court ${m.court_number}` : null);
+            const courtLabel = isAdmin() && (m.court_name || (m.schedule_courts && m.court_number ? `Court ${m.court_number}` : null));
             const timeInfo = courtLabel
               ? `${courtLabel}${m.match_time ? ' · ' + m.match_time : ''}`
               : (m.match_time || '—');

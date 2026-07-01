@@ -607,7 +607,7 @@ export async function renderDashboard() {
     const pills = nextMatch ? [
       `<span class="dh-pill">${fmtMatchDate(nextMatch.week_date)}</span>`,
       nextMatch.match_time ? `<span class="dh-pill">${esc(nextMatch.match_time)}</span>` : '',
-      (nextMatch.court_name || (nextMatch.schedule_courts && nextMatch.court_number)) ? `<span class="dh-pill">${nextMatch.court_name || `Court ${nextMatch.court_number}`}</span>` : '',
+      isAdmin() && (nextMatch.court_name || (nextMatch.schedule_courts && nextMatch.court_number)) ? `<span class="dh-pill">${nextMatch.court_name || `Court ${nextMatch.court_number}`}</span>` : '',
       nextMatch.division_name ? `<span class="dh-pill">${esc(nextMatch.division_name)}</span>` : '',
     ].filter(Boolean).join('') : '';
     const countdownInnerHTML = (() => {
