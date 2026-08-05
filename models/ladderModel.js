@@ -538,6 +538,60 @@ function getSeasonRecords(seasonId, asOfDate = null) {
   return Object.fromEntries(rows.map((r) => [r.player_id, { wins: r.wins, losses: r.losses }]));
 }
 
+/**
+ * A player's ladder position over time, for the profile's history chart.
+ *
+ * Nothing persists historical standings, so the series is reconstructed from
+ * the same chronological replay that produces the live ladder — one pass,
+ * recording the player's position whenever it changes. Deliberately all-time
+ * and leapfrog-based: the chart shows a career arc, not a season's ratings.
+ */
+function getPlayerLadderHistory(playerId) {
+  const db = getDB();
+  const id = Number(playerId);
+
+  const players = db.prepare(PLAYER_SELECT).all();
+  const playerIds = new Set(players.map((p) => p.id));
+  if (!playerIds.has(id)) return [];
+
+  const ranking = players.map((p) => p.id);
+  const matches = getCompletedMatches();
+  const size = ranking.length;
+
+  const series = [];
+  let position = ranking.indexOf(id) + 1;
+  const firstDate = matches.length ? String(matches[0].sort_key || '').slice(0, 10) : null;
+  if (firstDate) series.push({ date: firstDate, position, ladder_size: size });
+
+  for (const match of matches) {
+    const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
+    const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+    if (!playerIds.has(winnerId) || !playerIds.has(loserId)) continue;
+
+    const wi = ranking.indexOf(winnerId);
+    const li = ranking.indexOf(loserId);
+    if (wi === -1 || li === -1 || wi <= li) continue;
+
+    ranking.splice(wi, 1);
+    ranking.splice(li, 0, winnerId);
+
+    // Record only when this player actually moved. A full indexOf per match is
+    // a few thousand operations over the club's whole history — not worth
+    // optimising into range arithmetic that would be easy to get subtly wrong.
+    const next = ranking.indexOf(id) + 1;
+    if (next === position) continue;
+    position = next;
+    series.push({ date: String(match.sort_key || '').slice(0, 10), position, ladder_size: size });
+  }
+
+  // Always end at today's standing so the line reaches the right edge.
+  const last = series[series.length - 1];
+  const today = new Date().toISOString().slice(0, 10);
+  if (!last || last.date !== today) series.push({ date: today, position, ladder_size: size });
+
+  return series;
+}
+
 function getPlayerLadderStats(playerId) {
   const ladder = getLadder();
   const row = ladder.find((p) => p.id === Number(playerId));
@@ -546,7 +600,7 @@ function getPlayerLadderStats(playerId) {
 }
 
 module.exports = {
-  getLadder, getPlayerLadderStats, getLadderForSeason, computeEloLadder,
+  getLadder, getPlayerLadderStats, getPlayerLadderHistory, getLadderForSeason, computeEloLadder,
   freezeSeason, reopenSeason, getFrozenStandings, getSeasonRecords,
   getCompletedMatches, getLastMatchDates,
 };

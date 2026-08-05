@@ -99,11 +99,26 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   // which already carry season_id.
   const seasons = seasonModel.getAllSeasons();
   const ladderStats = ladderModel.getPlayerLadderStats(id);
+
+  // Division comes from the most recent league the player was entered in — the
+  // profile header shows it as part of their identity.
+  const division = db.prepare(`
+    SELECT d.name
+    FROM league_players lp
+    JOIN divisions d ON d.id = lp.division_id
+    JOIN leagues l ON l.id = lp.league_id
+    WHERE lp.player_id = ?
+    ORDER BY l.start_date DESC
+    LIMIT 1
+  `).get(id);
+
   res.json({
     ...playerData,
     wins: rec.wins || 0, losses: rec.losses || 0,
     history, upcoming, accountStatus, tournamentResults, seasons,
     ladder: ladderStats,
+    ladder_history: ladderModel.getPlayerLadderHistory(id),
+    division_name: division?.name || null,
   });
 }));
 

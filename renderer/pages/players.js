@@ -579,6 +579,10 @@ function openMessagePlayerModal(playerId, playerName) {
 // selection must never be trusted for a different player.
 let _profileSeason = null;
 let _profileSeasonFor = null;
+// Desktop panel and the Results source filter. Reset with the season selection
+// so a stale tab never opens on a different player.
+let _profileTab = 'season';
+let _profileResultFilter = 'all';
 
 export async function openPlayerProfile(id, { pushHistory = true } = {}) {
   const player = await window.api.getPlayerHistory(id);
@@ -655,291 +659,569 @@ export function renderPlayerProfile() {
     });
   }
 
-  // Season tabs are built from the seasons this player actually has matches in,
-  // so a profile never shows an empty tab. Stats are derived from the same rows
-  // the history table renders, which keeps "All Time" equal to the sum of the
-  // seasons rather than a separately-computed number that could drift.
+  // ===== DATA =====
+  // Everything below derives from the single getPlayerHistory payload. Season
+  // scoping is applied to history-derived blocks only; the ladder chart and
+  // upcoming matches are deliberately all-time.
   const allHistory = p.history || [];
-  const seasonsById = Object.fromEntries((p.seasons || []).map((s) => [s.id, s]));
+  const seasons = p.seasons || [];
+  const seasonsById = Object.fromEntries(seasons.map((s) => [s.id, s]));
+
   const playedSeasonIds = [...new Set(allHistory.map((m) => m.season_id).filter((id) => id != null))]
     .sort((a, b) => (seasonsById[b]?.start_date || '').localeCompare(seasonsById[a]?.start_date || ''));
   const hasUnassigned = allHistory.some((m) => m.season_id == null);
 
-  // Fall back to All Time unless the remembered selection belongs to this
-  // player AND still resolves to rows — otherwise a stale tab could render an
-  // empty profile with no tab bar to escape from.
+  // Default to the current season rather than all-time: the page is a season
+  // view now, and an unbounded history is what the redesign set out to remove.
+  const defaultSeason = seasons.find((s) => s.is_current && playedSeasonIds.includes(s.id))?.id
+    ?? playedSeasonIds[0]
+    ?? (hasUnassigned ? 'none' : null);
+
+  // A remembered selection is only trusted when it belongs to this player and
+  // still resolves to rows — back navigation swaps the player without going
+  // through openPlayerProfile.
   const selectionValid = _profileSeasonFor === p.id && (
-    playedSeasonIds.includes(_profileSeason) || (_profileSeason === 'none' && hasUnassigned)
+    _profileSeason === null
+    || playedSeasonIds.includes(_profileSeason)
+    || (_profileSeason === 'none' && hasUnassigned)
   );
-  const activeSeason = selectionValid ? _profileSeason : null;
+  const activeSeason = selectionValid ? _profileSeason : defaultSeason;
 
-  const history = activeSeason === null
-    ? allHistory
-    : activeSeason === 'none'
-      ? allHistory.filter((m) => m.season_id == null)
-      : allHistory.filter((m) => m.season_id === activeSeason);
+  // Opening a different player resets the view — a Results filter that matched
+  // nothing for them would otherwise render an empty panel with no explanation.
+  if (_profileSeasonFor !== p.id) {
+    _profileTab = 'season';
+    _profileResultFilter = 'all';
+    _profileSeasonFor = p.id;
+    _profileSeason = defaultSeason;
+  }
 
-  const wins   = history.filter((m) => m.result === 'W').length;
-  const losses = history.filter((m) => m.result === 'L').length;
+  const inSeason = (row) => activeSeason === null
+    || (activeSeason === 'none' ? row.season_id == null : row.season_id === activeSeason);
+
+  const history = allHistory.filter(inSeason);
+  const tournamentResults = (p.tournamentResults || []).filter(inSeason);
+  const upcoming = p.upcoming || [];
+
+  const seasonLabel = activeSeason === null
+    ? 'All time'
+    : activeSeason === 'none' ? 'Unassigned' : (seasonsById[activeSeason]?.name || 'Season');
+
+  const stats = _profileStats(history);
+  const allTimeStats = _profileStats(allHistory);
+
+  const ladder = p.ladder || {};
+  const ladderSeries = p.ladder_history || [];
+  const bestRankInSeason = _bestRankInWindow(ladderSeries, seasonsById[activeSeason]);
+
+  // ===== HEADER =====
+  const canEditPhoto = adminMode || state.currentUser?.playerId === p.id;
+  const metaBits = [
+    p.division_name,
+    p.member_number ? `Member #${esc(p.member_number)}` : null,
+    adminMode && p.email ? esc(p.email) : null,
+  ].filter(Boolean);
+
+  const acctBadge = adminMode && acctStatus === 'verified'
+    ? `<span class="pp-badge">Verified</span>` : '';
+
+  const rankDelta = ladder.position != null && ladder.best_position != null && ladder.position > ladder.best_position
+    ? null
+    : null;
+
+  const headerStatsHTML = `
+    ${ladder.position == null ? '' : `
+      <div class="pp-hstat">
+        <div class="pp-hstat-val">#${ladder.position}</div>
+        <div class="pp-hstat-label">Ladder of ${ladder.ladder_size}</div>
+      </div>`}
+    <div class="pp-hstat pp-hstat-wide">
+      <div class="pp-hstat-val">${stats.wins}–${stats.losses}<span class="pp-hstat-sub">${stats.winPct === null ? '' : `${stats.winPct}%`}</span></div>
+      <div class="pp-hbar"><span style="width:${stats.winPct || 0}%"></span></div>
+      <div class="pp-hstat-label">${esc(seasonLabel)} record</div>
+    </div>
+    ${stats.currentStreak === 0 ? '' : `
+      <div class="pp-hstat">
+        <div class="pp-hstat-val ${stats.streakType === 'W' ? 'pp-pos' : 'pp-neg'}">${stats.currentStreak}${stats.streakType}</div>
+        <div class="pp-hstat-label">Current streak</div>
+      </div>`}`;
+
+  const seasonOptions = [
+    ...playedSeasonIds.map((id) => ({ value: String(id), label: seasonsById[id]?.name || 'Season' })),
+    ...(hasUnassigned ? [{ value: 'none', label: 'Unassigned' }] : []),
+    { value: 'all', label: 'All time' },
+  ];
+  const seasonPillHTML = seasonOptions.length < 2 ? '' : `
+    <div class="pp-season-pick">
+      <select id="ppSeasonSelect" aria-label="Season">
+        ${seasonOptions.map((o) => `<option value="${o.value}" ${String(activeSeason ?? 'all') === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      </select>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+    </div>`;
+
+  const headerHTML = `
+    <div class="pp-header">
+      <div class="pp-identity">
+        ${canEditPhoto ? `
+          <button class="pp-avatar-btn" id="btnEditPhoto" title="Change photo">
+            ${avatarHTML(p, 'pp-avatar')}
+            <span class="pp-avatar-edit">Edit</span>
+          </button>` : avatarHTML(p, 'pp-avatar')}
+        <div class="pp-identity-text">
+          <h2 class="pp-name">${esc(p.name)}</h2>
+          ${metaBits.length ? `<div class="pp-meta">${metaBits.join(' · ')}</div>` : ''}
+          ${acctBadge}
+        </div>
+      </div>
+      <div class="pp-header-right">
+        ${seasonPillHTML}
+        <div class="pp-hstats">${headerStatsHTML}</div>
+      </div>
+    </div>`;
+
+  // ===== PANELS =====
+  const TABS = [
+    { key: 'season', label: 'Season' },
+    { key: 'results', label: 'Results' },
+    { key: 'upcoming', label: 'Upcoming' },
+    { key: 'tournaments', label: 'Tournaments' },
+    { key: 'ladder', label: 'Ladder history' },
+    { key: 'past', label: 'Past seasons' },
+  ];
+  const activeTab = TABS.some((t) => t.key === _profileTab) ? _profileTab : 'season';
+
+  const tabBarHTML = `
+    <div class="pp-tabs" role="tablist">
+      ${TABS.map((t) => `
+        <button class="pp-tab${t.key === activeTab ? ' active' : ''}" data-pp-tab="${t.key}" role="tab">${t.label}</button>`).join('')}
+    </div>`;
+
+  const resultRow = (m, { compact = false } = {}) => {
+    const won = m.result === 'W';
+    const context = m.source === 'tournament'
+      ? [esc(m.league_name), esc(m.round_label || '')].filter(Boolean).join(' · ')
+      : m.source === 'pickup'
+        ? 'Ladder match'
+        : [esc(m.league_name), m.week_number ? `Wk ${m.week_number}` : null,
+           m.division_name ? esc(m.division_name.replace(/^Division\s*/i, 'Div ')) : null].filter(Boolean).join(' · ');
+    const opponent = m.opponent_id
+      ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
+      : esc(m.opponent_name);
+    return `
+      <div class="pp-row">
+        <span class="pp-chip ${won ? 'pp-chip-w' : 'pp-chip-l'}">${won ? 'W' : 'L'}</span>
+        <div class="pp-row-main">
+          <span class="pp-row-title">${opponent}</span>
+          <span class="pp-row-sub">${context}</span>
+        </div>
+        <span class="pp-row-score">${m.my_score}–${m.their_score}</span>
+        ${compact ? '' : `<span class="pp-row-date">${formatShortDate(m.week_date)}</span>`}
+      </div>`;
+  };
+
+  const emptyBlock = (msg) => `<div class="empty-state"><strong>${esc(msg)}</strong></div>`;
+
+  // -- Season panel --
+  const recentResults = history.slice(0, 5);
+  const seasonPanelHTML = `
+    <div class="pp-season-grid">
+      <div class="pp-col">
+        <div class="pp-card">
+          <div class="pp-card-head">
+            <span class="pp-card-label">Results this season</span>
+            ${history.length > 5 ? `<button class="pp-link" data-pp-tab="results">Show all ${history.length}</button>` : ''}
+          </div>
+          ${recentResults.length ? recentResults.map((m) => resultRow(m)).join('') : emptyBlock('No matches played this season')}
+        </div>
+      </div>
+      <div class="pp-col">
+        <div class="pp-card pp-card-pad">
+          <span class="pp-card-label">Season detail</span>
+          <div class="pp-detail-row">
+            <span class="pp-detail-key">Games won</span>
+            <span class="pp-detail-val">${stats.gamesWon}–${stats.gamesLost}
+              <span class="pp-detail-sub">${stats.gameWinPct === null ? '—' : `${stats.gameWinPct}%`}</span></span>
+          </div>
+          <div class="pp-bar"><span style="width:${stats.gameWinPct || 0}%"></span></div>
+          <div class="pp-figures">
+            <div><span class="pp-fig">${stats.longestWinStreak}</span><span class="pp-fig-label">Best run</span></div>
+            <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
+            <div><span class="pp-fig">${tournamentResults.length}</span><span class="pp-fig-label">Tournaments</span></div>
+          </div>
+        </div>
+        ${_quickLinksHTML(upcoming.length, tournamentResults.length, allTimeStats)}
+      </div>
+    </div>`;
+
+  // -- Results panel --
+  const sourceFilters = [
+    { key: 'all', label: 'All' },
+    { key: 'league', label: 'League' },
+    { key: 'pickup', label: 'Ladder' },
+    { key: 'tournament', label: 'Tournament' },
+  ];
+  const filtered = _profileResultFilter === 'all'
+    ? history
+    : history.filter((m) => (m.source || 'league') === _profileResultFilter);
+
+  const resultsPanelHTML = `
+    <div class="pp-card">
+      <div class="pp-card-head pp-card-head-wrap">
+        <div class="pp-card-head-text">
+          <span class="pp-card-label">Results · ${esc(seasonLabel)}</span>
+          <span class="pp-card-sub">${stats.wins} win${stats.wins === 1 ? '' : 's'} · ${stats.losses} loss${stats.losses === 1 ? '' : 'es'}</span>
+        </div>
+        <div class="pp-filters">
+          ${sourceFilters.map((f) => `
+            <button class="pp-filter${_profileResultFilter === f.key ? ' active' : ''}" data-pp-filter="${f.key}">${f.label}</button>`).join('')}
+        </div>
+      </div>
+      ${filtered.length ? filtered.map((m) => resultRow(m)).join('') : emptyBlock('No matches for this filter')}
+    </div>`;
+
+  // -- Upcoming panel --
+  const upcomingPanelHTML = `
+    <div class="pp-card">
+      <div class="pp-card-head">
+        <span class="pp-card-label">Upcoming matches</span>
+        <span class="pp-card-sub">all seasons · ${upcoming.length} scheduled</span>
+      </div>
+      ${upcoming.length ? upcoming.map((m, i) => {
+        const courtLabel = isAdmin() && (m.court_name || (m.schedule_courts && m.court_number ? `Court ${m.court_number}` : null));
+        const timing = [m.match_time, courtLabel].filter(Boolean).join(' · ');
+        const context = [esc(m.league_name), m.week_number ? `Wk ${m.week_number}` : null].filter(Boolean).join(' · ');
+        const h2h = _headToHead(allHistory, m.opponent_id);
+        const opponent = m.opponent_id
+          ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
+          : esc(m.opponent_name || 'TBD');
+        return `
+          <div class="pp-row pp-row-lg${i === 0 ? ' pp-row-next' : ''}">
+            <div class="pp-date-block">
+              <span class="pp-date-main">${formatShortDate(m.week_date)}</span>
+              ${timing ? `<span class="pp-date-sub">${esc(timing)}</span>` : ''}
+            </div>
+            <div class="pp-row-main">
+              <span class="pp-row-title">${opponent}${i === 0 ? '<span class="pp-next-chip">Next up</span>' : ''}</span>
+              <span class="pp-row-sub">${[context, h2h].filter(Boolean).join(' — ')}</span>
+            </div>
+          </div>`;
+      }).join('') : emptyBlock('No upcoming matches')}
+    </div>`;
+
+  // -- Tournaments panel --
+  const tournPanelHTML = `
+    <div class="pp-card">
+      <div class="pp-card-head"><span class="pp-card-label">Tournaments · ${esc(seasonLabel)}</span></div>
+      ${tournamentResults.length ? tournamentResults.map((t) => `
+        <div class="pp-row pp-row-lg${t.status !== 'completed' ? ' pp-row-next' : ''}">
+          <div class="pp-row-main">
+            <span class="pp-row-title">${esc(t.name)}</span>
+            <span class="pp-row-sub">${formatShortDate(t.championship_date)}</span>
+          </div>
+          ${t.status === 'completed'
+            ? `<span class="pp-finish${t.position === 2 ? ' pp-finish-runner' : ''}">${t.position ? `Finished #${t.position}` : '—'}</span>`
+            : `<span class="pp-next-chip">In progress</span>`}
+        </div>`).join('') : emptyBlock('No tournaments played yet')}
+    </div>`;
+
+  // -- Ladder history panel (all-time, independent of the season selector) --
+  const ladderPanelHTML = ladder.position == null ? '' : `
+    <div class="pp-ladder-card">
+      <span class="pp-card-label pp-on-navy">Ladder history</span>
+      ${_ladderChartHTML(ladderSeries, seasons, 'desktop')}
+      <div class="pp-ladder-overlay">
+        <div class="pp-ladder-now">#${ladder.position}</div>
+        <div class="pp-ladder-of">of ${ladder.ladder_size} players</div>
+        <div class="pp-ladder-rule"></div>
+        <div class="pp-ladder-best">#${ladder.best_position}<span>Best ever</span></div>
+      </div>
+    </div>`;
+
+  // -- Past seasons panel --
+  const pastRows = playedSeasonIds.map((id) => {
+    const s = seasonsById[id];
+    const st = _profileStats(allHistory.filter((m) => m.season_id === id));
+    const best = _bestRankInWindow(ladderSeries, s);
+    return { id, name: s?.name || 'Season', st, best, isCurrent: !!s?.is_current };
+  });
+  const pastPanelHTML = `
+    <div class="pp-card">
+      <div class="pp-card-head">
+        <span class="pp-card-label">Season by season</span>
+        <span class="pp-card-sub">select a season to load it above</span>
+      </div>
+      ${pastRows.length ? pastRows.map((r) => `
+        <div class="pp-row pp-row-lg pp-past-row${r.isCurrent ? ' pp-row-next' : ''}" data-pp-season="${r.id}">
+          <span class="pp-past-name">${esc(r.name)}</span>
+          <span class="pp-past-rec">${r.st.wins}–${r.st.losses}</span>
+          <span class="pp-bar pp-bar-inline"><span style="width:${r.st.winPct || 0}%"></span></span>
+          <span class="pp-past-pct">${r.st.winPct === null ? '—' : `${r.st.winPct}%`}</span>
+          <span class="pp-past-best">${r.best ? `Best rank #${r.best}` : ''}</span>
+          ${r.isCurrent ? `<span class="pp-next-chip">Current</span>` : `<svg class="pp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>`}
+        </div>`).join('') : emptyBlock('No season history yet')}
+      <div class="pp-row pp-row-lg pp-past-total">
+        <span class="pp-past-name">All time</span>
+        <span class="pp-past-rec">${allTimeStats.wins}–${allTimeStats.losses}</span>
+        <span class="pp-bar pp-bar-inline pp-bar-navy"><span style="width:${allTimeStats.winPct || 0}%"></span></span>
+        <span class="pp-past-pct">${allTimeStats.winPct === null ? '—' : `${allTimeStats.winPct}%`}</span>
+        <span class="pp-past-best">${ladder.best_position ? `Best rank #${ladder.best_position}` : ''}</span>
+      </div>
+    </div>`;
+
+  const panels = {
+    season: seasonPanelHTML,
+    results: resultsPanelHTML,
+    upcoming: upcomingPanelHTML,
+    tournaments: tournPanelHTML,
+    ladder: ladderPanelHTML || emptyBlock('Not on the ladder'),
+    past: pastPanelHTML,
+  };
+
+  // ===== MOBILE =====
+  // A single scrolling column rather than tabs: record, recent results, then an
+  // "all time" divider that signals the ladder card ignores the season filter.
+  const mobileHTML = `
+    <div class="pp-mobile">
+      <div class="pp-season-row">
+        ${seasonPillHTML}
+        <span class="pp-season-count">${history.length} match${history.length === 1 ? '' : 'es'} played</span>
+      </div>
+
+      <div class="pp-card pp-card-pad">
+        <div class="pp-card-head pp-card-head-bare">
+          <span class="pp-card-label">${esc(seasonLabel)} record</span>
+          ${stats.currentStreak > 1 && stats.streakType === 'W'
+            ? `<span class="pp-streak">${stats.currentStreak}-match win streak</span>` : ''}
+        </div>
+        ${stats.played === 0 ? emptyBlock('No matches played this season') : `
+          <div class="pp-big">
+            <span class="pp-big-w">${stats.wins}</span>
+            <span class="pp-big-sep">/</span>
+            <span class="pp-big-l">${stats.losses}</span>
+            <span class="pp-big-pct">${stats.winPct === null ? '—' : `${stats.winPct}%`}</span>
+          </div>
+          <div class="pp-bar pp-bar-lg"><span style="width:${stats.winPct || 0}%"></span></div>
+          <div class="pp-figures">
+            <div><span class="pp-fig">${stats.gamesWon}–${stats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
+            <div><span class="pp-fig">${stats.longestWinStreak}</span><span class="pp-fig-label">Best run</span></div>
+            <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
+          </div>`}
+      </div>
+
+      ${history.length ? `
+        <div class="pp-card">
+          <div class="pp-card-head">
+            <span class="pp-card-label">Last ${Math.min(3, history.length)} result${history.length === 1 ? '' : 's'}</span>
+            ${history.length > 3 ? `<button class="pp-link" data-pp-tab="results">All ${history.length}</button>` : ''}
+          </div>
+          ${history.slice(0, 3).map((m) => resultRow(m)).join('')}
+        </div>` : ''}
+
+      ${ladder.position == null ? '' : `
+        <div class="pp-divider"><span>All time</span></div>
+        <div class="pp-ladder-card pp-ladder-card-sm">
+          <span class="pp-card-label pp-on-navy">Ladder history</span>
+          ${_ladderChartHTML(ladderSeries, seasons, 'mobile')}
+        </div>`}
+
+      ${_quickLinksHTML(upcoming.length, tournamentResults.length, allTimeStats)}
+    </div>`;
+
+  document.getElementById('mainContent').innerHTML = `
+    ${headerHTML}
+    <div class="pp-desktop">
+      ${tabBarHTML}
+      <div class="pp-panel">${panels[activeTab]}</div>
+    </div>
+    ${mobileHTML}`;
+
+  // ===== EVENTS =====
+  const content = document.getElementById('mainContent');
+
+  content.querySelectorAll('.nav-player-link').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.openPlayerProfile(Number(el.dataset.playerId));
+    });
+  });
+
+  document.getElementById('btnEditPhoto')?.addEventListener('click', () => openPhotoModal(p));
+
+  content.querySelectorAll('[data-pp-tab]').forEach((el) => {
+    el.addEventListener('click', () => {
+      _profileTab = el.dataset.ppTab;
+      renderPlayerProfile();
+    });
+  });
+
+  content.querySelectorAll('[data-pp-filter]').forEach((el) => {
+    el.addEventListener('click', () => {
+      _profileResultFilter = el.dataset.ppFilter;
+      renderPlayerProfile();
+    });
+  });
+
+  content.querySelectorAll('[data-pp-season]').forEach((el) => {
+    el.addEventListener('click', () => {
+      _profileSeason = Number(el.dataset.ppSeason);
+      _profileSeasonFor = p.id;
+      _profileTab = 'season';
+      renderPlayerProfile();
+    });
+  });
+
+  document.getElementById('ppSeasonSelect')?.addEventListener('change', (e) => {
+    const raw = e.target.value;
+    _profileSeason = raw === 'all' ? null : raw === 'none' ? 'none' : Number(raw);
+    _profileSeasonFor = p.id;
+    renderPlayerProfile();
+  });
+}
+
+// ===== PROFILE HELPERS =====
+
+/** Match/game/streak totals for a set of history rows (newest first). */
+function _profileStats(rows) {
+  const wins = rows.filter((m) => m.result === 'W').length;
+  const losses = rows.filter((m) => m.result === 'L').length;
   const played = wins + losses;
-  const winPct = played > 0 ? Math.round((wins / played) * 100) : null;
-
-  // Games (individual games inside a match, e.g. a 3–1 win is 3 games won, 1 lost)
-  const gamesWon  = history.reduce((sum, m) => sum + (Number(m.my_score) || 0), 0);
-  const gamesLost = history.reduce((sum, m) => sum + (Number(m.their_score) || 0), 0);
+  const gamesWon = rows.reduce((s, m) => s + (Number(m.my_score) || 0), 0);
+  const gamesLost = rows.reduce((s, m) => s + (Number(m.their_score) || 0), 0);
   const gamesTotal = gamesWon + gamesLost;
-  const gameWinPct = gamesTotal > 0 ? Math.round((gamesWon / gamesTotal) * 100) : null;
 
-  // Streaks. History arrives newest-first, so walk a chronological copy for the
-  // longest run and the newest-first original for the active run.
-  const chronological = [...history].reverse();
   let longestWinStreak = 0;
   let run = 0;
-  for (const m of chronological) {
+  for (const m of [...rows].reverse()) {
     run = m.result === 'W' ? run + 1 : 0;
     if (run > longestWinStreak) longestWinStreak = run;
   }
 
   let currentStreak = 0;
-  let currentStreakType = null;
-  for (const m of history) {
-    if (currentStreakType === null) currentStreakType = m.result;
-    if (m.result !== currentStreakType) break;
+  let streakType = null;
+  for (const m of rows) {
+    if (streakType === null) streakType = m.result;
+    if (m.result !== streakType) break;
     currentStreak++;
   }
 
-  const seasonTabsHTML = (playedSeasonIds.length + (hasUnassigned ? 1 : 0)) < 2 ? '' : `
-    <div class="season-tabs">
-      <button class="season-tab${activeSeason === null ? ' active' : ''}" data-season-tab="all">All Time</button>
-      ${playedSeasonIds.map((id) => `
-        <button class="season-tab${activeSeason === id ? ' active' : ''}" data-season-tab="${id}">
-          ${esc(seasonsById[id]?.name || 'Season')}
-        </button>`).join('')}
-      ${hasUnassigned ? `<button class="season-tab${activeSeason === 'none' ? ' active' : ''}" data-season-tab="none">Unassigned</button>` : ''}
-    </div>`;
-
-  const historyHTML = history.length === 0
-    ? `<div class="empty-state"><strong>No matches played yet</strong></div>`
-    : `<table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Details</th>
-            <th>Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${history.map((m) => {
-            const isTr = m.source === 'tournament';
-            const isPu = m.source === 'pickup';
-            const details = isTr
-              ? `${esc(m.league_name)} • ${esc(m.round_label || '')}`
-              : isPu
-              ? 'Ladder Match'
-              : [esc(m.league_name), `Wk ${m.week_number}`, m.division_name ? esc(m.division_name.replace(/^Division\s*/i, 'Div ')) : null].filter(Boolean).join(' • ');
-            const won = m.result === 'W';
-            const opponent = m.opponent_id
-              ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
-              : esc(m.opponent_name);
-            const resultText = `<span class="${won ? 'history-won' : 'history-lost'}">${won ? 'Won' : 'Lost'}</span> ${m.my_score}–${m.their_score} ${won ? 'against' : 'to'} ${opponent}`;
-            return `
-            <tr>
-              <td class="text-muted">${formatShortDate(m.week_date)}</td>
-              <td class="text-muted">${details}</td>
-              <td>${resultText}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
-
-  const upcomingHTML = (p.upcoming || []).length === 0
-    ? `<div class="empty-state"><strong>No upcoming matches</strong></div>`
-    : `<table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Details</th>
-            <th>Opponent</th>
-            <th>Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${p.upcoming.map((m) => {
-            const isTr = m.source === 'tournament';
-            const details = isTr
-              ? `${esc(m.league_name)} • ${esc(m.round_label || '')}`
-              : [esc(m.league_name), `Wk ${m.week_number}`, m.division_name ? esc(m.division_name.replace(/^Division\s*/i, 'Div ')) : null].filter(Boolean).join(' • ');
-            const courtLabel = isAdmin() && (m.court_name || (m.schedule_courts && m.court_number ? `Court ${m.court_number}` : null));
-            const timeInfo = courtLabel
-              ? `${courtLabel}${m.match_time ? ' · ' + m.match_time : ''}`
-              : (m.match_time || '—');
-            return `
-            <tr>
-              <td class="text-muted">${formatShortDate(m.week_date)}</td>
-              <td class="text-muted">${details}</td>
-              <td>${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</td>
-              <td class="text-muted">${esc(timeInfo)}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
-
-  // Tournament results are historical, so they follow the season tab. Upcoming
-  // matches deliberately do not — they are forward-looking, and hiding a match
-  // the player has next week because they are viewing a past season would be
-  // actively misleading.
-  const allTournResults = p.tournamentResults || [];
-  const tournamentResults = activeSeason === null
-    ? allTournResults
-    : activeSeason === 'none'
-      ? allTournResults.filter((t) => t.season_id == null)
-      : allTournResults.filter((t) => t.season_id === activeSeason);
-
-  const tournamentResultsHTML = tournamentResults.length === 0
-    ? `<div class="empty-state"><strong>No tournaments played yet</strong></div>`
-    : `<table>
-        <thead>
-          <tr>
-            <th>Tournament</th>
-            <th>Date</th>
-            <th style="text-align:center">Finish</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tournamentResults.map(t => `
-            <tr>
-              <td>${esc(t.name)}</td>
-              <td class="text-muted">${formatShortDate(t.championship_date)}</td>
-              <td style="text-align:center">
-                ${t.status === 'completed' && t.position
-                  ? `<span class="tr-results-pos" style="display:inline">${esc(t.position)}</span>`
-                  : `<span class="text-muted">In Progress</span>`}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`;
-
-  // A player may change their own photo; an admin may change anyone's.
-  const canEditPhoto = adminMode || state.currentUser?.playerId === p.id;
-
-  const scopeLabel = activeSeason === null
-    ? 'All-Time'
-    : activeSeason === 'none'
-      ? 'Unassigned'
-      : esc(seasonsById[activeSeason]?.name || 'Season');
-
-  // Ladder standing is a "right now" fact about the player, not a per-season
-  // one, so it sits in the header rather than inside the season-scoped stats.
-  const ladder = p.ladder || {};
-  const ladderHTML = ladder.position == null ? '' : `
-    <div class="profile-ladder">
-      <div class="profile-ladder-item">
-        <span class="profile-ladder-val">#${ladder.position}</span>
-        <span class="profile-ladder-label">Ladder Position</span>
-      </div>
-      <div class="profile-ladder-item">
-        <span class="profile-ladder-val">#${ladder.best_position}</span>
-        <span class="profile-ladder-label">Best Ever</span>
-      </div>
-      <div class="profile-ladder-item">
-        <span class="profile-ladder-val">${ladder.ladder_size}</span>
-        <span class="profile-ladder-label">Players</span>
-      </div>
-    </div>`;
-
-  const statTile = (val, label, tone = '') =>
-    `<div class="stat-tile${tone ? ` stat-tile-${tone}` : ''}">
-       <span class="stat-tile-val">${val}</span>
-       <span class="stat-tile-label">${label}</span>
-     </div>`;
-
-  const statsHTML = played === 0
-    ? `<div class="table-card"><div class="empty-state"><strong>No matches played${activeSeason === null ? ' yet' : ' this season'}</strong></div></div>`
-    : `<div class="stat-grid">
-        ${statTile(wins, 'Wins', 'win')}
-        ${statTile(losses, 'Losses', 'loss')}
-        ${statTile(played, 'Matches')}
-        ${statTile(winPct === null ? '—' : `${winPct}%`, 'Win Rate')}
-        ${statTile(gamesWon, 'Games Won', 'win')}
-        ${statTile(gamesLost, 'Games Lost', 'loss')}
-        ${statTile(gamesTotal, 'Games')}
-        ${statTile(gameWinPct === null ? '—' : `${gameWinPct}%`, 'Game Win Rate')}
-        ${statTile(longestWinStreak, 'Longest Win Streak')}
-        ${statTile(
-          currentStreak === 0 ? '—' : `${currentStreak}${currentStreakType === 'W' ? 'W' : 'L'}`,
-          'Current Streak',
-          currentStreak === 0 ? '' : currentStreakType === 'W' ? 'win' : 'loss'
-        )}
-      </div>`;
-
-  const acctBadgeHTML = adminMode ? (() => {
-    if (acctStatus === 'verified') return `<span class="acct-badge acct-badge-verified">Verified</span>`;
-    if (!hasEmail) return `<span class="acct-badge acct-badge-none">No Email</span>`;
-    return `<span class="acct-badge acct-badge-pending">Not Verified</span>`;
-  })() : '';
-
-  document.getElementById('mainContent').innerHTML = `
-    <div class="profile-header-card">
-      <div class="profile-info">
-        ${canEditPhoto ? `
-          <button class="profile-avatar-btn" id="btnEditPhoto" title="Change photo">
-            ${avatarHTML(p, 'profile-avatar')}
-            <span class="profile-avatar-edit">Edit</span>
-          </button>` : avatarHTML(p, 'profile-avatar')}
-        <div>
-          <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">${esc(p.name)}</h2>
-          ${adminMode && p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
-          ${adminMode && p.phone ? `<div class="text-muted" style="font-size:13px">${esc(p.phone)}</div>` : ''}
-          ${acctBadgeHTML}
-        </div>
-      </div>
-      ${ladderHTML}
-    </div>
-
-    ${seasonTabsHTML}
-
-    <div class="section">
-      <div class="section-title">${scopeLabel} Record <div class="divider"></div></div>
-      ${statsHTML}
-    </div>
-
-    <div class="section">
-      <div class="section-title">Upcoming Matches <span class="season-scope-note">all seasons</span> <div class="divider"></div></div>
-      <div class="table-card">${upcomingHTML}</div>
-    </div>
-
-    ${tournamentResults.length === 0 ? '' : `
-    <div class="section">
-      <div class="section-title">Tournament Results <div class="divider"></div></div>
-      <div class="table-card">${tournamentResultsHTML}</div>
-    </div>`}
-
-    <div class="section">
-      <details class="history-disclosure">
-        <summary>
-          <span class="history-disclosure-title">Match History</span>
-          <span class="history-disclosure-count">${played} match${played === 1 ? '' : 'es'}${activeSeason === null ? ', all time' : ''}</span>
-        </summary>
-        <div class="table-card" style="margin-top:12px">${historyHTML}</div>
-      </details>
-    </div>`;
-
-  document.getElementById('mainContent').querySelectorAll('.nav-player-link').forEach((el) => {
-    el.addEventListener('click', () => window.openPlayerProfile(Number(el.dataset.playerId)));
-  });
-
-  document.getElementById('btnEditPhoto')?.addEventListener('click', () => openPhotoModal(p));
-
-  document.querySelectorAll('[data-season-tab]').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const raw = tab.dataset.seasonTab;
-      _profileSeason = raw === 'all' ? null : raw === 'none' ? 'none' : Number(raw);
-      _profileSeasonFor = p.id;
-      renderPlayerProfile();
-    });
-  });
+  return {
+    wins, losses, played,
+    winPct: played > 0 ? Math.round((wins / played) * 100) : null,
+    gamesWon, gamesLost, gamesTotal,
+    gameWinPct: gamesTotal > 0 ? Math.round((gamesWon / gamesTotal) * 100) : null,
+    longestWinStreak, currentStreak, streakType: currentStreak ? streakType : null,
+  };
 }
 
+/** Best (lowest) ladder position reached inside a season's date window. */
+function _bestRankInWindow(series, season) {
+  if (!series?.length) return null;
+  const within = season
+    ? series.filter((pt) => pt.date >= season.start_date && pt.date <= season.end_date)
+    : series;
+  if (!within.length) return null;
+  return Math.min(...within.map((pt) => pt.position));
+}
+
+/** "you lead 3–1" style record against one opponent, from existing history. */
+function _headToHead(history, opponentId) {
+  if (!opponentId) return '';
+  const rows = history.filter((m) => m.opponent_id === opponentId);
+  if (!rows.length) return '';
+  const w = rows.filter((m) => m.result === 'W').length;
+  const l = rows.length - w;
+  if (w === l) return `level ${w}–${l}`;
+  return w > l ? `you lead ${w}–${l}` : `you trail ${w}–${l}`;
+}
+
+function _quickLinksHTML(upcomingCount, tournCount, allTimeStats) {
+  const chev = `<svg class="pp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>`;
+  return `
+    <div class="pp-card pp-quick">
+      <button class="pp-quick-row" data-pp-tab="upcoming">
+        <span class="pp-quick-label">Upcoming matches</span>
+        <span class="pp-quick-meta">${upcomingCount}</span>${chev}
+      </button>
+      <button class="pp-quick-row" data-pp-tab="tournaments">
+        <span class="pp-quick-label">Tournaments</span>
+        <span class="pp-quick-meta">${tournCount}</span>${chev}
+      </button>
+      <button class="pp-quick-row" data-pp-tab="past">
+        <span class="pp-quick-label">Past seasons</span>
+        <span class="pp-quick-meta">All time ${allTimeStats.wins}–${allTimeStats.losses}</span>${chev}
+      </button>
+    </div>`;
+}
+
+/**
+ * Ladder position over time as inline SVG.
+ *
+ * The viewBox aspect is kept equal to the rendered box aspect (2:1) so the
+ * default preserveAspectRatio doesn't letterbox the plot inside the card.
+ * The rank axis is inverted — a better rank sits higher.
+ */
+function _ladderChartHTML(series, seasons, variant) {
+  if (!series || series.length < 2) {
+    return `<div class="pp-chart-empty">Not enough history to chart yet</div>`;
+  }
+
+  const X0 = 36, X1 = 624, Y0 = 38, Y1 = 264;
+  const positions = series.map((pt) => pt.position);
+  let best = Math.min(...positions);
+  let worst = Math.max(...positions);
+  if (best === worst) { best = Math.max(1, best - 1); worst = worst + 1; }
+
+  const dates = series.map((pt) => pt.date);
+  const t0 = new Date(`${dates[0]}T00:00:00Z`).getTime();
+  const t1 = new Date(`${dates[dates.length - 1]}T00:00:00Z`).getTime();
+  const span = t1 - t0 || 1;
+
+  const x = (d) => X0 + ((new Date(`${d}T00:00:00Z`).getTime() - t0) / span) * (X1 - X0);
+  const y = (pos) => Y0 + ((pos - best) / (worst - best)) * (Y1 - Y0);
+
+  const pts = series.map((pt) => `${x(pt.date).toFixed(1)},${y(pt.position).toFixed(1)}`);
+  const area = `M${pts.join(' L')} L${X1},${Y1} L${X0},${Y1} Z`;
+
+  const mid = Math.round((best + worst) / 2);
+  const gridY = [best, mid, worst];
+
+  // Sample interior markers so a long series doesn't turn into a solid band.
+  const step = Math.max(1, Math.floor(series.length / 4));
+  const markers = series
+    .filter((_, i) => i % step === 0 && i !== series.length - 1)
+    .map((pt) => `<circle cx="${x(pt.date).toFixed(1)}" cy="${y(pt.position).toFixed(1)}" r="4" fill="#1a2150" stroke="#8fa8ff" stroke-width="2.5"/>`)
+    .join('');
+
+  const lastPt = series[series.length - 1];
+  const lastX = x(lastPt.date);
+  const lastY = y(lastPt.position);
+
+  // X-axis labelled by season, using each season that overlaps the series.
+  const spanSeasons = (seasons || [])
+    .filter((s) => s.end_date >= dates[0] && s.start_date <= dates[dates.length - 1])
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
+  const xLabels = spanSeasons.map((s, i) => {
+    const cx = Math.min(X1, Math.max(X0, x(s.start_date > dates[0] ? s.start_date : dates[0])));
+    const anchor = i === 0 ? 'start' : i === spanSeasons.length - 1 ? 'end' : 'middle';
+    const px = anchor === 'end' ? X1 : anchor === 'start' ? X0 : cx;
+    return `<text x="${px}" y="300" text-anchor="${anchor}" font-size="12" fill="rgba(255,255,255,.5)">${esc(s.name)}</text>`;
+  }).join('');
+
+  return `
+    <svg class="pp-chart pp-chart-${variant}" viewBox="0 0 640 320" role="img" aria-label="Ladder position over time">
+      ${gridY.map((pos, i) => {
+        const gy = Y0 + (i / 2) * (Y1 - Y0);
+        return `<line x1="${X0}" y1="${gy}" x2="${X1}" y2="${gy}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+                <text x="26" y="${gy + 4}" text-anchor="end" font-size="12" fill="rgba(255,255,255,.5)">#${pos}</text>`;
+      }).join('')}
+      <path d="${area}" fill="#8fa8ff" fill-opacity="0.14"/>
+      <polyline points="${pts.join(' ')}" fill="none" stroke="#8fa8ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+      ${markers}
+      <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="6" fill="#fff"/>
+      <text x="${Math.min(X1 - 8, lastX).toFixed(1)}" y="${(lastY - 17).toFixed(1)}" text-anchor="middle" font-family="Barlow, sans-serif" font-size="17" font-weight="700" fill="#fff">#${lastPt.position}</text>
+      ${xLabels}
+    </svg>`;
+}
 // ===== PROFILE PHOTO =====
 function openPhotoModal(player) {
   modal.open('Profile Photo', `
