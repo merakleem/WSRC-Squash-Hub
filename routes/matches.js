@@ -2,7 +2,7 @@ const express = require('express');
 const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
-const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
+const { sendEmail, isConfigured: emailConfigured } = require('../lib/email');
 
 const router = express.Router();
 
@@ -181,8 +181,7 @@ router.post('/matches/:id/message-opponent', requireAuth, emailLimiter, wrap(asy
   const { message } = req.body;
   if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required.' });
 
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'Email service is not configured.' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'Email service is not configured.' });
 
   const db = getDB();
   const match = db.prepare(`
@@ -211,25 +210,17 @@ router.post('/matches/:id/message-opponent', requireAuth, emailLimiter, wrap(asy
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: RESEND_FROM,
-      reply_to: sender.email,
-      to: [opponent.email],
-      subject: `Message from ${sender.name} via Play WSRC`,
-      html: `<p>Hi ${opponent.name},</p>
+  const result = await sendEmail({
+    reply_to: sender.email,
+    to: [opponent.email],
+    subject: `Message from ${sender.name} via Play WSRC`,
+    html: `<p>Hi ${opponent.name},</p>
 <p>${sender.name} sent you a message through Play WSRC:</p>
 <blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
 <p style="color:#6b7e93;font-size:12px">Reply to this email to respond directly to ${sender.name}. This message was sent through Play WSRC.</p>`,
-    }),
   });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    return res.status(502).json({ error: err.message || 'Failed to send message.' });
-  }
+  if (!result.ok) return res.status(502).json({ error: result.error });
 
   res.json({ ok: true });
 }));

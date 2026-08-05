@@ -5,7 +5,7 @@ const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
-const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
+const { sendBatch, isConfigured: emailConfigured, appUrl } = require('../lib/email');
 
 const router = express.Router();
 
@@ -90,8 +90,7 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
   const { subject, body, attachments } = req.body;
   if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required' });
 
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
   const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
   const recipients = players.filter((p) => p.player_email);
@@ -101,31 +100,18 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
 
-  // Resend batch API: up to 100 emails per request, avoiding per-email rate limits
-  const BATCH_SIZE = 100;
-  let sent = 0;
-  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-    const chunk = recipients.slice(i, i + BATCH_SIZE);
-    const batch = chunk.map((player) => ({
-      from: RESEND_FROM,
-      to: [player.player_email],
-      subject,
-      html: `<p>${htmlBody}</p>`,
-      ...(attachments && attachments.length ? { attachments } : {}),
-    }));
-    const response = await fetch('https://api.resend.com/emails/batch', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(batch),
-    });
-    if (response.ok) sent += chunk.length;
-  }
-  res.json({ sent });
+  const { sent, failed } = await sendBatch(recipients.map((player) => ({
+    to: [player.player_email],
+    subject,
+    html: `<p>${htmlBody}</p>`,
+    ...(attachments && attachments.length ? { attachments } : {}),
+  })));
+
+  res.json({ sent, failed });
 }));
 
 router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
   const db = getDB();
   const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
@@ -138,7 +124,7 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
 
   if (eligible.length === 0) return res.json({ sent: 0 });
 
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const baseUrl = appUrl(req);
   const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
 
   const batch = eligible.map((p) => {
@@ -149,7 +135,6 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
       ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires
     `).run(p.player_id, token, expires);
     return {
-      from: RESEND_FROM,
       to: [p.player_email],
       subject: 'Activate your Play WSRC account',
       html: `<p>Hi ${p.player_name},</p>
@@ -159,19 +144,9 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
     };
   });
 
-  const BATCH_SIZE = 100;
-  let sent = 0;
-  for (let i = 0; i < batch.length; i += BATCH_SIZE) {
-    const chunk = batch.slice(i, i + BATCH_SIZE);
-    const response = await fetch('https://api.resend.com/emails/batch', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(chunk),
-    });
-    if (response.ok) sent += chunk.length;
-  }
+  const { sent, failed } = await sendBatch(batch);
 
-  res.json({ sent });
+  res.json({ sent, failed });
 }));
 
 router.get('/configs/:numPlayers', wrap(async (req, res) => {

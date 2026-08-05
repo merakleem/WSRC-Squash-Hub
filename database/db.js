@@ -54,9 +54,20 @@ function initDB(dbPath) {
     `CREATE TABLE IF NOT EXISTS pickup_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, player1_id INTEGER NOT NULL, player2_id INTEGER NOT NULL, player1_score INTEGER NOT NULL, player2_score INTEGER NOT NULL, winner_id INTEGER NOT NULL, submitted_by_player_id INTEGER, played_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (player1_id) REFERENCES players(id), FOREIGN KEY (player2_id) REFERENCES players(id), FOREIGN KEY (winner_id) REFERENCES players(id), FOREIGN KEY (submitted_by_player_id) REFERENCES players(id))`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_players_email ON players (LOWER(email)) WHERE email IS NOT NULL AND email != ''`,
     `ALTER TABLE players ADD COLUMN is_tester INTEGER NOT NULL DEFAULT 0`,
+    `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
+    `ALTER TABLE players ADD COLUMN photo_path TEXT`,
   ];
   for (const sql of migrations) {
-    try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }
+    try {
+      db.prepare(sql).run();
+    } catch (err) {
+      // "duplicate column name" just means the migration already ran — expected.
+      // Anything else is a real failure and must not pass silently, or the app
+      // boots looking healthy and then throws at query time.
+      if (!/duplicate column name/i.test(err.message)) {
+        console.error(`[migration] FAILED: ${sql}\n           ${err.message}`);
+      }
+    }
   }
 
   // Make league_players.team_id nullable for modern leagues (SQLite requires table recreation)

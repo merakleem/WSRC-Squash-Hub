@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const { initDB, getDB } = require('./database/db');
 const { getSession, requireCsrf } = require('./middleware');
+const { ensureDir: ensureAvatarDir, AVATAR_DIR, AVATAR_URL_BASE } = require('./lib/photos');
 
 const PORT = process.env.PORT || 8080;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
@@ -48,6 +49,12 @@ app.use((req, res, next) => {
 // CSRF validation on all mutating API calls
 app.use('/api', requireCsrf);
 
+// Profile photos (behind the auth guard — member photos are not public).
+// Filenames are content-hashed, so these are safe to cache aggressively.
+app.use(AVATAR_URL_BASE, express.static(AVATAR_DIR, {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
+}));
+
 // Renderer SPA (no caching — auth check must run before this)
 app.use(express.static(path.join(__dirname, 'renderer'), {
   etag: false,
@@ -75,6 +82,7 @@ app.use('/api', require('./routes/schedule'));
 app.use('/api', require('./routes/bookings'));
 app.use('/api', require('./routes/courts'));
 app.use('/api', require('./routes/tournaments'));
+app.use('/api', require('./routes/settings'));
 
 // ===== 404 =====
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
@@ -82,6 +90,7 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 // ===== START =====
 async function start() {
   await initDB(DB_PATH);
+  ensureAvatarDir();
   app.listen(PORT, () => {
     console.log('');
     console.log('  Play WSRC is running!');

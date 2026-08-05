@@ -2,8 +2,10 @@ const express = require('express');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
-const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
+const { sendEmail, isConfigured: emailConfigured, appUrl } = require('../lib/email');
 const playerService = require('../services/playerService');
+const playerModel = require('../models/playerModel');
+const { savePlayerPhoto, deletePlayerPhoto } = require('../lib/photos');
 const tournamentModel = require('../models/tournamentModel');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
 
@@ -109,7 +111,6 @@ router.delete('/players/:id', requireAdmin, wrap(async (req, res) => {
 
 router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return res.status(404).json({ error: 'Player not found' });
@@ -122,27 +123,18 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
     ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`
   ).run(playerId, token, expires);
 
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  const inviteUrl = `${baseUrl}/invite/${token}`;
+  const inviteUrl = `${appUrl(req)}/invite/${token}`;
 
-  if (RESEND_API_KEY && player.email) {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: RESEND_FROM,
-        to: player.email,
-        subject: 'Activate your Play WSRC account',
-        html: `<p>Hi ${player.name},</p>
+  if (emailConfigured() && player.email) {
+    const result = await sendEmail({
+      to: player.email,
+      subject: 'Activate your Play WSRC account',
+      html: `<p>Hi ${player.name},</p>
 <p>You've been invited to create an account on Play WSRC.</p>
 <p><a href="${inviteUrl}">Click here to activate your account</a></p>
 <p>This link expires in 72 hours.</p>`,
-      }),
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      return res.status(502).json({ error: err.message || 'Failed to send email.', inviteUrl });
-    }
+    if (!result.ok) return res.status(502).json({ error: result.error, inviteUrl });
     return res.json({ ok: true, emailSent: true, inviteUrl });
   }
 
@@ -151,7 +143,6 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
 
 router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return res.status(404).json({ error: 'Player not found' });
@@ -164,27 +155,18 @@ router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (r
 
   db.prepare('UPDATE user_accounts SET reset_token = ?, reset_expires = ? WHERE player_id = ?').run(token, expires, playerId);
 
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  const resetUrl = `${baseUrl}/reset-password/${token}`;
+  const resetUrl = `${appUrl(req)}/reset-password/${token}`;
 
-  if (RESEND_API_KEY && player.email) {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: RESEND_FROM,
-        to: player.email,
-        subject: 'Reset your Play WSRC password',
-        html: `<p>Hi ${player.name},</p>
+  if (emailConfigured() && player.email) {
+    const result = await sendEmail({
+      to: player.email,
+      subject: 'Reset your Play WSRC password',
+      html: `<p>Hi ${player.name},</p>
 <p>A password reset was requested for your Play WSRC account.</p>
 <p><a href="${resetUrl}">Click here to reset your password</a></p>
 <p>This link expires in 24 hours. If you did not request this, you can ignore this email.</p>`,
-      }),
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      return res.status(502).json({ error: err.message || 'Failed to send email.', resetUrl });
-    }
+    if (!result.ok) return res.status(502).json({ error: result.error, resetUrl });
     return res.json({ ok: true, emailSent: true, resetUrl });
   }
 
@@ -201,8 +183,7 @@ router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, 
   const { message } = req.body;
   if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required.' });
 
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'Email service is not configured.' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'Email service is not configured.' });
 
   const db = getDB();
   const sender    = db.prepare('SELECT name, email FROM players WHERE id = ?').get(senderId);
@@ -217,27 +198,63 @@ router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, 
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: RESEND_FROM,
-      reply_to: sender.email,
-      to: [recipient.email],
-      subject: `Message from ${sender.name} via Play WSRC`,
-      html: `<p>Hi ${recipient.name},</p>
+  const result = await sendEmail({
+    reply_to: sender.email,
+    to: [recipient.email],
+    subject: `Message from ${sender.name} via Play WSRC`,
+    html: `<p>Hi ${recipient.name},</p>
 <p>${sender.name} sent you a message through Play WSRC:</p>
 <blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
 <p style="color:#6b7e93;font-size:12px">Reply to this email to respond directly to ${sender.name}. This message was sent through Play WSRC.</p>`,
-    }),
   });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    return res.status(502).json({ error: err.message || 'Failed to send message.' });
-  }
+  if (!result.ok) return res.status(502).json({ error: result.error });
 
   res.json({ ok: true });
+}));
+
+// ===== PROFILE PHOTOS =====
+// A player may set their own photo; an admin may set anyone's.
+function _canEditPhoto(req, playerId) {
+  return req.session?.role === 'admin' || req.session?.playerId === playerId;
+}
+
+router.put('/players/:id/photo', requireAuth, wrap(async (req, res) => {
+  const playerId = Number(req.params.id);
+  if (!_canEditPhoto(req, playerId)) return res.status(403).json({ error: 'You can only change your own photo.' });
+
+  const { image } = req.body;
+  if (!image) return res.status(400).json({ error: 'No image supplied.' });
+
+  const player = await playerService.getPlayerById(playerId);
+  if (!player) return res.status(404).json({ error: 'Player not found' });
+
+  let photoPath;
+  try {
+    photoPath = savePlayerPhoto(playerId, image);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  // Only remove the previous file once the new one is safely written.
+  const previous = player.photo_path;
+  const updated = await playerModel.setPlayerPhoto(playerId, photoPath);
+  if (previous && previous !== photoPath) deletePlayerPhoto(previous);
+
+  res.json({ ok: true, photo_path: updated.photo_path });
+}));
+
+router.delete('/players/:id/photo', requireAuth, wrap(async (req, res) => {
+  const playerId = Number(req.params.id);
+  if (!_canEditPhoto(req, playerId)) return res.status(403).json({ error: 'You can only change your own photo.' });
+
+  const player = await playerService.getPlayerById(playerId);
+  if (!player) return res.status(404).json({ error: 'Player not found' });
+
+  await playerModel.setPlayerPhoto(playerId, null);
+  deletePlayerPhoto(player.photo_path);
+
+  res.json({ ok: true, photo_path: null });
 }));
 
 module.exports = router;

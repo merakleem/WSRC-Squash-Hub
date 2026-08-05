@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal } from '../utils.js';
+import { esc, toast, modal, avatarHTML } from '../utils.js';
 
 // ===== LADDER PAGE =====
 export async function renderLadder() {
@@ -29,12 +29,6 @@ export async function renderLadder() {
   }
 
   const myId  = state.currentUser?.playerId;
-  const playerInitials = (name) => {
-    if (!name) return '?';
-    const parts = name.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  };
 
   const rankChangeBadge = (change) => {
     if (!change || change === 0) return '';
@@ -51,7 +45,7 @@ export async function renderLadder() {
       <div class="ldr-all-row${isMe ? ' ldr-all-me' : ''}" data-action="view-profile" data-id="${p.id}">
         <span class="ldr-all-rank">${rank}</span>
         <div class="ldr-all-player">
-          <div class="ldr-avatar ldr-avatar-sm">${playerInitials(p.name)}</div>
+          ${avatarHTML(p, 'ldr-avatar ldr-avatar-sm')}
           <span class="ldr-all-name">${esc(p.name)}${isMe ? '<span class="ldr-you-chip">YOU</span>' : ''}</span>
           ${rankChangeBadge(p.rank_change)}
         </div>

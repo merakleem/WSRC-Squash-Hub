@@ -13,7 +13,7 @@ function getLadder() {
   const db = getDB();
 
   const players = db.prepare(`
-    SELECT id, name, email, phone, exclude_from_ladder, club_locker_rating
+    SELECT id, name, email, phone, exclude_from_ladder, club_locker_rating, photo_path
     FROM players
     WHERE exclude_from_ladder = 0 OR exclude_from_ladder IS NULL
     ORDER BY

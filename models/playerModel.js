@@ -27,6 +27,12 @@ function deletePlayer(id) {
   getDB().prepare('DELETE FROM players WHERE id = ?').run(Number(id));
 }
 
+// Kept separate from updatePlayer so an ordinary player edit can't clear a photo.
+function setPlayerPhoto(id, photoPath) {
+  getDB().prepare('UPDATE players SET photo_path = ? WHERE id = ?').run(photoPath, Number(id));
+  return getPlayerById(id);
+}
+
 /**
  * All completed matches for a player with context (league, week, opponent, score, result).
  * Handles subs on either side.
@@ -275,6 +281,6 @@ function getPlayerUpcomingMatches(id) {
 }
 
 module.exports = {
-  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer,
+  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, setPlayerPhoto,
   getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
 };

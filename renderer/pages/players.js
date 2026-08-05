@@ -1,5 +1,5 @@
 import { state, isAdmin, isTester } from '../state.js';
-import { esc, formatDate, formatShortDate, toast, modal } from '../utils.js';
+import { esc, formatDate, formatShortDate, toast, modal, avatarHTML, playerInitials } from '../utils.js';
 
 // ===== PLAYERS PAGE =====
 export async function renderPlayers() {
@@ -741,6 +741,9 @@ export function renderPlayerProfile() {
         </tbody>
       </table>`;
 
+  // A player may change their own photo; an admin may change anyone's.
+  const canEditPhoto = adminMode || state.currentUser?.playerId === p.id;
+
   const acctBadgeHTML = adminMode ? (() => {
     if (acctStatus === 'verified') return `<span class="acct-badge acct-badge-verified">Verified</span>`;
     if (!hasEmail) return `<span class="acct-badge acct-badge-none">No Email</span>`;
@@ -750,7 +753,11 @@ export function renderPlayerProfile() {
   document.getElementById('mainContent').innerHTML = `
     <div class="profile-header-card">
       <div class="profile-info">
-        <div class="profile-avatar">${esc(p.name.charAt(0).toUpperCase())}</div>
+        ${canEditPhoto ? `
+          <button class="profile-avatar-btn" id="btnEditPhoto" title="Change photo">
+            ${avatarHTML(p, 'profile-avatar')}
+            <span class="profile-avatar-edit">Edit</span>
+          </button>` : avatarHTML(p, 'profile-avatar')}
         <div>
           <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">${esc(p.name)}</h2>
           ${adminMode && p.email ? `<div class="text-muted" style="font-size:13px">${esc(p.email)}</div>` : ''}
@@ -783,6 +790,66 @@ export function renderPlayerProfile() {
 
   document.getElementById('mainContent').querySelectorAll('.nav-player-link').forEach((el) => {
     el.addEventListener('click', () => window.openPlayerProfile(Number(el.dataset.playerId)));
+  });
+
+  document.getElementById('btnEditPhoto')?.addEventListener('click', () => openPhotoModal(p));
+}
+
+// ===== PROFILE PHOTO =====
+function openPhotoModal(player) {
+  modal.open('Profile Photo', `
+    <div class="photo-modal">
+      <div class="photo-preview" id="photoPreview">
+        ${player.photo_path
+          ? `<img src="${esc(player.photo_path)}" alt="">`
+          : `<span>${esc(playerInitials(player.name))}</span>`}
+      </div>
+      <p class="form-hint">JPEG, PNG, WebP or GIF. Maximum 5 MB.</p>
+      <input type="file" id="fPhotoFile" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none">
+      <div class="form-actions">
+        ${player.photo_path ? `<button class="btn btn-danger" id="fPhotoRemove">Remove</button>` : ''}
+        <button class="btn btn-outline" id="fPhotoCancel">Cancel</button>
+        <button class="btn btn-primary" id="fPhotoChoose">Choose Image</button>
+      </div>
+    </div>`);
+
+  const fileInput = document.getElementById('fPhotoFile');
+
+  document.getElementById('fPhotoCancel').addEventListener('click', modal.close);
+  document.getElementById('fPhotoChoose').addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) return toast('Image is too large. Maximum size is 5 MB.', 'error');
+
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Could not read that file.'));
+      reader.readAsDataURL(file);
+    }).catch((err) => { toast(err.message, 'error'); return null; });
+    if (!dataUrl) return;
+
+    try {
+      await window.api.setPlayerPhoto(player.id, dataUrl);
+      modal.close();
+      toast('Photo updated');
+      await window.openPlayerProfile(player.id);
+    } catch (err) {
+      toast(err.message || 'Could not save photo', 'error');
+    }
+  });
+
+  document.getElementById('fPhotoRemove')?.addEventListener('click', async () => {
+    try {
+      await window.api.deletePlayerPhoto(player.id);
+      modal.close();
+      toast('Photo removed');
+      await window.openPlayerProfile(player.id);
+    } catch (err) {
+      toast(err.message || 'Could not remove photo', 'error');
+    }
   });
 }
 

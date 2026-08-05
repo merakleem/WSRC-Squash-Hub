@@ -20,6 +20,29 @@ export function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// ===== AVATARS =====
+
+// Single source of truth for initials — the ladder and profile previously
+// disagreed (two letters vs one).
+export function playerInitials(name) {
+  if (!name) return '?';
+  const parts = String(name).trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/**
+ * Avatar markup for a player: their photo when set, initials otherwise.
+ * `className` carries the size modifier (e.g. 'ldr-avatar ldr-avatar-sm').
+ */
+export function avatarHTML(player, className) {
+  const name = player?.name || '';
+  if (player?.photo_path) {
+    return `<div class="${className} has-photo"><img src="${esc(player.photo_path)}" alt="${esc(name)}" loading="lazy"></div>`;
+  }
+  return `<div class="${className}">${esc(playerInitials(name))}</div>`;
+}
+
 // ===== TOAST =====
 export function toast(msg, type = 'default') {
   const container = document.getElementById('toastContainer');
