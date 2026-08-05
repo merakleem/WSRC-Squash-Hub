@@ -832,7 +832,6 @@ export function renderPlayerProfile() {
     <div class="pp-detail-strip">
       <div><span class="pp-fig">${stats.gamesWon}–${stats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
       <div><span class="pp-fig">${stats.gameWinPct === null ? '—' : `${stats.gameWinPct}%`}</span><span class="pp-fig-label">Game win rate</span></div>
-      <div><span class="pp-fig">${stats.longestWinStreak}</span><span class="pp-fig-label">Best run</span></div>
       <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
       <div><span class="pp-fig">${tournamentResults.length}</span><span class="pp-fig-label">Tournaments</span></div>
     </div>`;
@@ -953,8 +952,7 @@ export function renderPlayerProfile() {
           <div class="pp-bar pp-bar-lg"><span style="width:${stats.winPct || 0}%"></span></div>
           <div class="pp-figures">
             <div><span class="pp-fig">${stats.gamesWon}–${stats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
-            <div><span class="pp-fig">${stats.longestWinStreak}</span><span class="pp-fig-label">Best run</span></div>
-            <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
+                  <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
           </div>`}
       </div>
 
@@ -1030,13 +1028,6 @@ function _profileStats(rows) {
   const gamesLost = rows.reduce((s, m) => s + (Number(m.their_score) || 0), 0);
   const gamesTotal = gamesWon + gamesLost;
 
-  let longestWinStreak = 0;
-  let run = 0;
-  for (const m of [...rows].reverse()) {
-    run = m.result === 'W' ? run + 1 : 0;
-    if (run > longestWinStreak) longestWinStreak = run;
-  }
-
   let currentStreak = 0;
   let streakType = null;
   for (const m of rows) {
@@ -1050,7 +1041,7 @@ function _profileStats(rows) {
     winPct: played > 0 ? Math.round((wins / played) * 100) : null,
     gamesWon, gamesLost, gamesTotal,
     gameWinPct: gamesTotal > 0 ? Math.round((gamesWon / gamesTotal) * 100) : null,
-    longestWinStreak, currentStreak, streakType: currentStreak ? streakType : null,
+    currentStreak, streakType: currentStreak ? streakType : null,
   };
 }
 
