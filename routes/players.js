@@ -56,11 +56,22 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   const tournUpcoming = tournamentModel.getPlayerTournamentUpcoming(id);
 
   const pickupHistory = playerService.getPickupMatchHistory(id);
+
+  // Rating movement per match, present only for matches in a rated season.
+  const ratingDeltas = ladderModel.getPlayerMatchRatingDeltas(id);
+  const withDelta = (m) => {
+    // Tournament rows carry a prefixed id ("t_12") to keep them unique in the
+    // merged list; the delta map is keyed on the raw table id.
+    const rawId = m.source === 'tournament' ? String(m.id).replace(/^t_/, '') : m.id;
+    const delta = ratingDeltas[`${m.source}:${rawId}`];
+    return delta === undefined ? m : { ...m, rating_change: delta };
+  };
+
   const history = [
     ...leagueHistory.map((m) => ({ ...m, source: 'league' })),
     ...tournHistory,
     ...pickupHistory,
-  ].sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''));
+  ].map(withDelta).sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''));
   const upcoming = [...leagueUpcoming.map((m) => ({ ...m, source: 'league' })), ...tournUpcoming]
     .sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
 

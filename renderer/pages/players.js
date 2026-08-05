@@ -708,7 +708,6 @@ export function renderPlayerProfile() {
     : activeSeason === 'none' ? 'Unassigned' : (seasonsById[activeSeason]?.name || 'Season');
 
   const stats = _profileStats(history);
-  const allTimeStats = _profileStats(allHistory);
 
   const ladder = p.ladder || {};
   const ladderSeries = p.ladder_history || [];
@@ -780,15 +779,15 @@ export function renderPlayerProfile() {
     </div>`;
 
   // ===== PANELS =====
+  // Season and Past seasons are gone: the season pill in the header already
+  // controls the period, so both were a second way to do the same thing.
   const TABS = [
-    { key: 'season', label: 'Season' },
     { key: 'results', label: 'Results' },
     { key: 'upcoming', label: 'Upcoming' },
     { key: 'tournaments', label: 'Tournaments' },
     { key: 'ladder', label: 'Ladder history' },
-    { key: 'past', label: 'Past seasons' },
   ];
-  const activeTab = TABS.some((t) => t.key === _profileTab) ? _profileTab : 'season';
+  const activeTab = TABS.some((t) => t.key === _profileTab) ? _profileTab : 'results';
 
   const tabBarHTML = `
     <div class="pp-tabs" role="tablist">
@@ -807,6 +806,10 @@ export function renderPlayerProfile() {
     const opponent = m.opponent_id
       ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
       : esc(m.opponent_name);
+    // Only matches in a rated season carry a rating change.
+    const delta = m.rating_change;
+    const deltaHTML = delta === undefined || delta === null ? '' : `
+      <span class="pp-row-delta ${delta >= 0 ? 'pp-delta-up' : 'pp-delta-down'}">${delta >= 0 ? '+' : ''}${delta}</span>`;
     return `
       <div class="pp-row">
         <span class="pp-chip ${won ? 'pp-chip-w' : 'pp-chip-l'}">${won ? 'W' : 'L'}</span>
@@ -814,6 +817,7 @@ export function renderPlayerProfile() {
           <span class="pp-row-title">${opponent}</span>
           <span class="pp-row-sub">${context}</span>
         </div>
+        ${deltaHTML}
         <span class="pp-row-score">${m.my_score}–${m.their_score}</span>
         ${compact ? '' : `<span class="pp-row-date">${formatShortDate(m.week_date)}</span>`}
       </div>`;
@@ -821,39 +825,18 @@ export function renderPlayerProfile() {
 
   const emptyBlock = (msg) => `<div class="empty-state"><strong>${esc(msg)}</strong></div>`;
 
-  // -- Season panel --
-  const recentResults = history.slice(0, 5);
-  const seasonPanelHTML = `
-    <div class="pp-season-grid">
-      <div class="pp-col">
-        <div class="pp-card">
-          <div class="pp-card-head">
-            <span class="pp-card-label">Results this season</span>
-            ${history.length > 5 ? `<button class="pp-link" data-pp-tab="results">Show all ${history.length}</button>` : ''}
-          </div>
-          ${recentResults.length ? recentResults.map((m) => resultRow(m)).join('') : emptyBlock('No matches played this season')}
-        </div>
-      </div>
-      <div class="pp-col">
-        <div class="pp-card pp-card-pad">
-          <span class="pp-card-label">Season detail</span>
-          <div class="pp-detail-row">
-            <span class="pp-detail-key">Games won</span>
-            <span class="pp-detail-val">${stats.gamesWon}–${stats.gamesLost}
-              <span class="pp-detail-sub">${stats.gameWinPct === null ? '—' : `${stats.gameWinPct}%`}</span></span>
-          </div>
-          <div class="pp-bar"><span style="width:${stats.gameWinPct || 0}%"></span></div>
-          <div class="pp-figures">
-            <div><span class="pp-fig">${stats.longestWinStreak}</span><span class="pp-fig-label">Best run</span></div>
-            <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
-            <div><span class="pp-fig">${tournamentResults.length}</span><span class="pp-fig-label">Tournaments</span></div>
-          </div>
-        </div>
-        ${_quickLinksHTML(upcoming.length, tournamentResults.length, allTimeStats)}
-      </div>
+  // -- Results panel --
+  // Carries the season-detail figures that used to live on the Season tab, so
+  // removing that tab doesn't lose them from the desktop view.
+  const detailStripHTML = stats.played === 0 ? '' : `
+    <div class="pp-detail-strip">
+      <div><span class="pp-fig">${stats.gamesWon}–${stats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
+      <div><span class="pp-fig">${stats.gameWinPct === null ? '—' : `${stats.gameWinPct}%`}</span><span class="pp-fig-label">Game win rate</span></div>
+      <div><span class="pp-fig">${stats.longestWinStreak}</span><span class="pp-fig-label">Best run</span></div>
+      <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
+      <div><span class="pp-fig">${tournamentResults.length}</span><span class="pp-fig-label">Tournaments</span></div>
     </div>`;
 
-  // -- Results panel --
   const sourceFilters = [
     { key: 'all', label: 'All' },
     { key: 'league', label: 'League' },
@@ -876,6 +859,7 @@ export function renderPlayerProfile() {
             <button class="pp-filter${_profileResultFilter === f.key ? ' active' : ''}" data-pp-filter="${f.key}">${f.label}</button>`).join('')}
         </div>
       </div>
+      ${detailStripHTML}
       ${filtered.length ? filtered.map((m) => resultRow(m)).join('') : emptyBlock('No matches for this filter')}
     </div>`;
 
@@ -936,44 +920,11 @@ export function renderPlayerProfile() {
       </div>
     </div>`;
 
-  // -- Past seasons panel --
-  const pastRows = playedSeasonIds.map((id) => {
-    const s = seasonsById[id];
-    const st = _profileStats(allHistory.filter((m) => m.season_id === id));
-    const best = _bestRankInWindow(ladderSeries, s);
-    return { id, name: s?.name || 'Season', st, best, isCurrent: !!s?.is_current };
-  });
-  const pastPanelHTML = `
-    <div class="pp-card">
-      <div class="pp-card-head">
-        <span class="pp-card-label">Season by season</span>
-        <span class="pp-card-sub">select a season to load it above</span>
-      </div>
-      ${pastRows.length ? pastRows.map((r) => `
-        <div class="pp-row pp-row-lg pp-past-row${r.isCurrent ? ' pp-row-next' : ''}" data-pp-season="${r.id}">
-          <span class="pp-past-name">${esc(r.name)}</span>
-          <span class="pp-past-rec">${r.st.wins}–${r.st.losses}</span>
-          <span class="pp-bar pp-bar-inline"><span style="width:${r.st.winPct || 0}%"></span></span>
-          <span class="pp-past-pct">${r.st.winPct === null ? '—' : `${r.st.winPct}%`}</span>
-          <span class="pp-past-best">${r.best ? `Best rank #${r.best}` : ''}</span>
-          ${r.isCurrent ? `<span class="pp-next-chip">Current</span>` : `<svg class="pp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>`}
-        </div>`).join('') : emptyBlock('No season history yet')}
-      <div class="pp-row pp-row-lg pp-past-total">
-        <span class="pp-past-name">All time</span>
-        <span class="pp-past-rec">${allTimeStats.wins}–${allTimeStats.losses}</span>
-        <span class="pp-bar pp-bar-inline pp-bar-navy"><span style="width:${allTimeStats.winPct || 0}%"></span></span>
-        <span class="pp-past-pct">${allTimeStats.winPct === null ? '—' : `${allTimeStats.winPct}%`}</span>
-        <span class="pp-past-best">${ladder.best_position ? `Best rank #${ladder.best_position}` : ''}</span>
-      </div>
-    </div>`;
-
   const panels = {
-    season: seasonPanelHTML,
     results: resultsPanelHTML,
     upcoming: upcomingPanelHTML,
     tournaments: tournPanelHTML,
     ladder: ladderPanelHTML || emptyBlock('Not on the ladder'),
-    past: pastPanelHTML,
   };
 
   // ===== MOBILE =====
@@ -1023,7 +974,7 @@ export function renderPlayerProfile() {
           ${_ladderChartHTML(ladderSeries, seasons, 'mobile')}
         </div>`}
 
-      ${_quickLinksHTML(upcoming.length, tournamentResults.length, allTimeStats)}
+      ${_quickLinksHTML(upcoming.length, tournamentResults.length)}
     </div>`;
 
   document.getElementById('mainContent').innerHTML = `
@@ -1056,15 +1007,6 @@ export function renderPlayerProfile() {
   content.querySelectorAll('[data-pp-filter]').forEach((el) => {
     el.addEventListener('click', () => {
       _profileResultFilter = el.dataset.ppFilter;
-      renderPlayerProfile();
-    });
-  });
-
-  content.querySelectorAll('[data-pp-season]').forEach((el) => {
-    el.addEventListener('click', () => {
-      _profileSeason = Number(el.dataset.ppSeason);
-      _profileSeasonFor = p.id;
-      _profileTab = 'season';
       renderPlayerProfile();
     });
   });
@@ -1122,7 +1064,7 @@ function _bestRankInWindow(series, season) {
   return Math.min(...within.map((pt) => pt.position));
 }
 
-function _quickLinksHTML(upcomingCount, tournCount, allTimeStats) {
+function _quickLinksHTML(upcomingCount, tournCount) {
   const chev = `<svg class="pp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>`;
   return `
     <div class="pp-card pp-quick">
@@ -1133,10 +1075,6 @@ function _quickLinksHTML(upcomingCount, tournCount, allTimeStats) {
       <button class="pp-quick-row" data-pp-tab="tournaments">
         <span class="pp-quick-label">Tournaments</span>
         <span class="pp-quick-meta">${tournCount}</span>${chev}
-      </button>
-      <button class="pp-quick-row" data-pp-tab="past">
-        <span class="pp-quick-label">Past seasons</span>
-        <span class="pp-quick-meta">All time ${allTimeStats.wins}–${allTimeStats.losses}</span>${chev}
       </button>
     </div>`;
 }

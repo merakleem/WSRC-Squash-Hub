@@ -91,15 +91,14 @@ export async function renderLadder() {
     ? { wins: p.season_wins || 0, losses: p.season_losses || 0 }
     : (records[p.id] || { wins: 0, losses: 0 }));
 
+  // Movement is shown as places gained or lost beside the name, the same as the
+  // positional ladder. The rating column carries the number only.
   const ratingCell = (p) => {
     if (!isElo) return '';
-    const delta = p.rating_change;
-    const badge = ladderResult.frozen || !delta ? ''
-      : `<span class="ldr-rating-delta ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : ''}${delta}</span>`;
     const idle = p.inactive_months > 0
       ? `<span class="ldr-idle" title="${p.inactive_months} month${p.inactive_months === 1 ? '' : 's'} without a match: −${p.inactivity_penalty}">idle</span>`
       : '';
-    return `<span class="ldr-all-stat ldr-col-rating">${p.rating ?? '—'}${badge}${idle}</span>`;
+    return `<span class="ldr-all-stat ldr-col-rating">${p.rating ?? '—'}${idle}</span>`;
   };
 
   const allRowHTML = (p, rank) => {
@@ -113,7 +112,7 @@ export async function renderLadder() {
         <div class="ldr-all-player">
           ${avatarHTML(p, 'ldr-avatar ldr-avatar-sm')}
           <span class="ldr-all-name">${esc(p.name)}${isMe ? '<span class="ldr-you-chip">YOU</span>' : ''}</span>
-          ${isElo ? '' : rankChangeBadge(p.rank_change)}
+          ${ladderResult.frozen ? '' : rankChangeBadge(p.rank_change)}
         </div>
         ${ratingCell(p)}
         <span class="ldr-all-stat ldr-col-won">${rec.wins}</span>

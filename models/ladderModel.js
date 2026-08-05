@@ -28,6 +28,7 @@ function getCompletedMatches(seasonId = null) {
 
   const leagueMatches = db.prepare(`
     SELECT
+      m.id AS match_id, 'league' AS source,
       m.winner_id, m.player1_id, m.player2_id,
       COALESCE(s1.sub_player_id, m.player1_id) AS eff_p1_id,
       COALESCE(s2.sub_player_id, m.player2_id) AS eff_p2_id,
@@ -45,6 +46,7 @@ function getCompletedMatches(seasonId = null) {
 
   const tournamentMatches = db.prepare(`
     SELECT
+      tm.id AS match_id, 'tournament' AS source,
       tm.winner_id, tm.player1_id, tm.player2_id,
       tm.player1_id AS eff_p1_id, tm.player2_id AS eff_p2_id,
       COALESCE(tm.confirmed_at, tm.match_date) AS sort_key
@@ -58,6 +60,7 @@ function getCompletedMatches(seasonId = null) {
 
   const pickupMatches = db.prepare(`
     SELECT
+      pm.id AS match_id, 'pickup' AS source,
       pm.winner_id, pm.player1_id, pm.player2_id,
       pm.player1_id AS eff_p1_id, pm.player2_id AS eff_p2_id,
       pm.played_at AS sort_key
@@ -374,10 +377,33 @@ function computeEloLadder(season, settings, asOfDate = null, { includeHidden = f
 
   rows.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
 
+  // Movement is reported as places gained or lost, not points, matching how the
+  // ladder has always read. Same 7-day window the positional ladder uses.
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const priorRatings = { ...seeds };
+  for (const match of matches) {
+    if (String(match.sort_key || '').slice(0, 10) > weekAgo) break;
+    const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
+    const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+    if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
+    const r = elo.applyMatch(priorRatings[winnerId], priorRatings[loserId], cfg.elo_k_factor);
+    priorRatings[winnerId] = r.winner;
+    priorRatings[loserId] = r.loser;
+  }
+  const priorOrder = rows
+    .map((r) => r.id)
+    .sort((a, b) => priorRatings[b] - priorRatings[a]);
+  const priorPos = Object.fromEntries(priorOrder.map((id, i) => [id, i + 1]));
+
   // Best position within this season needs a per-match replay of the ordering,
   // which is more work than it is worth; peak rating is the meaningful
   // equivalent under a rating system and is already implied by rating_change.
-  return rows.map((r, i) => ({ ...r, position: i + 1, best_position: null, rank_change: 0 }));
+  return rows.map((r, i) => ({
+    ...r,
+    position: i + 1,
+    best_position: null,
+    rank_change: (priorPos[r.id] || i + 1) - (i + 1),
+  }));
 }
 
 /**
@@ -592,6 +618,70 @@ function getPlayerLadderHistory(playerId) {
   return series;
 }
 
+/**
+ * Rating change per match for one player, keyed `source:matchId`.
+ *
+ * Only rated seasons produce deltas; a positional season has no rating to
+ * change. Computed by the same replay that produces the ladder, so the numbers
+ * shown on a match always reconcile with the standings.
+ */
+function getPlayerMatchRatingDeltas(playerId) {
+  const db = getDB();
+  const id = Number(playerId);
+  const deltas = {};
+
+  const ratedSeasons = db.prepare(`SELECT * FROM seasons WHERE ladder_system = 'elo'`).all();
+  if (!ratedSeasons.length) return deltas;
+
+  const settings = Object.fromEntries(
+    db.prepare('SELECT key, value FROM settings').all().map((r) => [r.key, r.value])
+  );
+  const cfg = elo.config(settings);
+  const players = db.prepare(PLAYER_SELECT).all();
+  const playerIds = new Set(players.map((p) => p.id));
+  if (!playerIds.has(id)) return deltas;
+
+  for (const season of ratedSeasons) {
+    // Same seeding the ladder uses, so a delta is measured against the rating
+    // the player actually held at that point in the season.
+    const previous = db.prepare(`
+      SELECT * FROM seasons WHERE start_date < ? AND status = 'ended'
+      ORDER BY start_date DESC LIMIT 1
+    `).get(season.start_date);
+    const prior = previous
+      ? db.prepare('SELECT * FROM season_standings WHERE season_id = ?').all(previous.id)
+      : [];
+    const priorById = Object.fromEntries(prior.map((s) => [s.player_id, s]));
+
+    const ratings = {};
+    for (const p of players) {
+      const pr = priorById[p.id];
+      ratings[p.id] = elo.seedRating({
+        previousRating: pr?.rating ?? null,
+        previousPosition: pr?.position ?? null,
+        ladderSize: prior.length,
+        clubLockerRating: p.club_locker_rating,
+      }, cfg);
+    }
+
+    for (const match of getCompletedMatches(season.id)) {
+      const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
+      const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+      if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
+
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
+      ratings[winnerId] = r.winner;
+      ratings[loserId] = r.loser;
+
+      if (winnerId === id || loserId === id) {
+        deltas[`${match.source}:${match.match_id}`] = Math.round(winnerId === id ? r.delta : -r.delta);
+      }
+    }
+  }
+
+  return deltas;
+}
+
 function getPlayerLadderStats(playerId) {
   const ladder = getLadder();
   const row = ladder.find((p) => p.id === Number(playerId));
@@ -600,7 +690,7 @@ function getPlayerLadderStats(playerId) {
 }
 
 module.exports = {
-  getLadder, getPlayerLadderStats, getPlayerLadderHistory, getLadderForSeason, computeEloLadder,
+  getLadder, getPlayerLadderStats, getPlayerLadderHistory, getPlayerMatchRatingDeltas, getLadderForSeason, computeEloLadder,
   freezeSeason, reopenSeason, getFrozenStandings, getSeasonRecords,
   getCompletedMatches, getLastMatchDates,
 };
