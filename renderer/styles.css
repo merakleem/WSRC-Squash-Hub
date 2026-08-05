@@ -1791,6 +1791,19 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   text-transform: uppercase;
   vertical-align: middle;
 }
+.season-ended-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #6b7589;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
 .season-meta {
   font-size: 12px;
   font-weight: 400;
@@ -2801,6 +2814,46 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   gap: 0;
   padding: 10px 16px;
 }
+/* Rating ladder adds a RATING column ahead of the W/L stats. */
+.ldr-all-header.ldr-row-elo,
+.ldr-all-row.ldr-row-elo {
+  grid-template-columns: 36px 1fr 92px 52px 52px 62px 52px;
+}
+.ldr-col-rating {
+  font-family: 'Barlow', sans-serif;
+  font-weight: 700;
+  color: #1a2150;
+  white-space: nowrap;
+}
+.ldr-rating-delta { font-size: 10px; font-weight: 700; margin-left: 4px; }
+.ldr-rating-delta.up { color: #0f7b3f; }
+.ldr-rating-delta.down { color: #b3261e; }
+.ldr-idle {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #f0f2f6;
+  color: #7e8c9a;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: help;
+}
+.ldr-frozen-dot { color: #7e8c9a; font-size: 9px; }
+
+.ldr-context {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.ldr-context-system { font-weight: 700; color: #1a2150; }
+.ldr-context-live, .ldr-context-frozen { color: var(--text-muted); }
+
 .ldr-all-header {
   background: #f7f9fc;
   border-bottom: 1px solid #edf0f5;
@@ -2861,10 +2914,19 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
     grid-template-columns: 28px 1fr 30px 30px;
     padding: 10px 12px;
   }
+  /* Must out-specify the desktop .ldr-row-elo rule, which is declared outside
+     this query and would otherwise keep its 7-track template on a phone —
+     leaving two empty tracks and overflowing narrow screens. */
+  .ldr-all-header.ldr-row-elo,
+  .ldr-all-row.ldr-row-elo {
+    grid-template-columns: 28px 1fr 58px 30px 30px;
+  }
   .ldr-col-played,
   .ldr-col-winpct { display: none; }
   .ldr-col-long  { display: none; }
   .ldr-col-short { display: inline; }
+  /* The +/- delta and idle chip don't fit beside the rating on a phone. */
+  .ldr-rating-delta, .ldr-idle { display: none; }
 }
 
 .ldr-you-chip {

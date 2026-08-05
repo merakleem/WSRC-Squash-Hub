@@ -24,19 +24,22 @@ function getCurrentSeasonId() {
   return getCurrentSeason()?.id ?? null;
 }
 
-function addSeason({ name, start_date, end_date, is_current }) {
+const LADDER_SYSTEMS = ['leapfrog', 'elo'];
+const _system = (value) => (LADDER_SYSTEMS.includes(value) ? value : 'leapfrog');
+
+function addSeason({ name, start_date, end_date, is_current, ladder_system }) {
   const db = getDB();
   const result = db.prepare(
-    'INSERT INTO seasons (name, start_date, end_date, is_current) VALUES (?, ?, ?, 0)'
-  ).run(name, start_date, end_date);
+    'INSERT INTO seasons (name, start_date, end_date, is_current, ladder_system) VALUES (?, ?, ?, 0, ?)'
+  ).run(name, start_date, end_date, _system(ladder_system));
   if (is_current) setCurrentSeason(result.lastInsertRowid);
   return getSeasonById(result.lastInsertRowid);
 }
 
-function updateSeason({ id, name, start_date, end_date, is_current }) {
+function updateSeason({ id, name, start_date, end_date, is_current, ladder_system }) {
   const db = getDB();
-  db.prepare('UPDATE seasons SET name = ?, start_date = ?, end_date = ? WHERE id = ?')
-    .run(name, start_date, end_date, Number(id));
+  db.prepare('UPDATE seasons SET name = ?, start_date = ?, end_date = ?, ladder_system = ? WHERE id = ?')
+    .run(name, start_date, end_date, _system(ladder_system), Number(id));
   // Promoting is supported; demoting is not, because "no current season" is not
   // a valid state. To move it, promote a different season instead.
   if (is_current) setCurrentSeason(id);

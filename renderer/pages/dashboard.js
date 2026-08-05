@@ -165,8 +165,9 @@ export async function renderClubSettings() {
                 return `
                 <div class="court-item">
                   <div class="court-item-name">
-                    ${esc(s.name)}${s.is_current ? '<span class="season-current-chip">Current</span>' : ''}
+                    ${esc(s.name)}${s.is_current ? '<span class="season-current-chip">Current</span>' : ''}${s.status === 'ended' ? '<span class="season-ended-chip">Final</span>' : ''}
                     <div class="season-meta">
+                      ${s.ladder_system === 'elo' ? 'Rating ladder' : 'Position ladder'} ·
                       ${formatShortDate(s.start_date)} – ${formatShortDate(s.end_date)}
                       · ${total === 0 ? 'no data yet' : [
                           s.usage.leagues     ? `${s.usage.leagues} league${s.usage.leagues === 1 ? '' : 's'}` : null,
@@ -176,7 +177,10 @@ export async function renderClubSettings() {
                     </div>
                   </div>
                   <div class="court-item-actions">
-                    ${s.is_current ? '' : `<button class="btn btn-outline btn-sm" data-season-current="${s.id}">Set Current</button>`}
+                    ${s.status === 'ended'
+                      ? `<button class="btn btn-outline btn-sm" data-season-reopen="${s.id}">Reopen</button>`
+                      : `${s.is_current ? '' : `<button class="btn btn-outline btn-sm" data-season-current="${s.id}">Set Current</button>`}
+                         <button class="btn btn-outline btn-sm" data-season-end="${s.id}">End Season</button>`}
                     <button class="btn btn-outline btn-sm" data-season-edit="${s.id}">Edit</button>
                     <button class="btn btn-danger btn-sm" data-season-delete="${s.id}">Delete</button>
                   </div>
@@ -245,6 +249,16 @@ export async function renderClubSettings() {
     btn.addEventListener('click', () => deleteSeasonConfirm(season));
   });
 
+  content.querySelectorAll('[data-season-end]').forEach((btn) => {
+    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonEnd));
+    btn.addEventListener('click', () => endSeasonConfirm(season));
+  });
+
+  content.querySelectorAll('[data-season-reopen]').forEach((btn) => {
+    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonReopen));
+    btn.addEventListener('click', () => reopenSeasonConfirm(season));
+  });
+
   content.querySelectorAll('[data-season-current]').forEach((btn) => {
     const id = Number(btn.dataset.seasonCurrent);
     btn.addEventListener('click', async () => {
@@ -306,6 +320,14 @@ function _seasonFormHTML(season) {
           <input class="form-control" id="fSeasonEnd" type="date" value="${esc(s.end_date)}">
         </div>
       </div>
+      <div class="form-group">
+        <label class="form-label">Ladder System</label>
+        <select class="form-control" id="fSeasonSystem">
+          <option value="leapfrog" ${s.ladder_system !== 'elo' ? 'selected' : ''}>Position ladder — beat someone above you and take their spot</option>
+          <option value="elo" ${s.ladder_system === 'elo' ? 'selected' : ''}>Rating ladder — every match moves a rating</option>
+        </select>
+        <p class="form-hint">Held per season, so changing it never reorders a season already played.</p>
+      </div>
       <label class="check-label">
         <input type="checkbox" id="fSeasonCurrent" ${s.is_current ? 'checked disabled' : ''}>
         <span>Make this the current season</span>
@@ -326,6 +348,7 @@ function _readSeasonForm() {
     name: document.getElementById('fSeasonName').value.trim(),
     start_date: document.getElementById('fSeasonStart').value,
     end_date: document.getElementById('fSeasonEnd').value,
+    ladder_system: document.getElementById('fSeasonSystem').value,
     is_current: document.getElementById('fSeasonCurrent').checked,
   };
 }
@@ -355,6 +378,57 @@ function openEditSeasonModal(season) {
       await window.api.updateSeason(season.id, _readSeasonForm());
       modal.close();
       toast('Season updated');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function endSeasonConfirm(season) {
+  modal.open('End Season', `
+    <p>End <strong>${esc(season.name)}</strong>?</p>
+    <p class="text-muted" style="font-size:13px">
+      This freezes the final standings. The ladder for this season stops changing, even if more
+      scores are reported afterwards. Do this once every score is in.
+    </p>
+    <p class="text-muted" style="font-size:13px">
+      If a late score does arrive, you can Reopen the season, let it recalculate, and end it again.
+    </p>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fEndCancel">Cancel</button>
+      <button class="btn btn-primary" id="fEndConfirm">End Season</button>
+    </div>`);
+  document.getElementById('fEndCancel').addEventListener('click', modal.close);
+  document.getElementById('fEndConfirm').addEventListener('click', async () => {
+    try {
+      const r = await window.api.endSeason(season.id);
+      modal.close();
+      toast(`Season ended — ${r.frozen} standings frozen`);
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function reopenSeasonConfirm(season) {
+  modal.open('Reopen Season', `
+    <p>Reopen <strong>${esc(season.name)}</strong>?</p>
+    <p class="text-muted" style="font-size:13px">
+      The frozen standings are discarded and this season's ladder goes back to recalculating from
+      match results. End the season again once the late scores are in.
+    </p>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fReopenCancel">Cancel</button>
+      <button class="btn btn-primary" id="fReopenConfirm">Reopen</button>
+    </div>`);
+  document.getElementById('fReopenCancel').addEventListener('click', modal.close);
+  document.getElementById('fReopenConfirm').addEventListener('click', async () => {
+    try {
+      await window.api.reopenSeason(season.id);
+      modal.close();
+      toast('Season reopened');
       renderClubSettings();
     } catch (err) {
       toast(err.message, 'error');

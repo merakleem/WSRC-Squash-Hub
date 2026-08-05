@@ -47,6 +47,9 @@ if (typeof window !== 'undefined' && !window.api) {
     getValidConfigs:  (n) => _apiFetch('GET',    `/api/configs/${n}`),
 
     getLadder:        ()    => _apiFetch('GET', '/api/ladder'),
+    getLadderForSeason: (seasonId) => _apiFetch('GET', `/api/ladder/season${seasonId ? `?season=${seasonId}` : ''}`),
+    endSeason:        (id)  => _apiFetch('PUT', `/api/seasons/${id}/end`),
+    reopenSeason:     (id)  => _apiFetch('PUT', `/api/seasons/${id}/reopen`),
     getPlayerHistory: (id)  => _apiFetch('GET', `/api/players/${id}/history`),
     getPlayerRecords:       ()  => _apiFetch('GET', '/api/players/records'),
     getVerifiedPlayerCount: ()  => _apiFetch('GET', '/api/players/verified-count'),

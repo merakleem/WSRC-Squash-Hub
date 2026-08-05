@@ -63,6 +63,25 @@ function initDB(dbPath) {
     `ALTER TABLE tournaments ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
     // pickup_matches has no parent to inherit from — it needs its own stamp.
     `ALTER TABLE pickup_matches ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
+    // Which ranking system a season is played under. Held per season so past
+    // ladders are always rendered by the rules they were actually played under,
+    // and so switching systems never disturbs a season already in progress.
+    `ALTER TABLE seasons ADD COLUMN ladder_system TEXT NOT NULL DEFAULT 'leapfrog'`,
+    `ALTER TABLE seasons ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
+    `ALTER TABLE seasons ADD COLUMN ended_at TEXT`,
+    // Frozen final standings. Once a season is ended these are served verbatim,
+    // so a late-reported score can never move a past ladder.
+    `CREATE TABLE IF NOT EXISTS season_standings (
+       season_id INTEGER NOT NULL,
+       player_id INTEGER NOT NULL,
+       position INTEGER NOT NULL,
+       rating REAL,
+       wins INTEGER NOT NULL DEFAULT 0,
+       losses INTEGER NOT NULL DEFAULT 0,
+       PRIMARY KEY (season_id, player_id),
+       FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
+       FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+     )`,
   ];
   for (const sql of migrations) {
     try {
@@ -147,10 +166,15 @@ function seedSeasons(db) {
   const fallStart = `${year}-09-01`;
   const today = new Date().toISOString().slice(0, 10);
 
-  const insert = db.prepare('INSERT INTO seasons (name, start_date, end_date, is_current) VALUES (?, ?, ?, ?)');
+  const insert = db.prepare(
+    'INSERT INTO seasons (name, start_date, end_date, is_current, ladder_system) VALUES (?, ?, ?, ?, ?)'
+  );
   const springCurrent = today < fallStart ? 1 : 0;
-  const springId = insert.run(`Spring ${year}`, springStart, `${year}-08-31`, springCurrent).lastInsertRowid;
-  insert.run(`Fall/Winter ${year}`, fallStart, `${year + 1}-04-30`, springCurrent ? 0 : 1);
+  // The season holding existing data keeps the original leapfrog ladder so the
+  // switch to ratings never retroactively reorders a season already played.
+  const springId = insert.run(`Spring ${year}`, springStart, `${year}-08-31`, springCurrent, 'leapfrog').lastInsertRowid;
+  const shortNext = String((year + 1) % 100).padStart(2, '0');
+  insert.run(`${year}/${shortNext} Season`, fallStart, `${year + 1}-04-30`, springCurrent ? 0 : 1, 'elo');
 
   // Everything that existed before seasons did is filed under the first season.
   const leagues = db.prepare('UPDATE leagues SET season_id = ? WHERE season_id IS NULL').run(springId);
@@ -159,7 +183,7 @@ function seedSeasons(db) {
 
   db.prepare(`INSERT INTO settings (key, value) VALUES ('seasons_seeded', ?)`).run(new Date().toISOString());
 
-  console.log(`[seasons] seeded Spring ${year} + Fall/Winter ${year}; backfilled ` +
+  console.log(`[seasons] seeded Spring ${year} (leapfrog) + ${year}/${shortNext} Season (elo); backfilled ` +
     `${leagues.changes} league(s), ${tourns.changes} tournament(s), ${pickups.changes} pickup match(es)`);
 }
 

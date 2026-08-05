@@ -5,7 +5,7 @@ import { renderSchedule } from './schedule.js';
 
 import { renderClubActivity, renderClubSettings, renderDashboard } from './pages/dashboard.js';
 import { renderPlayers, renderPlayerProfile, openPlayerProfile, openPickupGameModal, openReportScoreModal } from './pages/players.js';
-import { renderLadder } from './pages/ladder.js';
+import { renderLadder, resetLadderSeason } from './pages/ladder.js';
 import { renderLeagues } from './pages/leagues.js';
 import { renderLeagueDetail, resetLeagueEditMode } from './pages/leagueDetail.js';
 import { renderCreateLeague } from './pages/createLeague.js';
@@ -93,7 +93,7 @@ function renderPage() {
   switch (state.page) {
     case 'dashboard':        renderDashboard(); break;
     case 'players':          renderPlayers(); break;
-    case 'ladder':           renderLadder(); break;
+    case 'ladder':           resetLadderSeason(); renderLadder(); break;
     case 'activity':         renderClubActivity(); break;
     case 'schedule':         renderSchedule(); break;
     case 'clubSettings':     renderClubSettings(); break;

@@ -102,6 +102,11 @@ router.get('/activity', wrap(async (req, res) => {
   const allMatches = [...leagueMatches, ...tournamentMatchesRaw, ...pickupMatchesRaw]
     .sort((a, b) => (a.confirmed_at || '').localeCompare(b.confirmed_at || '') || 0);
 
+  // The replay below reproduces leapfrog positions. Only label matches with
+  // them while the current season is actually played under that system.
+  const currentSeason = db.prepare('SELECT ladder_system FROM seasons WHERE is_current = 1').get();
+  const showPositions = !currentSeason || currentSeason.ladder_system !== 'elo';
+
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 3650);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const activity = [];
@@ -122,9 +127,12 @@ router.get('/activity', wrap(async (req, res) => {
         ? winnerIdx - loserIdx : 0;
       activity.push({
         ...match,
-        p1_pos: p1Idx !== -1 ? p1Idx + 1 : null,
-        p2_pos: p2Idx !== -1 ? p2Idx + 1 : null,
-        places_moved: placesWon,
+        // Positions and "moved up N places" are leapfrog concepts. Under a
+        // rating ladder they would be fabricated, so they are omitted rather
+        // than shown as something the ladder never did.
+        p1_pos: showPositions && p1Idx !== -1 ? p1Idx + 1 : null,
+        p2_pos: showPositions && p2Idx !== -1 ? p2Idx + 1 : null,
+        places_moved: showPositions ? placesWon : 0,
       });
     }
 
