@@ -8,7 +8,7 @@ function _attachLadderSeasonTabs() {
   document.querySelectorAll('[data-ladder-season]').forEach((tab) => {
     tab.addEventListener('click', () => {
       // Selecting the current season returns to the live ladder rather than
-      // pinning to its id — otherwise there is no way back to "today", and
+      // pinning to its id; otherwise there is no way back to "today", and
       // state.ladder would stay frozen for the rest of the session.
       _ladderSeason = tab.dataset.ladderCurrent === '1' ? null : Number(tab.dataset.ladderSeason);
       renderLadder();
@@ -36,7 +36,7 @@ export async function renderLadder() {
   const ladder = ladderResult.rows || [];
   const isElo = ladderResult.system === 'elo';
   const season = ladderResult.season;
-  // Only cache the live current-season ladder — other pages read state.ladder
+  // Only cache the live current-season ladder; other pages read state.ladder
   // expecting today's standings, not a historical snapshot.
   const viewingCurrent = !_ladderSeason || (season && season.is_current);
   if (viewingCurrent) state.ladder = ladder;
@@ -59,7 +59,7 @@ export async function renderLadder() {
     <div class="ldr-context">
       <span class="ldr-context-system">${isElo ? 'Rating ladder' : 'Position ladder'}</span>
       ${ladderResult.frozen
-        ? `<span class="ldr-context-frozen">Final standings — this season has ended and no longer changes</span>`
+        ? `<span class="ldr-context-frozen">Final standings. This season has ended and no longer changes</span>`
         : `<span class="ldr-context-live">Updates as matches are reported</span>`}
     </div>`;
 
@@ -158,11 +158,11 @@ export async function renderLadder() {
       </div>
       <div class="info-modal-section">
         <h4>Who you beat matters</h4>
-        <p>Beating someone rated well above you is worth a lot. Beating someone well below you is worth very little — and losing to them costs you a lot. Evenly matched games move both players by a moderate amount either way.</p>
+        <p>Beating someone rated well above you is worth a lot. Beating someone well below you is worth very little, and losing to them costs you a lot. Evenly matched games move both players by a moderate amount either way.</p>
       </div>
       <div class="info-modal-section">
         <h4>Playing more helps</h4>
-        <p>Unlike the old ladder, every match counts — not just wins against players above you. The more you play, the more your rating reflects your real standing.</p>
+        <p>Unlike the old ladder, every match counts, not just wins against players above you. The more you play, the more your rating reflects your real standing.</p>
       </div>
       <div class="info-modal-section">
         <h4>Inactivity</h4>

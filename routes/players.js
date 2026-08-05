@@ -100,7 +100,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   const seasons = seasonModel.getAllSeasons();
   const ladderStats = ladderModel.getPlayerLadderStats(id);
 
-  // Division comes from the most recent league the player was entered in — the
+  // Division comes from the most recent league the player was entered in; the
   // profile header shows it as part of their identity.
   const division = db.prepare(`
     SELECT d.name

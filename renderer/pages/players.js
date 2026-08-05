@@ -574,7 +574,7 @@ function openMessagePlayerModal(playerId, playerName) {
 // ===== PLAYER PROFILE =====
 
 // Selected season tab: null = All Time, 'none' = matches with no season, or a
-// season id. Tracked alongside the player it was chosen for — back-navigation
+// season id. Tracked alongside the player it was chosen for; back-navigation
 // swaps state.currentPlayer without going through openPlayerProfile, so a
 // selection must never be trusted for a different player.
 let _profileSeason = null;
@@ -678,7 +678,7 @@ export function renderPlayerProfile() {
     ?? (hasUnassigned ? 'none' : null);
 
   // A remembered selection is only trusted when it belongs to this player and
-  // still resolves to rows — back navigation swaps the player without going
+  // still resolves to rows; back navigation swaps the player without going
   // through openPlayerProfile.
   const selectionValid = _profileSeasonFor === p.id && (
     _profileSeason === null
@@ -687,7 +687,7 @@ export function renderPlayerProfile() {
   );
   const activeSeason = selectionValid ? _profileSeason : defaultSeason;
 
-  // Opening a different player resets the view — a Results filter that matched
+  // Opening a different player resets the view; a Results filter that matched
   // nothing for them would otherwise render an empty panel with no explanation.
   if (_profileSeasonFor !== p.id) {
     _profileTab = 'season';
@@ -890,7 +890,6 @@ export function renderPlayerProfile() {
         const courtLabel = isAdmin() && (m.court_name || (m.schedule_courts && m.court_number ? `Court ${m.court_number}` : null));
         const timing = [m.match_time, courtLabel].filter(Boolean).join(' · ');
         const context = [esc(m.league_name), m.week_number ? `Wk ${m.week_number}` : null].filter(Boolean).join(' · ');
-        const h2h = _headToHead(allHistory, m.opponent_id);
         const opponent = m.opponent_id
           ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
           : esc(m.opponent_name || 'TBD');
@@ -902,7 +901,7 @@ export function renderPlayerProfile() {
             </div>
             <div class="pp-row-main">
               <span class="pp-row-title">${opponent}${i === 0 ? '<span class="pp-next-chip">Next up</span>' : ''}</span>
-              <span class="pp-row-sub">${[context, h2h].filter(Boolean).join(' — ')}</span>
+              <span class="pp-row-sub">${context}</span>
             </div>
           </div>`;
       }).join('') : emptyBlock('No upcoming matches')}
@@ -1123,17 +1122,6 @@ function _bestRankInWindow(series, season) {
   return Math.min(...within.map((pt) => pt.position));
 }
 
-/** "you lead 3–1" style record against one opponent, from existing history. */
-function _headToHead(history, opponentId) {
-  if (!opponentId) return '';
-  const rows = history.filter((m) => m.opponent_id === opponentId);
-  if (!rows.length) return '';
-  const w = rows.filter((m) => m.result === 'W').length;
-  const l = rows.length - w;
-  if (w === l) return `level ${w}–${l}`;
-  return w > l ? `you lead ${w}–${l}` : `you trail ${w}–${l}`;
-}
-
 function _quickLinksHTML(upcomingCount, tournCount, allTimeStats) {
   const chev = `<svg class="pp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>`;
   return `
@@ -1158,7 +1146,7 @@ function _quickLinksHTML(upcomingCount, tournCount, allTimeStats) {
  *
  * The viewBox aspect is kept equal to the rendered box aspect (2:1) so the
  * default preserveAspectRatio doesn't letterbox the plot inside the card.
- * The rank axis is inverted — a better rank sits higher.
+ * The rank axis is inverted; a better rank sits higher.
  */
 function _ladderChartHTML(series, seasons, variant) {
   if (!series || series.length < 2) {

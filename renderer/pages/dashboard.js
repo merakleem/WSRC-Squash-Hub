@@ -323,8 +323,8 @@ function _seasonFormHTML(season) {
       <div class="form-group">
         <label class="form-label">Ladder System</label>
         <select class="form-control" id="fSeasonSystem">
-          <option value="leapfrog" ${s.ladder_system !== 'elo' ? 'selected' : ''}>Position ladder — beat someone above you and take their spot</option>
-          <option value="elo" ${s.ladder_system === 'elo' ? 'selected' : ''}>Rating ladder — every match moves a rating</option>
+          <option value="leapfrog" ${s.ladder_system !== 'elo' ? 'selected' : ''}>Position ladder: beat someone above you and take their spot</option>
+          <option value="elo" ${s.ladder_system === 'elo' ? 'selected' : ''}>Rating ladder: every match moves a rating</option>
         </select>
         <p class="form-hint">Held per season, so changing it never reorders a season already played.</p>
       </div>
@@ -334,7 +334,7 @@ function _seasonFormHTML(season) {
       </label>
       <p class="form-hint">
         New leagues, tournaments and ladder matches are filed under the current season.
-        ${s.is_current ? 'This is already the current season — to move it, set another season as current instead.' : ''}
+        ${s.is_current ? 'This is already the current season. To move it, set another season as current instead.' : ''}
       </p>
       <div class="form-actions">
         <button type="button" class="btn btn-outline" id="fSeasonCancel">Cancel</button>
@@ -404,7 +404,7 @@ function endSeasonConfirm(season) {
     try {
       const r = await window.api.endSeason(season.id);
       modal.close();
-      toast(`Season ended — ${r.frozen} standings frozen`);
+      toast(`Season ended. ${r.frozen} standings frozen`);
       renderClubSettings();
     } catch (err) {
       toast(err.message, 'error');
@@ -443,7 +443,7 @@ function deleteSeasonConfirm(season) {
     ${total > 0
       ? `<p class="text-muted" style="font-size:13px">
            ${season.usage.leagues} league(s), ${season.usage.tournaments} tournament(s) and
-           ${season.usage.pickups} ladder match(es) are filed under this season. Nothing is deleted —
+           ${season.usage.pickups} ladder match(es) are filed under this season. Nothing is deleted;
            they show as <strong>Unassigned</strong> on player profiles instead.
            Leagues can be re-filed from the league's Options menu; tournaments and ladder matches
            cannot currently be re-assigned.

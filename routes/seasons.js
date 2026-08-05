@@ -15,7 +15,7 @@ function _validate({ name, start_date, end_date }) {
   return null;
 }
 
-// Readable by any logged-in user — the profile page needs the season list to
+// Readable by any logged-in user; the profile page needs the season list to
 // build its tabs.
 router.get('/seasons', wrap(async (req, res) => {
   const seasons = await seasonModel.getAllSeasons();
@@ -35,7 +35,7 @@ router.put('/seasons/:id', requireAdmin, wrap(async (req, res) => {
   const error = _validate(req.body);
   if (error) return res.status(400).json({ error });
   const { name, start_date, end_date, is_current, ladder_system } = req.body;
-  // Absent ladder_system means "leave it alone" — an edit that only changes a
+  // Absent ladder_system means "leave it alone"; an edit that only changes a
   // date must never silently downgrade a rating season to the positional one.
   res.json(await seasonModel.updateSeason({
     id: req.params.id, name: name.trim(), start_date, end_date, is_current,

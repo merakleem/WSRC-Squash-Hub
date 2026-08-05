@@ -244,7 +244,7 @@ function getLadder(asOfDate = null) {
  *
  * Computed by replaying the season's matches from a seeded starting rating
  * rather than by storing running totals. Substitutions rewrite winners after
- * the fact, scores can be cleared, and voiding a tournament result cascades —
+ * the fact, scores can be cleared, and voiding a tournament result cascades;
  * an incrementally-maintained rating would corrupt silently under any of those.
  * A replay is self-healing and cheap at club scale.
  */
@@ -263,7 +263,7 @@ function computeEloLadder(season, settings, asOfDate = null, { includeHidden = f
 
   // Prefer a frozen snapshot. If the admin promoted this season without ending
   // the previous one, fall back to computing where that season stands right
-  // now — otherwise everyone would seed from Club Locker ratings and the whole
+  // now; otherwise everyone would seed from Club Locker ratings and the whole
   // ladder would lurch the day the previous season is finally ended.
   let priorStandings = previous
     ? db.prepare('SELECT * FROM season_standings WHERE season_id = ?').all(previous.id)
@@ -345,7 +345,7 @@ function computeEloLadder(season, settings, asOfDate = null, { includeHidden = f
 
     // Hiding is a display rule. When persisting a snapshot every player is kept,
     // otherwise a long-absent player loses the record that they were in the
-    // season at all — and seeds from their Club Locker rating next season
+    // season at all; and seeds from their Club Locker rating next season
     // instead of the rating they actually earned.
     const hidden = elo.isHiddenForInactivity(months, cfg);
     if (hidden && !includeHidden) continue;
@@ -393,7 +393,7 @@ function getLadderForSeason(seasonId = null) {
     ? db.prepare('SELECT * FROM seasons WHERE id = ?').get(Number(seasonId))
     : db.prepare('SELECT * FROM seasons WHERE is_current = 1').get();
 
-  // No seasons configured at all — fall back to the original all-time ladder.
+  // No seasons configured at all; fall back to the original all-time ladder.
   if (!season) return { season: null, system: 'leapfrog', frozen: false, rows: getLadder() };
 
   if (season.status === 'ended') {
@@ -439,7 +439,7 @@ function freezeSeason(seasonId) {
   // The snapshot is "the ladder as it stood at season end", so matches dated
   // after the season are excluded. Without this, re-freezing an old season
   // after the next one has started would pull the newer season's results in.
-  // Freeze as of the season's end, not as of the moment the admin clicked —
+  // Freeze as of the season's end, not as of the moment the admin clicked;
   // otherwise the standings depend on how long they waited for late scores.
   // Never freeze past today, so ending a season early doesn't count the future.
   const today = new Date().toISOString().slice(0, 10);
@@ -542,7 +542,7 @@ function getSeasonRecords(seasonId, asOfDate = null) {
  * A player's ladder position over time, for the profile's history chart.
  *
  * Nothing persists historical standings, so the series is reconstructed from
- * the same chronological replay that produces the live ladder — one pass,
+ * the same chronological replay that produces the live ladder; one pass,
  * recording the player's position whenever it changes. Deliberately all-time
  * and leapfrog-based: the chart shows a career arc, not a season's ratings.
  */
@@ -576,7 +576,7 @@ function getPlayerLadderHistory(playerId) {
     ranking.splice(li, 0, winnerId);
 
     // Record only when this player actually moved. A full indexOf per match is
-    // a few thousand operations over the club's whole history — not worth
+    // a few thousand operations over the club's whole history; not worth
     // optimising into range arithmetic that would be easy to get subtly wrong.
     const next = ranking.indexOf(id) + 1;
     if (next === position) continue;

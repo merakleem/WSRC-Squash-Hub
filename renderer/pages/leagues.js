@@ -346,7 +346,7 @@ export function copyPublicLink(league) {
   });
 }
 
-// Lets an admin correct a league filed under the wrong season — e.g. one
+// Lets an admin correct a league filed under the wrong season; e.g. one
 // created before the new season was made current.
 export async function openAssignSeasonModal(league) {
   let seasons = [];
@@ -360,7 +360,7 @@ export async function openAssignSeasonModal(league) {
     <div class="form-group">
       <label class="form-label">Season</label>
       <select class="form-control" id="fLeagueSeason">
-        <option value="">— No season —</option>
+        <option value="">No season</option>
         ${seasons.map((s) => `
           <option value="${s.id}" ${league.season_id === s.id ? 'selected' : ''}>
             ${esc(s.name)}${s.is_current ? ' (current)' : ''}
@@ -380,7 +380,7 @@ export async function openAssignSeasonModal(league) {
       await window.api.setLeagueSeason(league.id, raw === '' ? null : Number(raw));
       modal.close();
       toast('Season updated');
-      // Refetch so state.currentLeague.season_id isn't stale — reopening the
+      // Refetch so state.currentLeague.season_id isn't stale; reopening the
       // modal must show the season that was just saved.
       await openLeague(league.id);
     } catch (err) {

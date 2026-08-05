@@ -22,7 +22,7 @@ export function formatShortDate(dateStr) {
 
 // ===== AVATARS =====
 
-// Single source of truth for initials — the ladder and profile previously
+// Single source of truth for initials; the ladder and profile previously
 // disagreed (two letters vs one).
 export function playerInitials(name) {
   if (!name) return '?';

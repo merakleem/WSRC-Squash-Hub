@@ -1858,7 +1858,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .pp-hbar > span { display: block; height: 100%; background: var(--pp-on-navy-pos); }
 
-/* Season selector — a native select keeps the OS picker on mobile. */
+/* Season selector; a native select keeps the OS picker on mobile. */
 .pp-season-pick { position: relative; display: inline-flex; align-items: center; }
 .pp-season-pick select {
   appearance: none;
@@ -3223,7 +3223,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
     padding: 10px 12px;
   }
   /* Must out-specify the desktop .ldr-row-elo rule, which is declared outside
-     this query and would otherwise keep its 7-track template on a phone —
+     this query and would otherwise keep its 7-track template on a phone;
      leaving two empty tracks and overflowing narrow screens. */
   .ldr-all-header.ldr-row-elo,
   .ldr-all-row.ldr-row-elo {

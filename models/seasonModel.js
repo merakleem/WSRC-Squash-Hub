@@ -46,7 +46,7 @@ function updateSeason({ id, name, start_date, end_date, is_current, ladder_syste
   return getSeasonById(id);
 }
 
-// Exactly one season is current — clearing the others is part of setting one.
+// Exactly one season is current; clearing the others is part of setting one.
 function setCurrentSeason(id) {
   const db = getDB();
   const tx = db.transaction((seasonId) => {
@@ -87,7 +87,7 @@ function deleteSeason(id) {
     db.prepare('UPDATE pickup_matches SET season_id = NULL WHERE season_id = ?').run(seasonId);
     db.prepare('DELETE FROM seasons WHERE id = ?').run(seasonId);
 
-    // Deleting the current season must not leave the club with none — new
+    // Deleting the current season must not leave the club with none; new
     // records would otherwise be filed under whichever season happens to sort
     // last, which can be one that has not started yet.
     if (wasCurrent) {

@@ -61,7 +61,7 @@ function initDB(dbPath) {
     // can straddle a boundary, and admin intent should win over inference.
     `ALTER TABLE leagues ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
     `ALTER TABLE tournaments ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
-    // pickup_matches has no parent to inherit from — it needs its own stamp.
+    // pickup_matches has no parent to inherit from; it needs its own stamp.
     `ALTER TABLE pickup_matches ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
     // Which ranking system a season is played under. Held per season so past
     // ladders are always rendered by the rules they were actually played under,
@@ -87,7 +87,7 @@ function initDB(dbPath) {
     try {
       db.prepare(sql).run();
     } catch (err) {
-      // "duplicate column name" just means the migration already ran — expected.
+      // "duplicate column name" just means the migration already ran; expected.
       // Anything else is a real failure and must not pass silently, or the app
       // boots looking healthy and then throws at query time.
       if (!/duplicate column name/i.test(err.message)) {
@@ -140,14 +140,14 @@ function initDB(dbPath) {
  * under the earlier one.
  *
  * Guarded on the seasons table being empty, so it runs once and is a no-op on
- * every subsequent boot. Dates are starting points only — an admin edits them
+ * every subsequent boot. Dates are starting points only; an admin edits them
  * in Club Settings, and nothing here overwrites their changes.
  */
 function seedSeasons(db) {
   // Marked in settings rather than inferred from the seasons table being empty:
   // an admin who deletes the seeded seasons to use their own naming must not
-  // have them resurrected — and their deliberately detached leagues and matches
-  // re-stamped — on the next restart.
+  // have them resurrected; and their deliberately detached leagues and matches
+  // re-stamped; on the next restart.
   const marker = db.prepare(`SELECT value FROM settings WHERE key = 'seasons_seeded'`).get();
   if (marker) return;
 
@@ -170,11 +170,14 @@ function seedSeasons(db) {
     'INSERT INTO seasons (name, start_date, end_date, is_current, ladder_system) VALUES (?, ?, ?, ?, ?)'
   );
   const springCurrent = today < fallStart ? 1 : 0;
+  // Seasons span two calendar years, so they are named for the pair they cover.
+  const short = (y) => String(y % 100).padStart(2, '0');
+  const currentName = `${year - 1}/${short(year)}`;
+  const nextName = `${year}/${short(year + 1)}`;
   // The season holding existing data keeps the original leapfrog ladder so the
   // switch to ratings never retroactively reorders a season already played.
-  const springId = insert.run(`Spring ${year}`, springStart, `${year}-08-31`, springCurrent, 'leapfrog').lastInsertRowid;
-  const shortNext = String((year + 1) % 100).padStart(2, '0');
-  insert.run(`${year}/${shortNext} Season`, fallStart, `${year + 1}-04-30`, springCurrent ? 0 : 1, 'elo');
+  const springId = insert.run(currentName, springStart, `${year}-08-31`, springCurrent, 'leapfrog').lastInsertRowid;
+  insert.run(nextName, fallStart, `${year + 1}-04-30`, springCurrent ? 0 : 1, 'elo');
 
   // Everything that existed before seasons did is filed under the first season.
   const leagues = db.prepare('UPDATE leagues SET season_id = ? WHERE season_id IS NULL').run(springId);
@@ -183,7 +186,7 @@ function seedSeasons(db) {
 
   db.prepare(`INSERT INTO settings (key, value) VALUES ('seasons_seeded', ?)`).run(new Date().toISOString());
 
-  console.log(`[seasons] seeded Spring ${year} (leapfrog) + ${year}/${shortNext} Season (elo); backfilled ` +
+  console.log(`[seasons] seeded ${currentName} (leapfrog) + ${nextName} (elo); backfilled ` +
     `${leagues.changes} league(s), ${tourns.changes} tournament(s), ${pickups.changes} pickup match(es)`);
 }
 
