@@ -56,6 +56,13 @@ function initDB(dbPath) {
     `ALTER TABLE players ADD COLUMN is_tester INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
     `ALTER TABLE players ADD COLUMN photo_path TEXT`,
+    `CREATE TABLE IF NOT EXISTS seasons (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, is_current INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+    // Seasons are assigned explicitly rather than inferred from dates: a league
+    // can straddle a boundary, and admin intent should win over inference.
+    `ALTER TABLE leagues ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
+    `ALTER TABLE tournaments ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
+    // pickup_matches has no parent to inherit from — it needs its own stamp.
+    `ALTER TABLE pickup_matches ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
   ];
   for (const sql of migrations) {
     try {
@@ -104,7 +111,56 @@ function initDB(dbPath) {
     db.prepare(`UPDATE leagues SET public_token = ? WHERE id = ?`).run(crypto.randomBytes(2).toString('hex'), league.id);
   }
 
+  seedSeasons(db);
+
   return Promise.resolve(db);
+}
+
+/**
+ * One-time seed: create the first two seasons and file all pre-existing data
+ * under the earlier one.
+ *
+ * Guarded on the seasons table being empty, so it runs once and is a no-op on
+ * every subsequent boot. Dates are starting points only — an admin edits them
+ * in Club Settings, and nothing here overwrites their changes.
+ */
+function seedSeasons(db) {
+  // Marked in settings rather than inferred from the seasons table being empty:
+  // an admin who deletes the seeded seasons to use their own naming must not
+  // have them resurrected — and their deliberately detached leagues and matches
+  // re-stamped — on the next restart.
+  const marker = db.prepare(`SELECT value FROM settings WHERE key = 'seasons_seeded'`).get();
+  if (marker) return;
+
+  const year = new Date().getFullYear();
+  // Widen the first season if any existing data predates it, so the backfilled
+  // records fall inside the range they are labelled with.
+  const earliest = db.prepare(`
+    SELECT MIN(d) AS d FROM (
+      SELECT MIN(start_date) AS d FROM leagues
+      UNION ALL SELECT MIN(championship_date) FROM tournaments
+      UNION ALL SELECT MIN(substr(played_at, 1, 10)) FROM pickup_matches
+    ) WHERE d IS NOT NULL
+  `).get()?.d;
+
+  const springStart = earliest && earliest < `${year}-01-01` ? earliest : `${year}-01-01`;
+  const fallStart = `${year}-09-01`;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const insert = db.prepare('INSERT INTO seasons (name, start_date, end_date, is_current) VALUES (?, ?, ?, ?)');
+  const springCurrent = today < fallStart ? 1 : 0;
+  const springId = insert.run(`Spring ${year}`, springStart, `${year}-08-31`, springCurrent).lastInsertRowid;
+  insert.run(`Fall/Winter ${year}`, fallStart, `${year + 1}-04-30`, springCurrent ? 0 : 1);
+
+  // Everything that existed before seasons did is filed under the first season.
+  const leagues = db.prepare('UPDATE leagues SET season_id = ? WHERE season_id IS NULL').run(springId);
+  const tourns  = db.prepare('UPDATE tournaments SET season_id = ? WHERE season_id IS NULL').run(springId);
+  const pickups = db.prepare('UPDATE pickup_matches SET season_id = ? WHERE season_id IS NULL').run(springId);
+
+  db.prepare(`INSERT INTO settings (key, value) VALUES ('seasons_seeded', ?)`).run(new Date().toISOString());
+
+  console.log(`[seasons] seeded Spring ${year} + Fall/Winter ${year}; backfilled ` +
+    `${leagues.changes} league(s), ${tourns.changes} tournament(s), ${pickups.changes} pickup match(es)`);
 }
 
 function getDB() {

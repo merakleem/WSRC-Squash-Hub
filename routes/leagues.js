@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
+const seasonModel = require('../models/seasonModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
 const { sendBatch, isConfigured: emailConfigured, appUrl } = require('../lib/email');
@@ -84,6 +85,16 @@ router.put('/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) => 
   const { originalPlayerId, subPlayerId } = req.body;
   const count = await leagueModel.setSubForRemaining(Number(req.params.id), originalPlayerId, subPlayerId);
   res.json({ ok: true, count });
+}));
+
+router.put('/leagues/:id/season', requireAdmin, wrap(async (req, res) => {
+  const { season_id } = req.body;
+  if (season_id != null && !seasonModel.getSeasonById(season_id)) {
+    return res.status(400).json({ error: 'Season not found' });
+  }
+  getDB().prepare('UPDATE leagues SET season_id = ? WHERE id = ?')
+    .run(season_id == null ? null : Number(season_id), Number(req.params.id));
+  res.json({ ok: true, season_id: season_id == null ? null : Number(season_id) });
 }));
 
 router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {

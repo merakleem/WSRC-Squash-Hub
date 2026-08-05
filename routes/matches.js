@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
+const seasonModel = require('../models/seasonModel');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
 const { sendEmail, isConfigured: emailConfigured } = require('../lib/email');
 
@@ -141,8 +142,8 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
 
   const winnerId = player1Score > player2Score ? player1Id : player2Id;
   db.prepare(
-    'INSERT INTO pickup_matches (player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId);
+    'INSERT INTO pickup_matches (player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id, season_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId, seasonModel.getCurrentSeasonId());
 
   res.json({ ok: true });
 }));

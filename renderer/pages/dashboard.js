@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal } from '../utils.js';
+import { esc, toast, modal, formatShortDate } from '../utils.js';
 
 // ===== DASHBOARD HELPERS =====
 function abbrevName(name) {
@@ -140,13 +140,52 @@ export async function renderClubSettings() {
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
 
-  const [courts, bookingTypes] = await Promise.all([
+  const [courts, bookingTypes, seasons] = await Promise.all([
     window.api.getCourts(),
     window.api.getBookingTypes(),
+    window.api.getSeasons(),
   ]);
 
   content.innerHTML = `
     <div class="settings-page">
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Seasons</h2>
+          <button class="btn btn-primary btn-sm" id="btnAddSeason">+ Add Season</button>
+        </div>
+        <p class="settings-section-desc">
+          Seasons group leagues, tournaments and ladder matches so player profiles can show
+          history by season. New leagues and matches are filed under the current season.
+        </p>
+        ${seasons.length === 0
+          ? `<div class="settings-empty">No seasons yet.</div>`
+          : `<div class="court-list">
+              ${seasons.map((s) => {
+                const total = s.usage.leagues + s.usage.tournaments + s.usage.pickups;
+                return `
+                <div class="court-item">
+                  <div class="court-item-name">
+                    ${esc(s.name)}${s.is_current ? '<span class="season-current-chip">Current</span>' : ''}
+                    <div class="season-meta">
+                      ${formatShortDate(s.start_date)} – ${formatShortDate(s.end_date)}
+                      · ${total === 0 ? 'no data yet' : [
+                          s.usage.leagues     ? `${s.usage.leagues} league${s.usage.leagues === 1 ? '' : 's'}` : null,
+                          s.usage.tournaments ? `${s.usage.tournaments} tournament${s.usage.tournaments === 1 ? '' : 's'}` : null,
+                          s.usage.pickups     ? `${s.usage.pickups} ladder match${s.usage.pickups === 1 ? '' : 'es'}` : null,
+                        ].filter(Boolean).join(', ')}
+                    </div>
+                  </div>
+                  <div class="court-item-actions">
+                    ${s.is_current ? '' : `<button class="btn btn-outline btn-sm" data-season-current="${s.id}">Set Current</button>`}
+                    <button class="btn btn-outline btn-sm" data-season-edit="${s.id}">Edit</button>
+                    <button class="btn btn-danger btn-sm" data-season-delete="${s.id}">Delete</button>
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>`
+        }
+      </div>
+
       <div class="settings-section">
         <div class="settings-section-header">
           <h2 class="settings-section-title">Courts</h2>
@@ -194,6 +233,31 @@ export async function renderClubSettings() {
       </div>
     </div>`;
 
+  document.getElementById('btnAddSeason').addEventListener('click', openAddSeasonModal);
+
+  content.querySelectorAll('[data-season-edit]').forEach((btn) => {
+    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonEdit));
+    btn.addEventListener('click', () => openEditSeasonModal(season));
+  });
+
+  content.querySelectorAll('[data-season-delete]').forEach((btn) => {
+    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonDelete));
+    btn.addEventListener('click', () => deleteSeasonConfirm(season));
+  });
+
+  content.querySelectorAll('[data-season-current]').forEach((btn) => {
+    const id = Number(btn.dataset.seasonCurrent);
+    btn.addEventListener('click', async () => {
+      try {
+        await window.api.setCurrentSeason(id);
+        toast('Current season updated');
+        renderClubSettings();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  });
+
   document.getElementById('btnAddCourt').addEventListener('click', openAddCourtModal);
 
   content.querySelectorAll('[data-court-edit]').forEach((btn) => {
@@ -220,6 +284,111 @@ export async function renderClubSettings() {
     const id = Number(btn.dataset.btypeDelete);
     const bt = bookingTypes.find((b) => b.id === id);
     btn.addEventListener('click', () => deleteBookingTypeConfirm(bt));
+  });
+}
+
+// ===== SEASONS =====
+function _seasonFormHTML(season) {
+  const s = season || { name: '', start_date: '', end_date: '', is_current: 0 };
+  return `
+    <form id="seasonForm">
+      <div class="form-group">
+        <label class="form-label">Season Name</label>
+        <input class="form-control" id="fSeasonName" value="${esc(s.name)}" placeholder="e.g. Fall/Winter 2026" autofocus>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Start Date</label>
+          <input class="form-control" id="fSeasonStart" type="date" value="${esc(s.start_date)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">End Date</label>
+          <input class="form-control" id="fSeasonEnd" type="date" value="${esc(s.end_date)}">
+        </div>
+      </div>
+      <label class="check-label">
+        <input type="checkbox" id="fSeasonCurrent" ${s.is_current ? 'checked disabled' : ''}>
+        <span>Make this the current season</span>
+      </label>
+      <p class="form-hint">
+        New leagues, tournaments and ladder matches are filed under the current season.
+        ${s.is_current ? 'This is already the current season — to move it, set another season as current instead.' : ''}
+      </p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" id="fSeasonCancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>`;
+}
+
+function _readSeasonForm() {
+  return {
+    name: document.getElementById('fSeasonName').value.trim(),
+    start_date: document.getElementById('fSeasonStart').value,
+    end_date: document.getElementById('fSeasonEnd').value,
+    is_current: document.getElementById('fSeasonCurrent').checked,
+  };
+}
+
+function openAddSeasonModal() {
+  modal.open('Add Season', _seasonFormHTML(null));
+  document.getElementById('fSeasonCancel').addEventListener('click', modal.close);
+  document.getElementById('seasonForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await window.api.addSeason(_readSeasonForm());
+      modal.close();
+      toast('Season added');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function openEditSeasonModal(season) {
+  modal.open('Edit Season', _seasonFormHTML(season));
+  document.getElementById('fSeasonCancel').addEventListener('click', modal.close);
+  document.getElementById('seasonForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await window.api.updateSeason(season.id, _readSeasonForm());
+      modal.close();
+      toast('Season updated');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function deleteSeasonConfirm(season) {
+  const total = season.usage.leagues + season.usage.tournaments + season.usage.pickups;
+  modal.open('Delete Season', `
+    <p>Delete <strong>${esc(season.name)}</strong>?</p>
+    ${total > 0
+      ? `<p class="text-muted" style="font-size:13px">
+           ${season.usage.leagues} league(s), ${season.usage.tournaments} tournament(s) and
+           ${season.usage.pickups} ladder match(es) are filed under this season. Nothing is deleted —
+           they show as <strong>Unassigned</strong> on player profiles instead.
+           Leagues can be re-filed from the league's Options menu; tournaments and ladder matches
+           cannot currently be re-assigned.
+         </p>`
+      : `<p class="text-muted" style="font-size:13px">This season has no data filed under it.</p>`}
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fSeasonDelCancel">Cancel</button>
+      <button class="btn btn-danger" id="fSeasonDelConfirm">Delete</button>
+    </div>`);
+  document.getElementById('fSeasonDelCancel').addEventListener('click', modal.close);
+  document.getElementById('fSeasonDelConfirm').addEventListener('click', async () => {
+    try {
+      await window.api.deleteSeason(season.id);
+      modal.close();
+      toast('Season deleted');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   });
 }
 

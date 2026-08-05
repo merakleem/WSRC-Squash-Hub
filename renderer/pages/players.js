@@ -572,6 +572,14 @@ function openMessagePlayerModal(playerId, playerName) {
 }
 
 // ===== PLAYER PROFILE =====
+
+// Selected season tab: null = All Time, 'none' = matches with no season, or a
+// season id. Tracked alongside the player it was chosen for — back-navigation
+// swaps state.currentPlayer without going through openPlayerProfile, so a
+// selection must never be trusted for a different player.
+let _profileSeason = null;
+let _profileSeasonFor = null;
+
 export async function openPlayerProfile(id, { pushHistory = true } = {}) {
   const player = await window.api.getPlayerHistory(id);
   window.navigate('playerProfile', { player }, { pushHistory });
@@ -647,10 +655,46 @@ export function renderPlayerProfile() {
     });
   }
 
-  const played = (p.wins || 0) + (p.losses || 0);
-  const winPct = played > 0 ? Math.round((p.wins / played) * 100) : null;
+  // Season tabs are built from the seasons this player actually has matches in,
+  // so a profile never shows an empty tab. Stats are derived from the same rows
+  // the history table renders, which keeps "All Time" equal to the sum of the
+  // seasons rather than a separately-computed number that could drift.
+  const allHistory = p.history || [];
+  const seasonsById = Object.fromEntries((p.seasons || []).map((s) => [s.id, s]));
+  const playedSeasonIds = [...new Set(allHistory.map((m) => m.season_id).filter((id) => id != null))]
+    .sort((a, b) => (seasonsById[b]?.start_date || '').localeCompare(seasonsById[a]?.start_date || ''));
+  const hasUnassigned = allHistory.some((m) => m.season_id == null);
 
-  const historyHTML = (p.history || []).length === 0
+  // Fall back to All Time unless the remembered selection belongs to this
+  // player AND still resolves to rows — otherwise a stale tab could render an
+  // empty profile with no tab bar to escape from.
+  const selectionValid = _profileSeasonFor === p.id && (
+    playedSeasonIds.includes(_profileSeason) || (_profileSeason === 'none' && hasUnassigned)
+  );
+  const activeSeason = selectionValid ? _profileSeason : null;
+
+  const history = activeSeason === null
+    ? allHistory
+    : activeSeason === 'none'
+      ? allHistory.filter((m) => m.season_id == null)
+      : allHistory.filter((m) => m.season_id === activeSeason);
+
+  const wins   = history.filter((m) => m.result === 'W').length;
+  const losses = history.filter((m) => m.result === 'L').length;
+  const played = wins + losses;
+  const winPct = played > 0 ? Math.round((wins / played) * 100) : null;
+
+  const seasonTabsHTML = (playedSeasonIds.length + (hasUnassigned ? 1 : 0)) < 2 ? '' : `
+    <div class="season-tabs">
+      <button class="season-tab${activeSeason === null ? ' active' : ''}" data-season-tab="all">All Time</button>
+      ${playedSeasonIds.map((id) => `
+        <button class="season-tab${activeSeason === id ? ' active' : ''}" data-season-tab="${id}">
+          ${esc(seasonsById[id]?.name || 'Season')}
+        </button>`).join('')}
+      ${hasUnassigned ? `<button class="season-tab${activeSeason === 'none' ? ' active' : ''}" data-season-tab="none">Unassigned</button>` : ''}
+    </div>`;
+
+  const historyHTML = history.length === 0
     ? `<div class="empty-state"><strong>No matches played yet</strong></div>`
     : `<table>
         <thead>
@@ -661,7 +705,7 @@ export function renderPlayerProfile() {
           </tr>
         </thead>
         <tbody>
-          ${p.history.map((m) => {
+          ${history.map((m) => {
             const isTr = m.source === 'tournament';
             const isPu = m.source === 'pickup';
             const details = isTr
@@ -716,7 +760,17 @@ export function renderPlayerProfile() {
         </tbody>
       </table>`;
 
-  const tournamentResults = p.tournamentResults || [];
+  // Tournament results are historical, so they follow the season tab. Upcoming
+  // matches deliberately do not — they are forward-looking, and hiding a match
+  // the player has next week because they are viewing a past season would be
+  // actively misleading.
+  const allTournResults = p.tournamentResults || [];
+  const tournamentResults = activeSeason === null
+    ? allTournResults
+    : activeSeason === 'none'
+      ? allTournResults.filter((t) => t.season_id == null)
+      : allTournResults.filter((t) => t.season_id === activeSeason);
+
   const tournamentResultsHTML = tournamentResults.length === 0
     ? `<div class="empty-state"><strong>No tournaments played yet</strong></div>`
     : `<table>
@@ -766,15 +820,17 @@ export function renderPlayerProfile() {
         </div>
       </div>
       <div class="profile-stats">
-        <div class="stat"><span class="stat-val">${p.wins || 0}</span><span class="stat-label">Wins</span></div>
-        <div class="stat"><span class="stat-val">${p.losses || 0}</span><span class="stat-label">Losses</span></div>
+        <div class="stat"><span class="stat-val">${wins}</span><span class="stat-label">Wins</span></div>
+        <div class="stat"><span class="stat-val">${losses}</span><span class="stat-label">Losses</span></div>
         <div class="stat"><span class="stat-val">${played}</span><span class="stat-label">Played</span></div>
         ${winPct !== null ? `<div class="stat"><span class="stat-val">${winPct}%</span><span class="stat-label">Win Rate</span></div>` : ''}
       </div>
     </div>
 
+    ${seasonTabsHTML}
+
     <div class="section">
-      <div class="section-title">Upcoming Matches <div class="divider"></div></div>
+      <div class="section-title">Upcoming Matches${activeSeason !== null ? ' <span class="season-scope-note">all seasons</span>' : ''} <div class="divider"></div></div>
       <div class="table-card">${upcomingHTML}</div>
     </div>
 
@@ -793,6 +849,15 @@ export function renderPlayerProfile() {
   });
 
   document.getElementById('btnEditPhoto')?.addEventListener('click', () => openPhotoModal(p));
+
+  document.querySelectorAll('[data-season-tab]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const raw = tab.dataset.seasonTab;
+      _profileSeason = raw === 'all' ? null : raw === 'none' ? 'none' : Number(raw);
+      _profileSeasonFor = p.id;
+      renderPlayerProfile();
+    });
+  });
 }
 
 // ===== PROFILE PHOTO =====

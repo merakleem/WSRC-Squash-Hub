@@ -5,6 +5,7 @@ const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware
 const { sendEmail, isConfigured: emailConfigured, appUrl } = require('../lib/email');
 const playerService = require('../services/playerService');
 const playerModel = require('../models/playerModel');
+const seasonModel = require('../models/seasonModel');
 const { savePlayerPhoto, deletePlayerPhoto } = require('../lib/photos');
 const tournamentModel = require('../models/tournamentModel');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
@@ -64,7 +65,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
 
   // Tournament results: one entry per tournament, with the player's finishing position
   const playerTournaments = db.prepare(`
-    SELECT DISTINCT t.id, t.name, t.championship_date, t.status
+    SELECT DISTINCT t.id, t.name, t.championship_date, t.status, t.season_id
     FROM tournaments t
     WHERE t.id IN (
       SELECT tournament_id FROM tournament_players WHERE player_id = ?
@@ -85,13 +86,18 @@ router.get('/players/:id/history', wrap(async (req, res) => {
       name: tourn.name,
       championship_date: tourn.championship_date,
       status: tourn.status,
+      season_id: tourn.season_id,
       position: tier ? tier.position : null,
     });
   }
 
   const isAdmin = req.session?.role === 'admin';
   const playerData = isAdmin ? player : _stripContact(player);
-  res.json({ ...playerData, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming, accountStatus, tournamentResults });
+  // Seasons ship with the profile so the tab bar can be built without a second
+  // round trip; per-season records are derived client-side from history rows,
+  // which already carry season_id.
+  const seasons = seasonModel.getAllSeasons();
+  res.json({ ...playerData, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming, accountStatus, tournamentResults, seasons });
 }));
 
 router.post('/players', requireAdmin, wrap(async (req, res) => {

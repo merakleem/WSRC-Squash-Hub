@@ -1,6 +1,6 @@
 import { state, isAdmin } from '../state.js';
 import { esc, formatDate, formatShortDate, toast, modal } from '../utils.js';
-import { printBoxes, copyPublicLink, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague } from './leagues.js';
+import { printBoxes, copyPublicLink, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague, openAssignSeasonModal } from './leagues.js';
 
 let leagueEditMode = false;
 export function resetLeagueEditMode() { leagueEditMode = false; }
@@ -46,6 +46,7 @@ export function renderLeagueDetail() {
         <button class="options-item" data-action="box-scores">Submit scores by box view</button>
         ${league.setup_type === 'modern' ? `<button class="options-item" data-action="print-schedule">Print Schedule</button>` : ''}
         <button class="options-item" data-action="copy-link">Get Public Link</button>
+        <button class="options-item" data-action="assign-season">Assign Season</button>
         <button class="options-item" data-action="message-players">Message Players</button>
         <button class="options-item" data-action="bulk-invite">Send Account Invites</button>
         ${league.status !== 'completed' ? `<button class="options-item options-item-danger" data-action="end-league">End League</button>` : ''}
@@ -77,6 +78,9 @@ export function renderLeagueDetail() {
       } else if (action === 'copy-link') {
         document.getElementById('optionsDropdown').classList.remove('open');
         copyPublicLink(league);
+      } else if (action === 'assign-season') {
+        document.getElementById('optionsDropdown').classList.remove('open');
+        openAssignSeasonModal(league);
       } else if (action === 'message-players') {
         document.getElementById('optionsDropdown').classList.remove('open');
         openMessagePlayersModal(league);

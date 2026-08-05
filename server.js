@@ -83,6 +83,7 @@ app.use('/api', require('./routes/bookings'));
 app.use('/api', require('./routes/courts'));
 app.use('/api', require('./routes/tournaments'));
 app.use('/api', require('./routes/settings'));
+app.use('/api', require('./routes/seasons'));
 
 // ===== 404 =====
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));

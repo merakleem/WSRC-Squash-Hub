@@ -346,6 +346,49 @@ export function copyPublicLink(league) {
   });
 }
 
+// Lets an admin correct a league filed under the wrong season — e.g. one
+// created before the new season was made current.
+export async function openAssignSeasonModal(league) {
+  let seasons = [];
+  try {
+    seasons = await window.api.getSeasons();
+  } catch (err) {
+    return toast(err.message || 'Could not load seasons', 'error');
+  }
+
+  modal.open('Assign Season', `
+    <div class="form-group">
+      <label class="form-label">Season</label>
+      <select class="form-control" id="fLeagueSeason">
+        <option value="">— No season —</option>
+        ${seasons.map((s) => `
+          <option value="${s.id}" ${league.season_id === s.id ? 'selected' : ''}>
+            ${esc(s.name)}${s.is_current ? ' (current)' : ''}
+          </option>`).join('')}
+      </select>
+    </div>
+    <p class="form-hint">Controls which season this league's matches appear under on player profiles.</p>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="fSeasonCancel">Cancel</button>
+      <button class="btn btn-primary" id="fSeasonSave">Save</button>
+    </div>`);
+
+  document.getElementById('fSeasonCancel').addEventListener('click', modal.close);
+  document.getElementById('fSeasonSave').addEventListener('click', async () => {
+    const raw = document.getElementById('fLeagueSeason').value;
+    try {
+      await window.api.setLeagueSeason(league.id, raw === '' ? null : Number(raw));
+      modal.close();
+      toast('Season updated');
+      // Refetch so state.currentLeague.season_id isn't stale — reopening the
+      // modal must show the season that was just saved.
+      await openLeague(league.id);
+    } catch (err) {
+      toast(err.message || 'Could not update season', 'error');
+    }
+  });
+}
+
 export function openMessagePlayersModal(league) {
   const players = (league.players || []).filter((p) => p.player_email);
   const noEmailPlayers = (league.players || []).filter((p) => !p.player_email);
