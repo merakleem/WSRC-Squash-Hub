@@ -70,6 +70,11 @@ function getLadder() {
   const playerIds = new Set(players.map((p) => p.id));
   let ranking = players.map((p) => p.id);
 
+  // Best position ever held. Nothing persists historical standings, so it is
+  // derived from the same replay that produces the current ranking.
+  const bestPosition = {};
+  ranking.forEach((id, i) => { bestPosition[id] = i + 1; });
+
   for (const match of matches) {
     const effWinnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
     const effLoserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
@@ -84,6 +89,12 @@ function getLadder() {
 
     ranking.splice(winnerIdx, 1);
     ranking.splice(loserIdx, 0, effWinnerId);
+
+    // Only the winner and the players it leapfrogged changed position.
+    for (let i = loserIdx; i <= winnerIdx; i++) {
+      const id = ranking[i];
+      if (i + 1 < bestPosition[id]) bestPosition[id] = i + 1;
+    }
   }
 
   // Snapshot the ranking before any match from the past 7 days was applied,
@@ -111,8 +122,19 @@ function getLadder() {
   return ranking.map((id, i) => {
     const oldIdx = rankingSevenDaysAgo.indexOf(id);
     const rankChange = oldIdx !== -1 ? (oldIdx + 1) - (i + 1) : 0;
-    return { ...playerMap[id], position: i + 1, rank_change: rankChange };
+    return { ...playerMap[id], position: i + 1, rank_change: rankChange, best_position: bestPosition[id] };
   });
 }
 
-module.exports = { getLadder };
+/**
+ * Current and best-ever ladder position for one player.
+ * Returns nulls when the player is excluded from the ladder.
+ */
+function getPlayerLadderStats(playerId) {
+  const ladder = getLadder();
+  const row = ladder.find((p) => p.id === Number(playerId));
+  if (!row) return { position: null, best_position: null, ladder_size: ladder.length };
+  return { position: row.position, best_position: row.best_position, ladder_size: ladder.length };
+}
+
+module.exports = { getLadder, getPlayerLadderStats };

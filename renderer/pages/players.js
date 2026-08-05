@@ -684,6 +684,30 @@ export function renderPlayerProfile() {
   const played = wins + losses;
   const winPct = played > 0 ? Math.round((wins / played) * 100) : null;
 
+  // Games (individual games inside a match, e.g. a 3–1 win is 3 games won, 1 lost)
+  const gamesWon  = history.reduce((sum, m) => sum + (Number(m.my_score) || 0), 0);
+  const gamesLost = history.reduce((sum, m) => sum + (Number(m.their_score) || 0), 0);
+  const gamesTotal = gamesWon + gamesLost;
+  const gameWinPct = gamesTotal > 0 ? Math.round((gamesWon / gamesTotal) * 100) : null;
+
+  // Streaks. History arrives newest-first, so walk a chronological copy for the
+  // longest run and the newest-first original for the active run.
+  const chronological = [...history].reverse();
+  let longestWinStreak = 0;
+  let run = 0;
+  for (const m of chronological) {
+    run = m.result === 'W' ? run + 1 : 0;
+    if (run > longestWinStreak) longestWinStreak = run;
+  }
+
+  let currentStreak = 0;
+  let currentStreakType = null;
+  for (const m of history) {
+    if (currentStreakType === null) currentStreakType = m.result;
+    if (m.result !== currentStreakType) break;
+    currentStreak++;
+  }
+
   const seasonTabsHTML = (playedSeasonIds.length + (hasUnassigned ? 1 : 0)) < 2 ? '' : `
     <div class="season-tabs">
       <button class="season-tab${activeSeason === null ? ' active' : ''}" data-season-tab="all">All Time</button>
@@ -798,6 +822,56 @@ export function renderPlayerProfile() {
   // A player may change their own photo; an admin may change anyone's.
   const canEditPhoto = adminMode || state.currentUser?.playerId === p.id;
 
+  const scopeLabel = activeSeason === null
+    ? 'All-Time'
+    : activeSeason === 'none'
+      ? 'Unassigned'
+      : esc(seasonsById[activeSeason]?.name || 'Season');
+
+  // Ladder standing is a "right now" fact about the player, not a per-season
+  // one, so it sits in the header rather than inside the season-scoped stats.
+  const ladder = p.ladder || {};
+  const ladderHTML = ladder.position == null ? '' : `
+    <div class="profile-ladder">
+      <div class="profile-ladder-item">
+        <span class="profile-ladder-val">#${ladder.position}</span>
+        <span class="profile-ladder-label">Ladder Position</span>
+      </div>
+      <div class="profile-ladder-item">
+        <span class="profile-ladder-val">#${ladder.best_position}</span>
+        <span class="profile-ladder-label">Best Ever</span>
+      </div>
+      <div class="profile-ladder-item">
+        <span class="profile-ladder-val">${ladder.ladder_size}</span>
+        <span class="profile-ladder-label">Players</span>
+      </div>
+    </div>`;
+
+  const statTile = (val, label, tone = '') =>
+    `<div class="stat-tile${tone ? ` stat-tile-${tone}` : ''}">
+       <span class="stat-tile-val">${val}</span>
+       <span class="stat-tile-label">${label}</span>
+     </div>`;
+
+  const statsHTML = played === 0
+    ? `<div class="table-card"><div class="empty-state"><strong>No matches played${activeSeason === null ? ' yet' : ' this season'}</strong></div></div>`
+    : `<div class="stat-grid">
+        ${statTile(wins, 'Wins', 'win')}
+        ${statTile(losses, 'Losses', 'loss')}
+        ${statTile(played, 'Matches')}
+        ${statTile(winPct === null ? '—' : `${winPct}%`, 'Win Rate')}
+        ${statTile(gamesWon, 'Games Won', 'win')}
+        ${statTile(gamesLost, 'Games Lost', 'loss')}
+        ${statTile(gamesTotal, 'Games')}
+        ${statTile(gameWinPct === null ? '—' : `${gameWinPct}%`, 'Game Win Rate')}
+        ${statTile(longestWinStreak, 'Longest Win Streak')}
+        ${statTile(
+          currentStreak === 0 ? '—' : `${currentStreak}${currentStreakType === 'W' ? 'W' : 'L'}`,
+          'Current Streak',
+          currentStreak === 0 ? '' : currentStreakType === 'W' ? 'win' : 'loss'
+        )}
+      </div>`;
+
   const acctBadgeHTML = adminMode ? (() => {
     if (acctStatus === 'verified') return `<span class="acct-badge acct-badge-verified">Verified</span>`;
     if (!hasEmail) return `<span class="acct-badge acct-badge-none">No Email</span>`;
@@ -819,29 +893,35 @@ export function renderPlayerProfile() {
           ${acctBadgeHTML}
         </div>
       </div>
-      <div class="profile-stats">
-        <div class="stat"><span class="stat-val">${wins}</span><span class="stat-label">Wins</span></div>
-        <div class="stat"><span class="stat-val">${losses}</span><span class="stat-label">Losses</span></div>
-        <div class="stat"><span class="stat-val">${played}</span><span class="stat-label">Played</span></div>
-        ${winPct !== null ? `<div class="stat"><span class="stat-val">${winPct}%</span><span class="stat-label">Win Rate</span></div>` : ''}
-      </div>
+      ${ladderHTML}
     </div>
 
     ${seasonTabsHTML}
 
     <div class="section">
-      <div class="section-title">Upcoming Matches${activeSeason !== null ? ' <span class="season-scope-note">all seasons</span>' : ''} <div class="divider"></div></div>
+      <div class="section-title">${scopeLabel} Record <div class="divider"></div></div>
+      ${statsHTML}
+    </div>
+
+    <div class="section">
+      <div class="section-title">Upcoming Matches <span class="season-scope-note">all seasons</span> <div class="divider"></div></div>
       <div class="table-card">${upcomingHTML}</div>
     </div>
 
-    <div class="section">
-      <div class="section-title">Match History <div class="divider"></div></div>
-      <div class="table-card">${historyHTML}</div>
-    </div>
-
+    ${tournamentResults.length === 0 ? '' : `
     <div class="section">
       <div class="section-title">Tournament Results <div class="divider"></div></div>
       <div class="table-card">${tournamentResultsHTML}</div>
+    </div>`}
+
+    <div class="section">
+      <details class="history-disclosure">
+        <summary>
+          <span class="history-disclosure-title">Match History</span>
+          <span class="history-disclosure-count">${played} match${played === 1 ? '' : 'es'}${activeSeason === null ? ', all time' : ''}</span>
+        </summary>
+        <div class="table-card" style="margin-top:12px">${historyHTML}</div>
+      </details>
     </div>`;
 
   document.getElementById('mainContent').querySelectorAll('.nav-player-link').forEach((el) => {

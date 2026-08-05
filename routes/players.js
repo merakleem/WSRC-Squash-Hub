@@ -6,6 +6,7 @@ const { sendEmail, isConfigured: emailConfigured, appUrl } = require('../lib/ema
 const playerService = require('../services/playerService');
 const playerModel = require('../models/playerModel');
 const seasonModel = require('../models/seasonModel');
+const ladderModel = require('../models/ladderModel');
 const { savePlayerPhoto, deletePlayerPhoto } = require('../lib/photos');
 const tournamentModel = require('../models/tournamentModel');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
@@ -97,7 +98,13 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   // round trip; per-season records are derived client-side from history rows,
   // which already carry season_id.
   const seasons = seasonModel.getAllSeasons();
-  res.json({ ...playerData, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming, accountStatus, tournamentResults, seasons });
+  const ladderStats = ladderModel.getPlayerLadderStats(id);
+  res.json({
+    ...playerData,
+    wins: rec.wins || 0, losses: rec.losses || 0,
+    history, upcoming, accountStatus, tournamentResults, seasons,
+    ladder: ladderStats,
+  });
 }));
 
 router.post('/players', requireAdmin, wrap(async (req, res) => {
