@@ -729,7 +729,7 @@ export async function renderDashboard() {
         </button>
         <button class="db-quick-item" onclick="openReportScoreModal()">
           <svg class="db-quick-icon" viewBox="0 0 98.374 98.374" xmlns="http://www.w3.org/2000/svg" fill="#2ec610"><path d="M97.789,23.118l-7.24-7.24c-0.781-0.781-2.047-0.781-2.828,0L50.464,53.133l-13.291-13.29c-0.781-0.781-2.047-0.781-2.828,0l-7.24,7.24c-0.375,0.375-0.586,0.884-0.586,1.414c0,0.53,0.211,1.039,0.586,1.414L49.05,71.854c0.391,0.391,0.902,0.586,1.414,0.586c0.513,0,1.022-0.195,1.414-0.586l45.91-45.908c0.375-0.375,0.586-0.884,0.586-1.414C98.374,24.002,98.164,23.493,97.789,23.118z"/><path d="M73.583,80.979H10V17.395h65.098l8.485-8c0-1.104-0.896-2-2-2H2c-1.104,0-2,0.896-2,2v79.584c0,1.104,0.896,2,2,2h79.584c1.105,0,2-0.896,2-2v-37.88l-10,10.5L73.583,80.979L73.583,80.979z"/></svg>
-          Report Score
+          Report League Match Score
         </button>
         <button class="db-quick-item" onclick="openPickupGameModal()">
           <svg class="db-quick-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="#ff7300"><path d="M23.5 13.187h-7.5v-12.187l-7.5 17.813h7.5v12.187l7.5-17.813z"/></svg>
@@ -784,7 +784,7 @@ export async function renderDashboard() {
   document.getElementById('btnQuickActionsInfo')?.addEventListener('click', () => {
     modal.open('Quick Actions', `
       <div class="info-modal-section">
-        <h4>Report Score</h4>
+        <h4>Report League Match Score</h4>
         <p>Use this after playing a scheduled league match. It submits the result for your match in the current season.</p>
       </div>
       <div class="info-modal-section">
