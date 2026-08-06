@@ -61,6 +61,7 @@ export async function renderLadder() {
       ${ladderResult.frozen
         ? `<span class="ldr-context-frozen">Final standings. This season has ended and no longer changes</span>`
         : `<span class="ldr-context-live">Updates as matches are reported</span>`}
+      <span class="ldr-context-scope">W/L for ${esc(season.name)}</span>
     </div>`;
 
   if (ladder.length === 0) {
@@ -85,11 +86,13 @@ export async function renderLadder() {
     return `<span class="ldr-change ldr-change-down">↓${Math.abs(change)}</span>`;
   };
 
-  // In a rating season the W/L shown are that season's, not career totals, so
-  // the numbers agree with the rating beside them.
-  const recordFor = (p) => (isElo
-    ? { wins: p.season_wins || 0, losses: p.season_losses || 0 }
-    : (records[p.id] || { wins: 0, losses: 0 }));
+  // W/L belongs to the season being viewed under either system, so the numbers
+  // agree with the standing beside them and with the player's profile. Career
+  // totals are the fallback only when the club has no seasons configured at all,
+  // where every row arrives without a season record.
+  const recordFor = (p) => (p.season_wins == null
+    ? (records[p.id] || { wins: 0, losses: 0 })
+    : { wins: p.season_wins || 0, losses: p.season_losses || 0 });
 
   // Movement is shown as places gained or lost beside the name, the same as the
   // positional ladder. The rating column carries the number only.

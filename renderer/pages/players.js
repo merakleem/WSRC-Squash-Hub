@@ -724,15 +724,23 @@ export function renderPlayerProfile() {
   const acctBadge = adminMode && acctStatus === 'verified'
     ? `<span class="pp-badge">Verified</span>` : '';
 
-  const rankDelta = ladder.position != null && ladder.best_position != null && ladder.position > ladder.best_position
-    ? null
-    : null;
+  // The rank block names the system it came from. It reports the current season's
+  // standing, the same number the Ladder page and the dashboard ring show, while
+  // the career chart further down is a different scale entirely.
+  // The rating is dropped on narrow screens, where it would wrap the label onto
+  // a third line; the Ladder page carries it prominently either way.
+  const rankLabelHTML = [ladder.frozen ? 'Final' : null, ladder.system === 'elo' ? 'Rating ladder' : 'Ladder']
+    .filter(Boolean).join(' · ')
+    + (ladder.rating == null ? '' : `<span class="pp-hstat-label-extra"> · ${Number(ladder.rating)}</span>`);
+
+  const rankMoveHTML = !ladder.rank_change ? ''
+    : `<span class="pp-hstat-move ${ladder.rank_change > 0 ? 'pp-pos' : 'pp-neg'}" title="Places moved in the last 7 days">${ladder.rank_change > 0 ? '↑' : '↓'}${Math.abs(ladder.rank_change)}</span>`;
 
   const headerStatsHTML = `
     ${ladder.position == null ? '' : `
       <div class="pp-hstat">
-        <div class="pp-hstat-val">#${ladder.position}</div>
-        <div class="pp-hstat-label">Ladder of ${ladder.ladder_size}</div>
+        <div class="pp-hstat-val">#${ladder.position}<span class="pp-hstat-sub">of ${ladder.ladder_size}</span>${rankMoveHTML}</div>
+        <div class="pp-hstat-label">${rankLabelHTML}</div>
       </div>`}
     <div class="pp-hstat pp-hstat-wide">
       <div class="pp-hstat-val">${stats.wins}–${stats.losses}<span class="pp-hstat-sub">${stats.winPct === null ? '' : `${stats.winPct}%`}</span></div>
@@ -906,16 +914,22 @@ export function renderPlayerProfile() {
         </div>`).join('') : emptyBlock('No tournaments played yet')}
     </div>`;
 
-  // -- Ladder history panel (all-time, independent of the season selector) --
-  const ladderPanelHTML = ladder.position == null ? '' : `
+  // -- Career ladder panel (all-time, independent of the season selector) --
+  // The chart is an all-time positional replay, so the overlay reads the same
+  // series rather than the header's season rank. Pairing the two put a rating
+  // rank above a positional chart that legitimately disagreed with it.
+  const careerLast = ladderSeries[ladderSeries.length - 1] || null;
+  const careerBest = _bestRankInWindow(ladderSeries, null);
+
+  const ladderPanelHTML = careerLast == null ? '' : `
     <div class="pp-ladder-card">
-      <span class="pp-card-label pp-on-navy">Ladder history</span>
+      <span class="pp-card-label pp-on-navy">Career ladder position · all seasons</span>
       ${_ladderChartHTML(ladderSeries, seasons, 'desktop')}
       <div class="pp-ladder-overlay">
-        <div class="pp-ladder-now">#${ladder.position}</div>
-        <div class="pp-ladder-of">of ${ladder.ladder_size} players</div>
+        <div class="pp-ladder-now">#${careerLast.position}</div>
+        <div class="pp-ladder-of">of ${careerLast.ladder_size} players</div>
         <div class="pp-ladder-rule"></div>
-        <div class="pp-ladder-best">#${ladder.best_position}<span>Best ever</span></div>
+        <div class="pp-ladder-best">#${careerBest}<span>Best ever</span></div>
       </div>
     </div>`;
 
@@ -965,10 +979,10 @@ export function renderPlayerProfile() {
           ${history.slice(0, 3).map((m) => resultRow(m)).join('')}
         </div>` : ''}
 
-      ${ladder.position == null ? '' : `
+      ${careerLast == null ? '' : `
         <div class="pp-divider"><span>All time</span></div>
         <div class="pp-ladder-card pp-ladder-card-sm">
-          <span class="pp-card-label pp-on-navy">Ladder history</span>
+          <span class="pp-card-label pp-on-navy">Career ladder position</span>
           ${_ladderChartHTML(ladderSeries, seasons, 'mobile')}
         </div>`}
 

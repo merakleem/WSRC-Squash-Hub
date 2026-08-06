@@ -804,8 +804,15 @@ export async function renderDashboard() {
   const totalPlayers = ladderVisible.length;
   const todayStr = _localDateStr();
   const nextMatch = upcoming.find((m) => m.week_date >= todayStr) || null;
-  const wins = playerData.wins || 0;
-  const losses = playerData.losses || 0;
+  // Season-scoped, because the rank beside these figures is the current season's
+  // and the profile reports the same season by default. A career total here made
+  // one card contradict the other two surfaces.
+  const currentSeason = (playerData.seasons || []).find((s) => s.is_current) || null;
+  const seasonHistory = currentSeason
+    ? (playerData.history || []).filter((m) => m.season_id === currentSeason.id)
+    : (playerData.history || []);
+  const wins = seasonHistory.filter((m) => m.result === 'W').length;
+  const losses = seasonHistory.filter((m) => m.result === 'L').length;
   const total = wins + losses;
   const winPct = total > 0 ? Math.round((wins / total) * 100) : 0;
   const firstName = (playerData.name || '').split(' ')[0];
@@ -919,6 +926,7 @@ export async function renderDashboard() {
             <div class="db-rank-of">of ${totalPlayers}</div>
           </div>
         </div>
+        <div class="db-card-subtitle">${currentSeason ? esc(currentSeason.name) : 'All time'}</div>
         <div class="db-rank-stats">
           <div class="db-stat"><div class="db-stat-val">${wins}</div><div class="db-stat-lbl">Wins</div></div>
           <div class="db-stat"><div class="db-stat-val">${losses}</div><div class="db-stat-lbl">Losses</div></div>

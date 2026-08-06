@@ -236,10 +236,6 @@ function getLadder(asOfDate = null) {
   });
 }
 
-/**
- * Current and best-ever ladder position for one player.
- * Returns nulls when the player is excluded from the ladder.
- */
 // ===== ELO LADDER =====
 
 /**
@@ -433,7 +429,17 @@ function getLadderForSeason(seasonId = null) {
     return { season, system: 'elo', frozen: false, rows: computeEloLadder(season, settings) };
   }
 
-  return { season, system: 'leapfrog', frozen: false, rows: getLadder() };
+  // The positional ranking itself is all-time by construction, but the W/L shown
+  // beside it belongs to the season being viewed, matching both the rating
+  // ladder and a frozen snapshot. Without this the same row reports a career
+  // record under one system and a season record under the other.
+  const seasonRecords = getSeasonRecords(season.id);
+  const rows = getLadder().map((r) => ({
+    ...r,
+    season_wins: seasonRecords[r.id]?.wins || 0,
+    season_losses: seasonRecords[r.id]?.losses || 0,
+  }));
+  return { season, system: 'leapfrog', frozen: false, rows };
 }
 
 /** A frozen season's standings, rehydrated with current player details. */
@@ -682,11 +688,31 @@ function getPlayerMatchRatingDeltas(playerId) {
   return deltas;
 }
 
+/**
+ * Where one player stands on the ladder the rest of the app is showing.
+ *
+ * Goes through the same season dispatch the Ladder page and the dashboard ring
+ * use, so the three surfaces cannot report different ranks for the same player.
+ * It previously read the all-time positional ladder unconditionally, which
+ * disagreed with both of them whenever the current season was a rating one.
+ *
+ * `best_position` stays a career figure and is absent under a rating season by
+ * design; the profile derives the career numbers from the history series
+ * instead, and labels them separately from the season rank returned here.
+ */
 function getPlayerLadderStats(playerId) {
-  const ladder = getLadder();
-  const row = ladder.find((p) => p.id === Number(playerId));
-  if (!row) return { position: null, best_position: null, ladder_size: ladder.length };
-  return { position: row.position, best_position: row.best_position, ladder_size: ladder.length };
+  const { season, system, frozen, rows } = getLadderForSeason();
+  const row = rows.find((p) => p.id === Number(playerId)) || null;
+  return {
+    system,
+    frozen,
+    season_name: season?.name || null,
+    ladder_size: rows.length,
+    position: row?.position ?? null,
+    rank_change: frozen ? 0 : (row?.rank_change ?? 0),
+    rating: row?.rating ?? null,
+    best_position: row?.best_position ?? null,
+  };
 }
 
 module.exports = {

@@ -1840,6 +1840,16 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   gap: 8px;
 }
 .pp-hstat-sub { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.75); }
+/* Places gained or lost, beside the rank it applies to. Colour comes from
+   .pp-pos / .pp-neg, which are declared below. */
+.pp-hstat-move {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.14);
+  white-space: nowrap;
+}
 .pp-hstat-label {
   font-size: 10px;
   font-weight: 600;
@@ -2195,7 +2205,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .pp-header .pp-season-pick { display: none; }
   .pp-hstats { width: 100%; gap: 10px; }
   .pp-hstat { flex: 1; min-width: 0; padding: 12px 14px; }
-  .pp-hstat-val { font-size: 26px; }
+  /* Three stat blocks share a phone width; let a rank and its movement pill
+     wrap rather than overflow the block. */
+  .pp-hstat-val { font-size: 26px; flex-wrap: wrap; gap: 6px; row-gap: 3px; }
+  .pp-hstat-label-extra { display: none; }
   .pp-hstat-label { font-size: 9.5px; }
 
   .pp-card-pad { padding: 16px; }
@@ -3173,7 +3186,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   font-size: 12px;
 }
 .ldr-context-system { font-weight: 700; color: #1a2150; }
-.ldr-context-live, .ldr-context-frozen { color: var(--text-muted); }
+.ldr-context-live, .ldr-context-frozen, .ldr-context-scope { color: var(--text-muted); }
 
 .ldr-all-header {
   background: #f7f9fc;
