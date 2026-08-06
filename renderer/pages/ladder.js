@@ -1,10 +1,6 @@
 import { state, isAdmin } from '../state.js';
 import { esc, toast, modal, avatarHTML } from '../utils.js';
 
-// How far back the movement strip looks, and how many results it will show.
-const MOVEMENT_DAYS = 7;
-const MOVEMENT_MAX = 8;
-
 // Which season the ladder is showing. null = the current season.
 let _ladderSeason = null;
 // Search box contents. Filtering is client-side; the whole ladder is already here.
@@ -26,19 +22,6 @@ function _attachLadderSeasonTabs() {
   });
 }
 
-// "Today" / "Yesterday" / "4d" for the movement strip. Both sides are parsed as
-// date-only strings so the difference can't be thrown off by a time component.
-function _dayLabel(iso) {
-  if (!iso) return '';
-  const then = String(iso).slice(0, 10);
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const diff = Math.round((new Date(today) - new Date(then)) / 86400000);
-  if (diff <= 0) return 'Today';
-  if (diff === 1) return 'Yesterday';
-  return `${diff}d`;
-}
-
 // Called when navigating to the Ladder from elsewhere, so a historical season
 // left selected earlier doesn't silently persist across the session.
 export function resetLadderSeason() {
@@ -51,12 +34,10 @@ export async function renderLadder() {
   document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>`;
   document.getElementById('topbarActions').innerHTML = '';
 
-  const [ladderResult, recordsArr, seasons, activity] = await Promise.all([
+  const [ladderResult, recordsArr, seasons] = await Promise.all([
     window.api.getLadderForSeason(_ladderSeason),
     window.api.getPlayerRecords(),
     window.api.getSeasons().catch(() => []),
-    // Feeds the movement strip only. The ladder still renders without it.
-    window.api.getActivity(MOVEMENT_DAYS).catch(() => []),
   ]);
 
   const ladder = ladderResult.rows || [];
@@ -81,21 +62,11 @@ export async function renderLadder() {
         </button>`).join('')}
     </div>`;
 
-  const contextHTML = !season ? '' : `
-    <div class="ldr-context">
-      <span class="ldr-context-system">${isElo ? 'Rating ladder' : 'Position ladder'}</span>
-      ${ladderResult.frozen
-        ? `<span class="ldr-context-frozen">Final standings. This season has ended and no longer changes</span>`
-        : `<span class="ldr-context-live">Updates as matches are reported</span>`}
-      <span class="ldr-context-scope">W/L for ${esc(season.name)}</span>
-    </div>`;
-
   if (ladder.length === 0) {
     // An empty state that only explains is a dead end; the one thing a player
     // can do from here is record a game, so it offers that.
     content.innerHTML = `
       ${seasonBarHTML}
-      ${contextHTML}
       <div class="table-card">
         <div class="empty-state">
           <strong>No standings yet</strong>
@@ -185,49 +156,6 @@ export async function renderLadder() {
     return q ? `${shown} of ${ranked.length} players` : `${ranked.length} player${ranked.length === 1 ? '' : 's'}`;
   };
 
-  // A strip of what has changed since the last visit. Only for the live season:
-  // on a finished one, "the last 7 days" describes nothing that can still move.
-  // Under a rating ladder the server sends places_moved as 0 rather than invent
-  // positions, so those cards read as results with no movement badge.
-  const movementHTML = (() => {
-    if (!viewingCurrent || ladderResult.frozen) return '';
-    const recent = (Array.isArray(activity) ? activity : []).slice(0, MOVEMENT_MAX);
-    if (!recent.length) return '';
-
-    const cards = recent.map((a) => {
-      const winnerIsP1 = a.winner_id === a.player1_id;
-      const winnerName = winnerIsP1 ? a.p1_name : a.p2_name;
-      const loserName  = winnerIsP1 ? a.p2_name : a.p1_name;
-      const winnerId   = winnerIsP1 ? a.eff_p1_id : a.eff_p2_id;
-      const winnerScore = winnerIsP1 ? a.player1_score : a.player2_score;
-      const loserScore  = winnerIsP1 ? a.player2_score : a.player1_score;
-      const moved = Number(a.places_moved) || 0;
-      const label = `${winnerName} beat ${loserName}${moved ? `, up ${moved} place${moved === 1 ? '' : 's'}` : ''}. View profile`;
-      return `
-        <div class="ldr-move-card" role="button" tabindex="0" aria-label="${esc(label)}"
-          data-action="view-profile" data-id="${winnerId}">
-          <div class="ldr-move-top">
-            ${moved ? `<span class="ldr-move-delta">↑${moved}</span>` : ''}
-            <span class="ldr-move-winner">${esc(winnerName)}</span>
-            <span class="ldr-move-when">${_dayLabel(a.confirmed_at)}</span>
-          </div>
-          <div class="ldr-move-bot">
-            <span class="ldr-move-loser">beat ${esc(loserName)}</span>
-            <span class="ldr-move-score">${winnerScore ?? '–'}–${loserScore ?? '–'}</span>
-          </div>
-        </div>`;
-    }).join('');
-
-    return `
-      <div class="ldr-move">
-        <div class="ldr-move-head">
-          <span class="ldr-move-title">Last ${MOVEMENT_DAYS} days</span>
-          <button class="ldr-link" id="ldrMoveAll">Club activity</button>
-        </div>
-        <div class="ldr-move-strip">${cards}</div>
-      </div>`;
-  })();
-
   const toolbarHTML = `
     <div class="ldr-toolbar">
       <div class="ldr-search">
@@ -256,10 +184,8 @@ export async function renderLadder() {
 
   content.innerHTML = `
     ${seasonBarHTML}
-    ${contextHTML}
     <div class="ldr-player-wrap" id="ladderList">
       <div class="ldr-section-block">
-        ${movementHTML}
         ${toolbarHTML}
         <div class="ldr-all-table">
           <div class="ldr-all-header${isElo ? ' ldr-row-elo' : ''}" role="presentation">
@@ -359,7 +285,6 @@ export async function renderLadder() {
 
   document.getElementById('ldrJumpMe')?.addEventListener('click', jumpToMe);
   document.getElementById('ldrSelfBarJump')?.addEventListener('click', jumpToMe);
-  document.getElementById('ldrMoveAll')?.addEventListener('click', () => window.navigate('clubActivity'));
 
   watchOwnRow();
   _attachLadderSeasonTabs();

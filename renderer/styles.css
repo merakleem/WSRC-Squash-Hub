@@ -3235,17 +3235,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .ldr-frozen-dot { color: var(--text-muted-2); font-size: 9px; }
 
-.ldr-context {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  font-size: 12px;
-}
-.ldr-context-system { font-weight: 700; color: var(--navy-deep); }
-.ldr-context-live, .ldr-context-frozen, .ldr-context-scope { color: var(--text-muted); }
-
 .ldr-all-header {
   background: #f7f9fc;
   border-bottom: 1px solid #edf0f5;
@@ -3330,22 +3319,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   border-radius: 8px;
   letter-spacing: .04em;
 }
-
-/* ── Movement strip ── */
-.ldr-move { display: flex; flex-direction: column; gap: 8px; }
-.ldr-move-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-.ldr-move-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--text-muted-2);
-}
 .ldr-link {
   border: 0;
   background: none;
@@ -3357,76 +3330,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   cursor: pointer;
 }
 .ldr-link:hover { text-decoration: underline; }
-
-.ldr-move-strip {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  /* The cards are a sideways list, so they must not be squeezed to fit. */
-  padding-bottom: 2px;
-  scrollbar-width: thin;
-  /* Fades the last card out instead of slicing it, so the row reads as
-     continuing rather than as a clipped layout. */
-  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
-}
-.ldr-move-card {
-  flex: 0 0 auto;
-  min-width: 208px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 9px 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: 0 1px 3px rgba(0,0,0,.05);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color .12s, box-shadow .12s, transform .12s;
-}
-.ldr-move-card:hover {
-  border-color: #cfd8e6;
-  box-shadow: 0 3px 10px rgba(0,0,0,.09);
-  transform: translateY(-1px);
-}
-.ldr-move-card:focus-visible {
-  outline: 2px solid var(--you);
-  outline-offset: 1px;
-}
-.ldr-move-top, .ldr-move-bot { display: flex; align-items: center; gap: 7px; }
-.ldr-move-delta {
-  font-size: 11px;
-  font-weight: 800;
-  padding: 1px 5px;
-  border-radius: 6px;
-  background: var(--win-bg);
-  color: var(--win);
-}
-.ldr-move-winner {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.ldr-move-when { margin-left: auto; font-size: 11px; color: var(--text-muted-2); white-space: nowrap; }
-.ldr-move-loser {
-  font-size: 12.5px;
-  color: var(--text-muted);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.ldr-move-score {
-  margin-left: auto;
-  font-family: 'Barlow', sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--navy-deep);
-  white-space: nowrap;
-}
 
 /* ── Toolbar: search, count, jump ── */
 .ldr-toolbar {
@@ -3506,7 +3409,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .ldr-pos-1 .ldr-avatar,
 .ldr-pos-2 .ldr-avatar,
 .ldr-pos-3 .ldr-avatar {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--medal);
+  border: 2.5px solid var(--medal);
 }
 .ldr-pos-1 .ldr-all-name,
 .ldr-pos-2 .ldr-all-name,
