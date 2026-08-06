@@ -690,7 +690,9 @@ export function renderPlayerProfile() {
   // Opening a different player resets the view; a Results filter that matched
   // nothing for them would otherwise render an empty panel with no explanation.
   if (_profileSeasonFor !== p.id) {
-    _profileTab = 'season';
+    // 'season' was a tab that no longer exists; it only ever fell through to
+    // the Results default, so it now says so.
+    _profileTab = 'results';
     _profileResultFilter = 'all';
     _profileSeasonFor = p.id;
     _profileSeason = defaultSeason;
@@ -706,6 +708,12 @@ export function renderPlayerProfile() {
   const seasonLabel = activeSeason === null
     ? 'All time'
     : activeSeason === 'none' ? 'Unassigned' : (seasonsById[activeSeason]?.name || 'Season');
+
+  // Empty-state copy naming the selected period, so a profile filtered to
+  // "All time" doesn't report that nothing happened "this season".
+  const periodPhrase = activeSeason === null
+    ? 'recorded'
+    : activeSeason === 'none' ? 'outside a season' : `in ${seasonLabel}`;
 
   const stats = _profileStats(history);
 
@@ -795,12 +803,19 @@ export function renderPlayerProfile() {
     { key: 'tournaments', label: 'Tournaments' },
     { key: 'ladder', label: 'Ladder history' },
   ];
+  // Normalised back onto the module state so the arrow-key handler and the
+  // filter rebuild can't read a tab key the DOM never rendered.
   const activeTab = TABS.some((t) => t.key === _profileTab) ? _profileTab : 'results';
+  _profileTab = activeTab;
 
+  // A tablist needs aria-selected, a link to its panel, and one stop in the tab
+  // order rather than four; arrow keys move between tabs from there.
   const tabBarHTML = `
-    <div class="pp-tabs" role="tablist">
+    <div class="pp-tabs" role="tablist" aria-label="Profile sections">
       ${TABS.map((t) => `
-        <button class="pp-tab${t.key === activeTab ? ' active' : ''}" data-pp-tab="${t.key}" role="tab">${t.label}</button>`).join('')}
+        <button class="pp-tab${t.key === activeTab ? ' active' : ''}" data-pp-tab="${t.key}"
+          role="tab" id="ppTab-${t.key}" aria-controls="ppPanel"
+          aria-selected="${t.key === activeTab}" tabindex="${t.key === activeTab ? '0' : '-1'}">${t.label}</button>`).join('')}
     </div>`;
 
   const resultRow = (m, { compact = false } = {}) => {
@@ -831,7 +846,15 @@ export function renderPlayerProfile() {
       </div>`;
   };
 
-  const emptyBlock = (msg) => `<div class="empty-state"><strong>${esc(msg)}</strong></div>`;
+  // `action` is optional: only the states where there is a genuinely available
+  // next step get a button, rather than every empty panel growing one.
+  const emptyBlock = (msg, action) => `
+    <div class="empty-state">
+      <strong>${esc(msg)}</strong>
+      ${action ? `<button class="btn btn-outline btn-sm" data-pp-action="${action.id}">${esc(action.label)}</button>` : ''}
+    </div>`;
+
+  const reportMatchAction = { id: 'report-ladder', label: 'Report a ladder match' };
 
   // -- Results panel --
   // Carries the season-detail figures that used to live on the Season tab, so
@@ -850,25 +873,33 @@ export function renderPlayerProfile() {
     { key: 'pickup', label: 'Ladder' },
     { key: 'tournament', label: 'Tournament' },
   ];
-  const filtered = _profileResultFilter === 'all'
-    ? history
-    : history.filter((m) => (m.source || 'league') === _profileResultFilter);
-
-  const resultsPanelHTML = `
+  // Takes the filter as an argument so changing it can rebuild this panel alone
+  // instead of re-rendering the whole profile.
+  const buildResultsPanel = (filterKey) => {
+    const filtered = filterKey === 'all'
+      ? history
+      : history.filter((m) => (m.source || 'league') === filterKey);
+    return `
     <div class="pp-card">
       <div class="pp-card-head pp-card-head-wrap">
         <div class="pp-card-head-text">
           <span class="pp-card-label">Results · ${esc(seasonLabel)}</span>
           <span class="pp-card-sub">${stats.wins} win${stats.wins === 1 ? '' : 's'} · ${stats.losses} loss${stats.losses === 1 ? '' : 'es'}</span>
         </div>
-        <div class="pp-filters">
+        <div class="pp-filters" role="group" aria-label="Filter results by competition">
           ${sourceFilters.map((f) => `
-            <button class="pp-filter${_profileResultFilter === f.key ? ' active' : ''}" data-pp-filter="${f.key}">${f.label}</button>`).join('')}
+            <button class="pp-filter${filterKey === f.key ? ' active' : ''}" data-pp-filter="${f.key}"
+              aria-pressed="${filterKey === f.key}">${f.label}</button>`).join('')}
         </div>
       </div>
       ${detailStripHTML}
-      ${filtered.length ? filtered.map((m) => resultRow(m)).join('') : emptyBlock('No matches for this filter')}
+      ${filtered.length
+        ? filtered.map((m) => resultRow(m)).join('')
+        : filterKey === 'all'
+          ? emptyBlock(`No matches ${periodPhrase} yet`, reportMatchAction)
+          : emptyBlock(`No ${sourceFilters.find((f) => f.key === filterKey)?.label.toLowerCase()} matches ${periodPhrase}`)}
     </div>`;
+  };
 
   // -- Upcoming panel --
   const upcomingPanelHTML = `
@@ -933,11 +964,13 @@ export function renderPlayerProfile() {
       </div>
     </div>`;
 
-  const panels = {
-    results: resultsPanelHTML,
-    upcoming: upcomingPanelHTML,
-    tournaments: tournPanelHTML,
-    ladder: ladderPanelHTML || emptyBlock('Not on the ladder'),
+  const panelFor = (tabKey) => {
+    switch (tabKey) {
+      case 'upcoming':    return upcomingPanelHTML;
+      case 'tournaments': return tournPanelHTML;
+      case 'ladder':      return ladderPanelHTML || emptyBlock('Not on the ladder yet', reportMatchAction);
+      default:            return buildResultsPanel(_profileResultFilter);
+    }
   };
 
   // ===== MOBILE =====
@@ -993,32 +1026,77 @@ export function renderPlayerProfile() {
     ${headerHTML}
     <div class="pp-desktop">
       ${tabBarHTML}
-      <div class="pp-panel">${panels[activeTab]}</div>
+      <div class="pp-panel" id="ppPanel" role="tabpanel" aria-labelledby="ppTab-${activeTab}" tabindex="0">${panelFor(activeTab)}</div>
     </div>
     ${mobileHTML}`;
 
   // ===== EVENTS =====
   const content = document.getElementById('mainContent');
 
-  content.querySelectorAll('.nav-player-link').forEach((el) => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.openPlayerProfile(Number(el.dataset.playerId));
+  const wireOpponentLinks = (root) => {
+    root.querySelectorAll('.nav-player-link').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.openPlayerProfile(Number(el.dataset.playerId));
+      });
     });
-  });
+  };
+  wireOpponentLinks(content);
 
   document.getElementById('btnEditPhoto')?.addEventListener('click', () => openPhotoModal(p));
 
-  content.querySelectorAll('[data-pp-tab]').forEach((el) => {
+  const panelEl = document.getElementById('ppPanel');
+  const tabEls = [...content.querySelectorAll('.pp-tab[data-pp-tab]')];
+
+  // Only the panel's contents depend on the tab and the filter, so only they are
+  // rebuilt. A full renderPlayerProfile() re-fetched the profile, replayed the
+  // ladder and replaced the header and chart, which lost the scroll position.
+  const wirePanel = () => {
+    wireOpponentLinks(panelEl);
+    panelEl.querySelectorAll('[data-pp-action="report-ladder"]').forEach((el) => {
+      el.addEventListener('click', () => openPickupGameModal());
+    });
+    panelEl.querySelectorAll('[data-pp-filter]').forEach((el) => {
+      el.addEventListener('click', () => {
+        _profileResultFilter = el.dataset.ppFilter;
+        panelEl.innerHTML = panelFor(_profileTab);
+        wirePanel();
+      });
+    });
+  };
+
+  const showTab = (key) => {
+    _profileTab = key;
+    panelEl.innerHTML = panelFor(key);
+    panelEl.setAttribute('aria-labelledby', `ppTab-${key}`);
+    tabEls.forEach((t) => {
+      const on = t.dataset.ppTab === key;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+    });
+    wirePanel();
+  };
+
+  if (panelEl) {
+    wirePanel();
+    tabEls.forEach((el) => el.addEventListener('click', () => showTab(el.dataset.ppTab)));
+    content.querySelector('.pp-tabs')?.addEventListener('keydown', (e) => {
+      const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      const i = tabEls.findIndex((t) => t.dataset.ppTab === _profileTab);
+      const next = tabEls[(i + step + tabEls.length) % tabEls.length];
+      showTab(next.dataset.ppTab);
+      next.focus();
+    });
+  }
+
+  // The mobile quick links point at desktop tabs, which aren't rendered there;
+  // they still need the full re-render they have always done.
+  content.querySelectorAll('.pp-quick-row[data-pp-tab]').forEach((el) => {
     el.addEventListener('click', () => {
       _profileTab = el.dataset.ppTab;
-      renderPlayerProfile();
-    });
-  });
-
-  content.querySelectorAll('[data-pp-filter]').forEach((el) => {
-    el.addEventListener('click', () => {
-      _profileResultFilter = el.dataset.ppFilter;
       renderPlayerProfile();
     });
   });

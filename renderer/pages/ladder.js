@@ -1,8 +1,16 @@
 import { state, isAdmin } from '../state.js';
 import { esc, toast, modal, avatarHTML } from '../utils.js';
 
+// How far back the movement strip looks, and how many results it will show.
+const MOVEMENT_DAYS = 7;
+const MOVEMENT_MAX = 8;
+
 // Which season the ladder is showing. null = the current season.
 let _ladderSeason = null;
+// Search box contents. Filtering is client-side; the whole ladder is already here.
+let _ladderQuery = '';
+// Torn down and rebuilt on every row render, since the observed row is replaced.
+let _selfObserver = null;
 
 function _attachLadderSeasonTabs() {
   document.querySelectorAll('[data-ladder-season]').forEach((tab) => {
@@ -11,15 +19,31 @@ function _attachLadderSeasonTabs() {
       // pinning to its id; otherwise there is no way back to "today", and
       // state.ladder would stay frozen for the rest of the session.
       _ladderSeason = tab.dataset.ladderCurrent === '1' ? null : Number(tab.dataset.ladderSeason);
+      // A filter carried across seasons would silently hide most of the new one.
+      _ladderQuery = '';
       renderLadder();
     });
   });
+}
+
+// "Today" / "Yesterday" / "4d" for the movement strip. Both sides are parsed as
+// date-only strings so the difference can't be thrown off by a time component.
+function _dayLabel(iso) {
+  if (!iso) return '';
+  const then = String(iso).slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const diff = Math.round((new Date(today) - new Date(then)) / 86400000);
+  if (diff <= 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return `${diff}d`;
 }
 
 // Called when navigating to the Ladder from elsewhere, so a historical season
 // left selected earlier doesn't silently persist across the session.
 export function resetLadderSeason() {
   _ladderSeason = null;
+  _ladderQuery = '';
 }
 
 // ===== LADDER PAGE =====
@@ -27,10 +51,12 @@ export async function renderLadder() {
   document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>`;
   document.getElementById('topbarActions').innerHTML = '';
 
-  const [ladderResult, recordsArr, seasons] = await Promise.all([
+  const [ladderResult, recordsArr, seasons, activity] = await Promise.all([
     window.api.getLadderForSeason(_ladderSeason),
     window.api.getPlayerRecords(),
     window.api.getSeasons().catch(() => []),
+    // Feeds the movement strip only. The ladder still renders without it.
+    window.api.getActivity(MOVEMENT_DAYS).catch(() => []),
   ]);
 
   const ladder = ladderResult.rows || [];
@@ -65,6 +91,8 @@ export async function renderLadder() {
     </div>`;
 
   if (ladder.length === 0) {
+    // An empty state that only explains is a dead end; the one thing a player
+    // can do from here is record a game, so it offers that.
     content.innerHTML = `
       ${seasonBarHTML}
       ${contextHTML}
@@ -72,8 +100,10 @@ export async function renderLadder() {
         <div class="empty-state">
           <strong>No standings yet</strong>
           <p>${season ? `No matches have been played in ${esc(season.name)} yet.` : 'Add players on the Players page and they will appear here.'}</p>
+          ${ladderResult.frozen ? '' : `<button class="btn btn-primary" id="ldrEmptyReport">Report a ladder match</button>`}
         </div>
       </div>`;
+    document.getElementById('ldrEmptyReport')?.addEventListener('click', () => window.openPickupGameModal());
     _attachLadderSeasonTabs();
     return;
   }
@@ -104,13 +134,20 @@ export async function renderLadder() {
     return `<span class="ldr-all-stat ldr-col-rating">${p.rating ?? '—'}${idle}</span>`;
   };
 
+  // Rows are the page's main navigation, so they have to be reachable without a
+  // mouse. role/tabindex rather than a real <button> because the row contains
+  // the avatar div, which is not valid button content.
   const allRowHTML = (p, rank) => {
     const rec   = recordFor(p);
     const total = rec.wins + rec.losses;
     const pct   = total > 0 ? Math.round(rec.wins / total * 100) : null;
     const isMe  = p.id === myId;
+    const podium = rank <= 3 ? ` ldr-pos-${rank}` : '';
+    const label = `${p.name}, rank ${rank}${isMe ? ', you' : ''}, ${rec.wins} won ${rec.losses} lost`;
     return `
-      <div class="ldr-all-row${isMe ? ' ldr-all-me' : ''}${isElo ? ' ldr-row-elo' : ''}" data-action="view-profile" data-id="${p.id}">
+      <div class="ldr-all-row${isMe ? ' ldr-all-me' : ''}${isElo ? ' ldr-row-elo' : ''}${podium}"
+        role="button" tabindex="0" aria-label="${esc(label)}"
+        data-action="view-profile" data-id="${p.id}">
         <span class="ldr-all-rank">${rank}</span>
         <div class="ldr-all-player">
           ${avatarHTML(p, 'ldr-avatar ldr-avatar-sm')}
@@ -125,13 +162,107 @@ export async function renderLadder() {
       </div>`;
   };
 
+  // Rank is the ladder position, never the position within a filtered list, so
+  // searching cannot make someone look like they are 1st.
+  const ranked = ladder.map((p, i) => ({ player: p, rank: i + 1 }));
+  const myEntry = ranked.find((r) => r.player.id === myId) || null;
+
+  const rowsHTML = (query) => {
+    const q = query.trim().toLowerCase();
+    const shown = q ? ranked.filter((r) => r.player.name.toLowerCase().includes(q)) : ranked;
+    if (shown.length === 0) {
+      return `<div class="ldr-no-match">
+        <strong>No players match “${esc(query.trim())}”</strong>
+        <button class="btn btn-outline btn-sm" data-action="clear-search">Clear search</button>
+      </div>`;
+    }
+    return shown.map((r) => allRowHTML(r.player, r.rank)).join('');
+  };
+
+  const countText = (query) => {
+    const q = query.trim().toLowerCase();
+    const shown = q ? ranked.filter((r) => r.player.name.toLowerCase().includes(q)).length : ranked.length;
+    return q ? `${shown} of ${ranked.length} players` : `${ranked.length} player${ranked.length === 1 ? '' : 's'}`;
+  };
+
+  // A strip of what has changed since the last visit. Only for the live season:
+  // on a finished one, "the last 7 days" describes nothing that can still move.
+  // Under a rating ladder the server sends places_moved as 0 rather than invent
+  // positions, so those cards read as results with no movement badge.
+  const movementHTML = (() => {
+    if (!viewingCurrent || ladderResult.frozen) return '';
+    const recent = (Array.isArray(activity) ? activity : []).slice(0, MOVEMENT_MAX);
+    if (!recent.length) return '';
+
+    const cards = recent.map((a) => {
+      const winnerIsP1 = a.winner_id === a.player1_id;
+      const winnerName = winnerIsP1 ? a.p1_name : a.p2_name;
+      const loserName  = winnerIsP1 ? a.p2_name : a.p1_name;
+      const winnerId   = winnerIsP1 ? a.eff_p1_id : a.eff_p2_id;
+      const winnerScore = winnerIsP1 ? a.player1_score : a.player2_score;
+      const loserScore  = winnerIsP1 ? a.player2_score : a.player1_score;
+      const moved = Number(a.places_moved) || 0;
+      const label = `${winnerName} beat ${loserName}${moved ? `, up ${moved} place${moved === 1 ? '' : 's'}` : ''}. View profile`;
+      return `
+        <div class="ldr-move-card" role="button" tabindex="0" aria-label="${esc(label)}"
+          data-action="view-profile" data-id="${winnerId}">
+          <div class="ldr-move-top">
+            ${moved ? `<span class="ldr-move-delta">↑${moved}</span>` : ''}
+            <span class="ldr-move-winner">${esc(winnerName)}</span>
+            <span class="ldr-move-when">${_dayLabel(a.confirmed_at)}</span>
+          </div>
+          <div class="ldr-move-bot">
+            <span class="ldr-move-loser">beat ${esc(loserName)}</span>
+            <span class="ldr-move-score">${winnerScore ?? '–'}–${loserScore ?? '–'}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="ldr-move">
+        <div class="ldr-move-head">
+          <span class="ldr-move-title">Last ${MOVEMENT_DAYS} days</span>
+          <button class="ldr-link" id="ldrMoveAll">Club activity</button>
+        </div>
+        <div class="ldr-move-strip">${cards}</div>
+      </div>`;
+  })();
+
+  const toolbarHTML = `
+    <div class="ldr-toolbar">
+      <div class="ldr-search">
+        <svg class="ldr-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path d="M20 20l-4.2-4.2"/>
+        </svg>
+        <input type="search" id="ldrSearch" class="ldr-search-input" placeholder="Search players"
+          autocomplete="off" aria-label="Search players" value="${esc(_ladderQuery)}">
+      </div>
+      <span class="ldr-count" id="ldrCount" role="status">${countText(_ladderQuery)}</span>
+      ${myEntry ? `<button class="btn btn-outline btn-sm ldr-jump" id="ldrJumpMe">Jump to my rank</button>` : ''}
+    </div>`;
+
+  const selfBarHTML = !myEntry ? '' : (() => {
+    const rec = recordFor(myEntry.player);
+    const total = rec.wins + rec.losses;
+    const pct = total > 0 ? Math.round(rec.wins / total * 100) : null;
+    return `
+      <div class="ldr-selfbar" id="ldrSelfBar" aria-hidden="true">
+        <span class="ldr-selfbar-rank">#${myEntry.rank}</span>
+        <span class="ldr-selfbar-name">${esc(myEntry.player.name)}</span>
+        <span class="ldr-selfbar-rec">${rec.wins}–${rec.losses}${pct === null ? '' : ` · ${pct}%`}</span>
+        <button class="ldr-selfbar-btn" id="ldrSelfBarJump">Jump to my rank</button>
+      </div>`;
+  })();
+
   content.innerHTML = `
     ${seasonBarHTML}
     ${contextHTML}
     <div class="ldr-player-wrap" id="ladderList">
       <div class="ldr-section-block">
+        ${movementHTML}
+        ${toolbarHTML}
         <div class="ldr-all-table">
-          <div class="ldr-all-header${isElo ? ' ldr-row-elo' : ''}">
+          <div class="ldr-all-header${isElo ? ' ldr-row-elo' : ''}" role="presentation">
             <span class="ldr-all-rank">#</span>
             <span class="ldr-all-player">PLAYER</span>
             ${isElo ? '<span class="ldr-all-stat ldr-col-rating">RATING</span>' : ''}
@@ -140,16 +271,97 @@ export async function renderLadder() {
             <span class="ldr-all-stat ldr-col-played">PLAYED</span>
             <span class="ldr-all-stat ldr-col-winpct">WIN %</span>
           </div>
-          ${ladder.map((p, i) => allRowHTML(p, i + 1)).join('')}
+          <div id="ldrRows">${rowsHTML(_ladderQuery)}</div>
         </div>
       </div>
+      ${selfBarHTML}
     </div>`;
 
-  document.getElementById('ladderList').addEventListener('click', (e) => {
+  const listEl = document.getElementById('ladderList');
+  const rowsEl = document.getElementById('ldrRows');
+  const searchEl = document.getElementById('ldrSearch');
+  const selfBar = document.getElementById('ldrSelfBar');
+
+  const openRow = (el) => window.openPlayerProfile(Number(el.dataset.id));
+
+  listEl.addEventListener('click', (e) => {
+    if (e.target.closest('[data-action="clear-search"]')) {
+      _ladderQuery = '';
+      searchEl.value = '';
+      refreshRows();
+      searchEl.focus();
+      return;
+    }
     const el = e.target.closest('[data-action="view-profile"]');
-    if (el) window.openPlayerProfile(Number(el.dataset.id));
+    if (el) openRow(el);
   });
 
+  // Enter and Space are what a button would do, so the row does the same.
+  listEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const el = e.target.closest('[data-action="view-profile"]');
+    if (!el) return;
+    e.preventDefault();
+    openRow(el);
+  });
+
+  // The observed row is replaced on every filter, so the observer is rebuilt
+  // alongside it rather than kept for the life of the page.
+  function watchOwnRow() {
+    _selfObserver?.disconnect();
+    _selfObserver = null;
+    if (!selfBar) return;
+
+    const meRow = rowsEl.querySelector('.ldr-all-me');
+    if (!meRow) { selfBar.classList.remove('show'); return; }
+
+    _selfObserver = new IntersectionObserver((entries) => {
+      const visible = entries[0].isIntersecting;
+      selfBar.classList.toggle('show', !visible);
+      selfBar.setAttribute('aria-hidden', visible ? 'true' : 'false');
+    }, { root: document.getElementById('mainContent'), threshold: 0.6 });
+    _selfObserver.observe(meRow);
+  }
+
+  function refreshRows() {
+    rowsEl.innerHTML = rowsHTML(_ladderQuery);
+    document.getElementById('ldrCount').textContent = countText(_ladderQuery);
+    watchOwnRow();
+  }
+
+  let searchTimer = null;
+  searchEl.addEventListener('input', () => {
+    // Debounced because every keystroke rebuilds the whole list.
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      _ladderQuery = searchEl.value;
+      refreshRows();
+    }, 120);
+  });
+
+  function jumpToMe() {
+    // Clear a filter that would otherwise be hiding the row we want to reveal.
+    if (_ladderQuery.trim()) {
+      _ladderQuery = '';
+      searchEl.value = '';
+      refreshRows();
+    }
+    const meRow = rowsEl.querySelector('.ldr-all-me');
+    if (!meRow) return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    meRow.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+    meRow.classList.remove('ldr-flash');
+    // Reflow between remove and add so a second press replays the highlight.
+    void meRow.offsetWidth;
+    meRow.classList.add('ldr-flash');
+    meRow.focus({ preventScroll: true });
+  }
+
+  document.getElementById('ldrJumpMe')?.addEventListener('click', jumpToMe);
+  document.getElementById('ldrSelfBarJump')?.addEventListener('click', jumpToMe);
+  document.getElementById('ldrMoveAll')?.addEventListener('click', () => window.navigate('clubActivity'));
+
+  watchOwnRow();
   _attachLadderSeasonTabs();
 
   document.getElementById('btnLadderInfo')?.addEventListener('click', () => {
