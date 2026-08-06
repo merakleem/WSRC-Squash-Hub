@@ -59,25 +59,33 @@ router.get('/players/:id/history', wrap(async (req, res) => {
 
   // Rating movement per match, present only for matches in a rated season.
   const ratingDeltas = ladderModel.getPlayerMatchRatingDeltas(id);
-  const withDelta = (m) => {
+  const seasonSettings = seasonModel.getSettings();
+
+  const decorate = (m) => {
     // Tournament rows carry a prefixed id ("t_12") to keep them unique in the
     // merged list; the delta map is keyed on the raw table id.
     const rawId = m.source === 'tournament' ? String(m.id).replace(/^t_/, '') : m.id;
     const delta = ratingDeltas[`${m.source}:${rawId}`];
-    return delta === undefined ? m : { ...m, rating_change: delta };
+    return {
+      ...m,
+      // Season comes from when the match was played, so it stays correct even
+      // if a date is corrected later.
+      season_key: seasonModel.seasonKeyForDate(m.week_date, seasonSettings),
+      ...(delta === undefined ? {} : { rating_change: delta }),
+    };
   };
 
   const history = [
     ...leagueHistory.map((m) => ({ ...m, source: 'league' })),
     ...tournHistory,
     ...pickupHistory,
-  ].map(withDelta).sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''));
+  ].map(decorate).sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''));
   const upcoming = [...leagueUpcoming.map((m) => ({ ...m, source: 'league' })), ...tournUpcoming]
-    .sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
+    .map(decorate).sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
 
   // Tournament results: one entry per tournament, with the player's finishing position
   const playerTournaments = db.prepare(`
-    SELECT DISTINCT t.id, t.name, t.championship_date, t.status, t.season_id
+    SELECT DISTINCT t.id, t.name, t.championship_date, t.status
     FROM tournaments t
     WHERE t.id IN (
       SELECT tournament_id FROM tournament_players WHERE player_id = ?
@@ -98,7 +106,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
       name: tourn.name,
       championship_date: tourn.championship_date,
       status: tourn.status,
-      season_id: tourn.season_id,
+      season_key: seasonModel.seasonKeyForDate(tourn.championship_date),
       position: tier ? tier.position : null,
     });
   }
@@ -107,7 +115,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   const playerData = isAdmin ? player : _stripContact(player);
   // Seasons ship with the profile so the tab bar can be built without a second
   // round trip; per-season records are derived client-side from history rows,
-  // which already carry season_id.
+  // which already carry season_key.
   const seasons = seasonModel.getAllSeasons();
   const ladderStats = ladderModel.getPlayerLadderStats(id);
 

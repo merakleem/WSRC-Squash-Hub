@@ -4247,6 +4247,37 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   color: var(--text);
   margin: 0;
 }
+/* ── Seasons (Club Settings) ── */
+.season-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 460px;
+  margin-bottom: 18px;
+}
+.season-md { display: flex; gap: 8px; }
+.season-md select:first-child { flex: 2; }
+.season-md select:last-child { flex: 1; }
+.season-current-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.season-meta {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
 .settings-section-desc {
   font-size: 13px;
   color: var(--text-muted);

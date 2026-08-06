@@ -1,6 +1,5 @@
 const { run, all, get, getDB } = require('../database/db');
 const crypto = require('crypto');
-const seasonModel = require('./seasonModel');
 
 function getAllLeagues() {
   return all('SELECT * FROM leagues ORDER BY created_at DESC');
@@ -14,11 +13,10 @@ function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_typ
   const publicToken = crypto.randomBytes(2).toString('hex');
   const result = run(
     `INSERT INTO leagues (name, start_date, num_teams, num_divisions, setup_type, num_rounds, blackout_dates,
-       match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token, season_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [name, startDate, numTeams, numDivisions, setup_type, numRounds, JSON.stringify(blackoutDates),
-     matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken,
-     seasonModel.getCurrentSeasonId()]
+     matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken]
   );
   return result.lastID;
 }

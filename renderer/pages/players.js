@@ -667,9 +667,9 @@ export function renderPlayerProfile() {
   const seasons = p.seasons || [];
   const seasonsById = Object.fromEntries(seasons.map((s) => [s.id, s]));
 
-  const playedSeasonIds = [...new Set(allHistory.map((m) => m.season_id).filter((id) => id != null))]
+  const playedSeasonIds = [...new Set(allHistory.map((m) => m.season_key).filter((k) => k != null))]
     .sort((a, b) => (seasonsById[b]?.start_date || '').localeCompare(seasonsById[a]?.start_date || ''));
-  const hasUnassigned = allHistory.some((m) => m.season_id == null);
+  const hasUnassigned = allHistory.some((m) => m.season_key == null);
 
   // Default to the current season rather than all-time: the page is a season
   // view now, and an unbounded history is what the redesign set out to remove.
@@ -699,7 +699,7 @@ export function renderPlayerProfile() {
   }
 
   const inSeason = (row) => activeSeason === null
-    || (activeSeason === 'none' ? row.season_id == null : row.season_id === activeSeason);
+    || (activeSeason === 'none' ? row.season_key == null : row.season_key === activeSeason);
 
   const history = allHistory.filter(inSeason);
   const tournamentResults = (p.tournamentResults || []).filter(inSeason);
@@ -1103,7 +1103,7 @@ export function renderPlayerProfile() {
 
   document.getElementById('ppSeasonSelect')?.addEventListener('change', (e) => {
     const raw = e.target.value;
-    _profileSeason = raw === 'all' ? null : raw === 'none' ? 'none' : Number(raw);
+    _profileSeason = raw === 'all' ? null : raw === 'none' ? 'none' : raw;
     _profileSeasonFor = p.id;
     renderPlayerProfile();
   });

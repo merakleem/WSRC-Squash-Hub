@@ -1,5 +1,4 @@
 const { run, all, get, getDB } = require('../database/db');
-const seasonModel = require('./seasonModel');
 
 // ===== HELPERS =====
 
@@ -197,8 +196,8 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
 
   const txn = db.transaction(() => {
     const tr = db.prepare(
-      `INSERT INTO tournaments (name, type, status, championship_date, match_duration_minutes, buffer_minutes, season_id) VALUES (?, 'groups_16', 'group_stage', ?, ?, ?, ?)`
-    ).run(name, championshipDate, duration, buffer, seasonModel.getCurrentSeasonId());
+      `INSERT INTO tournaments (name, type, status, championship_date, match_duration_minutes, buffer_minutes) VALUES (?, 'groups_16', 'group_stage', ?, ?, ?)`
+    ).run(name, championshipDate, duration, buffer);
     const tournamentId = tr.lastInsertRowid;
 
     for (const courtId of courtIds.map(Number)) {
@@ -414,7 +413,7 @@ function getPlayerTournamentHistory(playerId) {
     SELECT tm.id, tm.player1_id, tm.player2_id, tm.winner_id, tm.scores,
       COALESCE(tm.confirmed_at, tm.match_date) AS confirmed_at,
       tm.round, tm.bracket_slot,
-      t.id AS tournament_id, t.name AS tournament_name, t.season_id AS season_id,
+      t.id AS tournament_id, t.name AS tournament_name,
       p1.name AS p1_name, p2.name AS p2_name
     FROM tournament_matches tm
     JOIN tournaments t ON t.id = tm.tournament_id
@@ -439,7 +438,6 @@ function getPlayerTournamentHistory(playerId) {
       opponent_id: isP1 ? m.player2_id : m.player1_id,
       week_date: (m.confirmed_at || '').slice(0, 10),
       league_name: m.tournament_name,
-      season_id: m.season_id,
       my_score: mySets,
       their_score: theirSets,
       tournament_id: m.tournament_id,

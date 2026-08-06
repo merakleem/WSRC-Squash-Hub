@@ -1,76 +1,53 @@
 const express = require('express');
 const seasonModel = require('../models/seasonModel');
-const ladderModel = require('../models/ladderModel');
+const seasons = require('../lib/seasons');
 const { wrap, requireAdmin } = require('../middleware');
 
 const router = express.Router();
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Seasons are derived from settings, so there is nothing to create, assign or
+// mark current. Only two knobs exist: where the year splits, and which season
+// ratings took over from.
 
-function _validate({ name, start_date, end_date }) {
-  if (!name?.trim()) return 'Season name is required';
-  if (!DATE_RE.test(start_date || '')) return 'Start date must be YYYY-MM-DD';
-  if (!DATE_RE.test(end_date || '')) return 'End date must be YYYY-MM-DD';
-  if (end_date < start_date) return 'End date must be on or after the start date';
-  return null;
-}
-
-// Readable by any logged-in user; the profile page needs the season list to
-// build its tabs.
+// Readable by any logged-in user; the profile and ladder pages need the list.
 router.get('/seasons', wrap(async (req, res) => {
-  const seasons = await seasonModel.getAllSeasons();
-  res.json(seasons.map((s) => ({ ...s, usage: seasonModel.getSeasonUsage(s.id) })));
+  const all = seasonModel.getAllSeasons();
+  res.json(all.map((s) => ({ ...s, usage: seasonModel.getSeasonUsage(s.key) })));
 }));
 
-router.post('/seasons', requireAdmin, wrap(async (req, res) => {
-  const error = _validate(req.body);
-  if (error) return res.status(400).json({ error });
-  const { name, start_date, end_date, is_current, ladder_system } = req.body;
-  res.json(await seasonModel.addSeason({ name: name.trim(), start_date, end_date, is_current, ladder_system }));
+router.get('/seasons/settings', wrap(async (req, res) => {
+  const settings = seasonModel.getSettings();
+  res.json({
+    season_start_md: seasons.startMonthDay(settings),
+    elo_start_season: settings.elo_start_season || '',
+    current_season: seasonModel.getCurrentSeasonKey(),
+    // Includes the upcoming season, so the switchover can be scheduled before
+    // the season it names has begun.
+    selectable: seasonModel.getSelectableSeasons(),
+  });
 }));
 
-router.put('/seasons/:id', requireAdmin, wrap(async (req, res) => {
-  const season = await seasonModel.getSeasonById(req.params.id);
-  if (!season) return res.status(404).json({ error: 'Season not found' });
-  const error = _validate(req.body);
-  if (error) return res.status(400).json({ error });
-  const { name, start_date, end_date, is_current, ladder_system } = req.body;
-  // Absent ladder_system means "leave it alone"; an edit that only changes a
-  // date must never silently downgrade a rating season to the positional one.
-  res.json(await seasonModel.updateSeason({
-    id: req.params.id, name: name.trim(), start_date, end_date, is_current,
-    ladder_system: ladder_system ?? season.ladder_system,
-  }));
-}));
+router.put('/seasons/settings', requireAdmin, wrap(async (req, res) => {
+  const { season_start_md, elo_start_season } = req.body || {};
 
-router.put('/seasons/:id/current', requireAdmin, wrap(async (req, res) => {
-  const season = await seasonModel.getSeasonById(req.params.id);
-  if (!season) return res.status(404).json({ error: 'Season not found' });
-  res.json(await seasonModel.setCurrentSeason(req.params.id));
-}));
+  if (season_start_md !== undefined) {
+    if (!/^\d{2}-\d{2}$/.test(String(season_start_md))) {
+      return res.status(400).json({ error: 'Season start must be MM-DD' });
+    }
+    // Guard against 02-30 and friends, which would produce a season that never
+    // starts. Any non-leap year works as a probe.
+    const probe = new Date(`2001-${season_start_md}T00:00:00Z`);
+    if (Number.isNaN(probe.getTime()) || probe.toISOString().slice(5, 10) !== String(season_start_md)) {
+      return res.status(400).json({ error: 'That is not a real date' });
+    }
+  }
 
-// Freezing is an explicit action rather than something that happens on the end
-// date, so an admin can wait until every late-reported score is in.
-router.put('/seasons/:id/end', requireAdmin, wrap(async (req, res) => {
-  const season = await seasonModel.getSeasonById(req.params.id);
-  if (!season) return res.status(404).json({ error: 'Season not found' });
-  const result = ladderModel.freezeSeason(req.params.id);
-  res.json({ ok: true, ...result, season: await seasonModel.getSeasonById(req.params.id) });
-}));
+  if (elo_start_season) {
+    const known = seasonModel.getSelectableSeasons().some((s) => s.key === String(elo_start_season));
+    if (!known) return res.status(400).json({ error: 'Unknown season' });
+  }
 
-// Re-freeze after a late score: reopen, then end again.
-router.put('/seasons/:id/reopen', requireAdmin, wrap(async (req, res) => {
-  const season = await seasonModel.getSeasonById(req.params.id);
-  if (!season) return res.status(404).json({ error: 'Season not found' });
-  ladderModel.reopenSeason(req.params.id);
-  res.json({ ok: true, season: await seasonModel.getSeasonById(req.params.id) });
-}));
-
-router.delete('/seasons/:id', requireAdmin, wrap(async (req, res) => {
-  const season = await seasonModel.getSeasonById(req.params.id);
-  if (!season) return res.status(404).json({ error: 'Season not found' });
-  await seasonModel.deleteSeason(req.params.id);
-  res.json({ ok: true });
+  res.json(await seasonModel.updateSettings({ season_start_md, elo_start_season }));
 }));
 
 module.exports = router;

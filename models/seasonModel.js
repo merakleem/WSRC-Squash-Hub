@@ -1,108 +1,147 @@
 const { getDB } = require('../database/db');
+const seasons = require('../lib/seasons');
 
+// Seasons are derived from two settings rather than stored as rows: a recurring
+// month/day that splits history, and the season ratings took over from. Nothing
+// is created, assigned or marked current, so none of it can be forgotten or
+// drift out of step with the data.
+
+function getSettings() {
+  const rows = getDB().prepare('SELECT key, value FROM settings').all();
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
+function getStartMonthDay(settings = null) {
+  return seasons.startMonthDay(settings || getSettings());
+}
+
+/** Earliest and latest recorded activity, which bound the season list. */
+function getActivityBounds() {
+  const row = getDB().prepare(`
+    SELECT MIN(d) AS earliest, MAX(d) AS latest FROM (
+      SELECT substr(COALESCE(m.confirmed_at, w.date), 1, 10) AS d
+        FROM matches m
+        JOIN team_matchups tm ON m.matchup_id = tm.id
+        JOIN weeks w ON tm.week_id = w.id
+      UNION ALL SELECT substr(COALESCE(confirmed_at, match_date), 1, 10) FROM tournament_matches
+      UNION ALL SELECT substr(played_at, 1, 10) FROM pickup_matches
+      UNION ALL SELECT substr(start_date, 1, 10) FROM leagues
+    ) WHERE d IS NOT NULL
+  `).get();
+  return { earliest: row?.earliest || null, latest: row?.latest || null };
+}
+
+function getEarliestActivityDate() {
+  const row = getDB().prepare(`
+    SELECT MIN(d) AS d FROM (
+      SELECT MIN(substr(COALESCE(m.confirmed_at, w.date), 1, 10)) AS d
+        FROM matches m
+        JOIN team_matchups tm ON m.matchup_id = tm.id
+        JOIN weeks w ON tm.week_id = w.id
+      UNION ALL SELECT MIN(substr(COALESCE(confirmed_at, match_date), 1, 10)) FROM tournament_matches
+      UNION ALL SELECT MIN(substr(played_at, 1, 10)) FROM pickup_matches
+      UNION ALL SELECT MIN(start_date) FROM leagues
+    ) WHERE d IS NOT NULL
+  `).get();
+  return row?.d || null;
+}
+
+/** Every season from the first recorded activity to today, newest first. */
 function getAllSeasons() {
-  return getDB().prepare('SELECT * FROM seasons ORDER BY start_date DESC').all();
-}
-
-function getSeasonById(id) {
-  return getDB().prepare('SELECT * FROM seasons WHERE id = ?').get(Number(id));
+  const settings = getSettings();
+  const monthDay = seasons.startMonthDay(settings);
+  const bounds = getActivityBounds();
+  return seasons.listSeasons({
+    earliestDate: bounds.earliest,
+    latestDate: bounds.latest,
+    monthDay,
+  }).map((s) => ({ ...s, ladder_system: seasons.ladderSystemFor(s.key, settings) }));
 }
 
 /**
- * The season new leagues, tournaments and pickup matches are filed under.
- * Falls back to the most recent season if no flag is set, so records are never
- * orphaned just because an admin cleared the flag.
+ * Seasons offered in the settings dropdown: everything so far plus the one
+ * coming next, so the rating ladder can be scheduled ahead of the switchover.
  */
+function getSelectableSeasons() {
+  const all = getAllSeasons();
+  const monthDay = getStartMonthDay();
+  const newest = all[0];
+  if (!newest) return all;
+  const nextYear = seasons.seasonStartYear(newest.key) + 1;
+  const nextKey = monthDay === '01-01'
+    ? String(nextYear)
+    : `${nextYear}/${String((nextYear + 1) % 100).padStart(2, '0')}`;
+  if (all.some((s) => s.key === nextKey)) return all;
+  const range = seasons.seasonRange(nextKey, monthDay);
+  return [{
+    key: nextKey, id: nextKey, name: nextKey,
+    start_date: range.start, end_date: range.end,
+    is_current: false, status: 'upcoming',
+    ladder_system: seasons.ladderSystemFor(nextKey, getSettings()),
+  }, ...all];
+}
+
+function getSeasonByKey(key) {
+  return getAllSeasons().find((s) => s.key === String(key)) || null;
+}
+
 function getCurrentSeason() {
-  const db = getDB();
-  return db.prepare('SELECT * FROM seasons WHERE is_current = 1').get()
-    || db.prepare('SELECT * FROM seasons ORDER BY start_date DESC LIMIT 1').get()
-    || null;
+  const all = getAllSeasons();
+  return all.find((s) => s.is_current) || all[0] || null;
 }
 
-function getCurrentSeasonId() {
-  return getCurrentSeason()?.id ?? null;
+function getCurrentSeasonKey() {
+  return seasons.currentSeasonKey(getStartMonthDay());
 }
 
-const LADDER_SYSTEMS = ['leapfrog', 'elo'];
-const _system = (value) => (LADDER_SYSTEMS.includes(value) ? value : 'leapfrog');
-
-function addSeason({ name, start_date, end_date, is_current, ladder_system }) {
-  const db = getDB();
-  const result = db.prepare(
-    'INSERT INTO seasons (name, start_date, end_date, is_current, ladder_system) VALUES (?, ?, ?, 0, ?)'
-  ).run(name, start_date, end_date, _system(ladder_system));
-  if (is_current) setCurrentSeason(result.lastInsertRowid);
-  return getSeasonById(result.lastInsertRowid);
-}
-
-function updateSeason({ id, name, start_date, end_date, is_current, ladder_system }) {
-  const db = getDB();
-  db.prepare('UPDATE seasons SET name = ?, start_date = ?, end_date = ?, ladder_system = ? WHERE id = ?')
-    .run(name, start_date, end_date, _system(ladder_system), Number(id));
-  // Promoting is supported; demoting is not, because "no current season" is not
-  // a valid state. To move it, promote a different season instead.
-  if (is_current) setCurrentSeason(id);
-  return getSeasonById(id);
-}
-
-// Exactly one season is current; clearing the others is part of setting one.
-function setCurrentSeason(id) {
-  const db = getDB();
-  const tx = db.transaction((seasonId) => {
-    db.prepare('UPDATE seasons SET is_current = 0').run();
-    db.prepare('UPDATE seasons SET is_current = 1 WHERE id = ?').run(seasonId);
-  });
-  tx(Number(id));
-  return getSeasonById(id);
+/** The season a given match date falls in. */
+function seasonKeyForDate(date, settings = null) {
+  return seasons.seasonKeyForDate(date, seasons.startMonthDay(settings || getSettings()));
 }
 
 /**
- * How much data a season holds. Used to warn before deleting one and to hide
- * empty seasons from the player profile tab bar.
+ * How much data each season holds. Counted by date rather than by a stored
+ * link, so it always reflects where the matches actually are.
  */
-function getSeasonUsage(id) {
+function getSeasonUsage(key) {
   const db = getDB();
-  const seasonId = Number(id);
-  const count = (sql) => db.prepare(sql).get(seasonId).count;
+  const range = seasons.seasonRange(key, getStartMonthDay());
+  if (!range) return { leagues: 0, tournaments: 0, matches: 0 };
+  const p = { start: range.start, end: range.end };
+  const count = (sql) => db.prepare(sql).get(p).count;
   return {
-    leagues:     count('SELECT COUNT(*) AS count FROM leagues WHERE season_id = ?'),
-    tournaments: count('SELECT COUNT(*) AS count FROM tournaments WHERE season_id = ?'),
-    pickups:     count('SELECT COUNT(*) AS count FROM pickup_matches WHERE season_id = ?'),
+    leagues: count(`SELECT COUNT(DISTINCT l.id) AS count FROM leagues l
+                    WHERE substr(l.start_date, 1, 10) BETWEEN @start AND @end`),
+    tournaments: count(`SELECT COUNT(*) AS count FROM tournaments
+                        WHERE substr(championship_date, 1, 10) BETWEEN @start AND @end`),
+    matches: count(`
+      SELECT (
+        (SELECT COUNT(*) FROM matches m
+           JOIN team_matchups tm ON m.matchup_id = tm.id
+           JOIN weeks w ON tm.week_id = w.id
+          WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+            AND substr(COALESCE(m.confirmed_at, w.date), 1, 10) BETWEEN @start AND @end)
+      + (SELECT COUNT(*) FROM tournament_matches
+          WHERE winner_id IS NOT NULL
+            AND substr(COALESCE(confirmed_at, match_date), 1, 10) BETWEEN @start AND @end)
+      + (SELECT COUNT(*) FROM pickup_matches
+          WHERE substr(played_at, 1, 10) BETWEEN @start AND @end)
+      ) AS count`),
   };
 }
 
-/**
- * Delete a season, detaching anything filed under it rather than cascading.
- * Losing a season label must never destroy league or match history.
- */
-function deleteSeason(id) {
+function updateSettings({ season_start_md, elo_start_season }) {
   const db = getDB();
-  const seasonId = Number(id);
-  const tx = db.transaction(() => {
-    const wasCurrent = db.prepare('SELECT is_current FROM seasons WHERE id = ?').get(seasonId)?.is_current;
-
-    db.prepare('UPDATE leagues SET season_id = NULL WHERE season_id = ?').run(seasonId);
-    db.prepare('UPDATE tournaments SET season_id = NULL WHERE season_id = ?').run(seasonId);
-    db.prepare('UPDATE pickup_matches SET season_id = NULL WHERE season_id = ?').run(seasonId);
-    db.prepare('DELETE FROM seasons WHERE id = ?').run(seasonId);
-
-    // Deleting the current season must not leave the club with none; new
-    // records would otherwise be filed under whichever season happens to sort
-    // last, which can be one that has not started yet.
-    if (wasCurrent) {
-      const today = new Date().toISOString().slice(0, 10);
-      const replacement =
-        db.prepare('SELECT id FROM seasons WHERE start_date <= ? AND end_date >= ? ORDER BY start_date DESC LIMIT 1').get(today, today)
-        || db.prepare('SELECT id FROM seasons WHERE start_date <= ? ORDER BY start_date DESC LIMIT 1').get(today)
-        || db.prepare('SELECT id FROM seasons ORDER BY start_date ASC LIMIT 1').get();
-      if (replacement) db.prepare('UPDATE seasons SET is_current = 1 WHERE id = ?').run(replacement.id);
-    }
-  });
-  tx();
+  const set = db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value'
+  );
+  if (season_start_md) set.run('season_start_md', season_start_md);
+  if (elo_start_season !== undefined) set.run('elo_start_season', elo_start_season || '');
+  return getAllSeasons();
 }
 
 module.exports = {
-  getAllSeasons, getSeasonById, getCurrentSeason, getCurrentSeasonId,
-  addSeason, updateSeason, setCurrentSeason, deleteSeason, getSeasonUsage,
+  getSettings, getStartMonthDay, getAllSeasons, getSeasonByKey, getCurrentSeason,
+  getCurrentSeasonKey, seasonKeyForDate, getSeasonUsage, updateSettings,
+  getEarliestActivityDate, getActivityBounds, getSelectableSeasons,
 };

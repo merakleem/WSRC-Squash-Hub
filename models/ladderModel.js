@@ -1,5 +1,7 @@
 const { getDB } = require('../database/db');
 const elo = require('../lib/elo');
+const seasonsLib = require('../lib/seasons');
+const seasonModel = require('./seasonModel');
 
 // ===== SHARED QUERIES =====
 
@@ -19,12 +21,13 @@ const PLAYER_SELECT = `
  * `seasonId` restricts to matches belonging to that season; omit it for the
  * all-time set the leapfrog ladder replays.
  */
-function getCompletedMatches(seasonId = null) {
+function getCompletedMatches(range = null) {
   const db = getDB();
-  const seasonFilter = seasonId == null ? '' : 'AND l.season_id = @seasonId';
-  const tournFilter  = seasonId == null ? '' : 'AND t.season_id = @seasonId';
-  const pickupFilter = seasonId == null ? '' : 'AND pm.season_id = @seasonId';
-  const params = seasonId == null ? {} : { seasonId: Number(seasonId) };
+  // Season membership is decided by when a match was played, so the filter is a
+  // date window rather than a stored link. `range` is { start, end } or null for
+  // everything ever.
+  const where = range ? 'AND substr(@dateExpr, 1, 10) BETWEEN @start AND @end' : '';
+  const params = range ? { start: range.start, end: range.end } : {};
 
   const leagueMatches = db.prepare(`
     SELECT
@@ -36,12 +39,11 @@ function getCompletedMatches(seasonId = null) {
     FROM matches m
     JOIN team_matchups tm ON m.matchup_id = tm.id
     JOIN weeks w ON tm.week_id = w.id
-    JOIN leagues l ON w.league_id = l.id
     LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     WHERE m.winner_id IS NOT NULL
       AND (m.skipped = 0 OR m.skipped IS NULL)
-      ${seasonFilter}
+      ${where.replace('@dateExpr', 'COALESCE(m.confirmed_at, w.date)')}
   `).all(params);
 
   const tournamentMatches = db.prepare(`
@@ -51,11 +53,10 @@ function getCompletedMatches(seasonId = null) {
       tm.player1_id AS eff_p1_id, tm.player2_id AS eff_p2_id,
       COALESCE(tm.confirmed_at, tm.match_date) AS sort_key
     FROM tournament_matches tm
-    JOIN tournaments t ON t.id = tm.tournament_id
     WHERE tm.winner_id IS NOT NULL
       AND tm.player1_id IS NOT NULL
       AND tm.player2_id IS NOT NULL
-      ${tournFilter}
+      ${where.replace('@dateExpr', 'COALESCE(tm.confirmed_at, tm.match_date)')}
   `).all(params);
 
   const pickupMatches = db.prepare(`
@@ -65,7 +66,7 @@ function getCompletedMatches(seasonId = null) {
       pm.player1_id AS eff_p1_id, pm.player2_id AS eff_p2_id,
       pm.played_at AS sort_key
     FROM pickup_matches pm
-    WHERE 1 = 1 ${pickupFilter}
+    WHERE 1 = 1 ${where.replace('@dateExpr', 'pm.played_at')}
   `).all(params);
 
   return [...leagueMatches, ...tournamentMatches, ...pickupMatches]
@@ -241,111 +242,94 @@ function getLadder(asOfDate = null) {
 /**
  * Rating-based ladder for one season.
  *
- * Computed by replaying the season's matches from a seeded starting rating
- * rather than by storing running totals. Substitutions rewrite winners after
- * the fact, scores can be cleared, and voiding a tournament result cascades;
- * an incrementally-maintained rating would corrupt silently under any of those.
- * A replay is self-healing and cheap at club scale.
+ * Computed by replaying matches from a seeded starting rating rather than by
+ * storing running totals. Substitutions rewrite winners after the fact, scores
+ * can be cleared, and voiding a tournament result cascades; an incrementally
+ * maintained rating would corrupt silently under any of those. A replay is
+ * self-healing and cheap at club scale.
+ *
+ * Ratings carry across seasons, so a rated season is seeded by replaying every
+ * rated season before it in order. The first one converts the preceding
+ * positional season's final order into ratings, which is what makes the
+ * switchover seamless: day one of the rating ladder shows the order the
+ * positional ladder ended on.
  */
-function computeEloLadder(season, settings, asOfDate = null, { includeHidden = false } = {}) {
+function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false } = {}) {
   const db = getDB();
   const cfg = elo.config(settings);
+  const monthDay = seasonsLib.startMonthDay(settings);
   const players = db.prepare(PLAYER_SELECT).all();
   const playerIds = new Set(players.map((p) => p.id));
 
-  // Seed from the previous season's frozen standings where available.
-  const previous = db.prepare(`
-    SELECT * FROM seasons
-    WHERE start_date < ? AND status = 'ended'
-    ORDER BY start_date DESC LIMIT 1
-  `).get(season.start_date);
+  const targetYear = seasonsLib.seasonStartYear(seasonKey);
+  const cutoverYear = seasonsLib.seasonStartYear(settings.elo_start_season || seasonKey);
 
-  // Prefer a frozen snapshot. If the admin promoted this season without ending
-  // the previous one, fall back to computing where that season stands right
-  // now; otherwise everyone would seed from Club Locker ratings and the whole
-  // ladder would lurch the day the previous season is finally ended.
-  let priorStandings = previous
-    ? db.prepare('SELECT * FROM season_standings WHERE season_id = ?').all(previous.id)
-    : [];
-
-  if (priorStandings.length === 0) {
-    const unended = db.prepare(`
-      SELECT * FROM seasons
-      WHERE start_date < ? AND id != ?
-      ORDER BY start_date DESC LIMIT 1
-    `).get(season.start_date, season.id);
-    if (unended) {
-      const live = unended.ladder_system === 'elo'
-        ? computeEloLadder(unended, settings, unended.end_date, { includeHidden: true })
-        : getLadder(unended.end_date);
-      priorStandings = live.map((r, i) => ({
-        player_id: r.id,
-        position: i + 1,
-        rating: unended.ladder_system === 'elo' ? r.rating : null,
-      }));
-    }
-  }
-  const priorById = Object.fromEntries(priorStandings.map((s) => [s.player_id, s]));
-  const priorSize = priorStandings.length;
+  // Seed from where players finished the season before ratings began.
+  const firstRatedRange = seasonsLib.seasonRange(
+    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay
+  );
+  const priorOrder = getLadder(_dayBefore(firstRatedRange.start));
+  const priorSize = priorOrder.length;
+  const priorByIdMap = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
   const ratings = {};
-  const seeds = {};
   for (const p of players) {
-    const prior = priorById[p.id];
-    const seed = elo.seedRating({
-      previousRating: prior?.rating ?? null,
-      previousPosition: prior?.position ?? null,
+    ratings[p.id] = elo.seedRating({
+      previousRating: null,
+      previousPosition: priorByIdMap[p.id]?.position ?? null,
       ladderSize: priorSize,
       clubLockerRating: p.club_locker_rating,
     }, cfg);
-    ratings[p.id] = seed;
-    seeds[p.id] = seed;
   }
 
-  const matches = getCompletedMatches(season.id)
-    .filter((m) => !asOfDate || String(m.sort_key || '').slice(0, 10) <= asOfDate);
-  const played = {};
-  const wins = {};
-  const losses = {};
+  // Replay each rated season up to and including the requested one.
+  let played = {}, wins = {}, losses = {}, seedsForTarget = { ...ratings };
+  for (let year = cutoverYear; year <= targetYear; year++) {
+    const key = monthDay === '01-01'
+      ? String(year)
+      : `${year}/${String((year + 1) % 100).padStart(2, '0')}`;
+    const range = seasonsLib.seasonRange(key, monthDay);
+    const isTarget = year === targetYear;
+    if (isTarget) seedsForTarget = { ...ratings };
 
-  for (const match of matches) {
-    const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
-    const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
-    if (!playerIds.has(winnerId) || !playerIds.has(loserId)) continue;
-    if (winnerId === loserId) continue;
+    const end = isTarget && asOfDate && asOfDate < range.end ? asOfDate : range.end;
+    const matches = getCompletedMatches({ start: range.start, end });
 
-    const result = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
-    ratings[winnerId] = result.winner;
-    ratings[loserId] = result.loser;
+    if (isTarget) { played = {}; wins = {}; losses = {}; }
 
-    played[winnerId] = (played[winnerId] || 0) + 1;
-    played[loserId] = (played[loserId] || 0) + 1;
-    wins[winnerId] = (wins[winnerId] || 0) + 1;
-    losses[loserId] = (losses[loserId] || 0) + 1;
+    for (const match of matches) {
+      const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
+      const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+      if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
+
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
+      ratings[winnerId] = r.winner;
+      ratings[loserId] = r.loser;
+
+      if (isTarget) {
+        played[winnerId] = (played[winnerId] || 0) + 1;
+        played[loserId] = (played[loserId] || 0) + 1;
+        wins[winnerId] = (wins[winnerId] || 0) + 1;
+        losses[loserId] = (losses[loserId] || 0) + 1;
+      }
+    }
   }
 
-  // Inactivity is applied after the replay, as a pure function of the last
-  // match date. Keeping it out of the replay means it never has to be "undone"
-  // and the whole computation stays idempotent.
+  const targetRange = seasonsLib.seasonRange(seasonKey, monthDay);
+  const today = new Date().toISOString().slice(0, 10);
+  // A past season is measured at its own end, so its standings read as they
+  // stood then rather than decaying forever afterwards.
+  const asOf = asOfDate || (targetRange.end < today ? targetRange.end : today);
+
   const lastMatch = getLastMatchDates();
-  // Decay is measured to the same date the matches are cut off at. Without
-  // this, freezing a season months after it ended would apply months of
-  // inactivity that never happened during the season, and the frozen result
-  // would depend on when the admin happened to click End Season.
-  const asOf = asOfDate || new Date().toISOString().slice(0, 10);
-
   const rows = [];
   for (const p of players) {
     const { months, penalty } = elo.inactivityPenalty({
       lastMatchDate: lastMatch[p.id] || null,
-      seasonStartDate: season.start_date,
+      seasonStartDate: targetRange.start,
       asOfDate: asOf,
     }, cfg);
 
-    // Hiding is a display rule. When persisting a snapshot every player is kept,
-    // otherwise a long-absent player loses the record that they were in the
-    // season at all; and seeds from their Club Locker rating next season
-    // instead of the rating they actually earned.
     const hidden = elo.isHiddenForInactivity(months, cfg);
     if (hidden && !includeHidden) continue;
 
@@ -357,12 +341,12 @@ function computeEloLadder(season, settings, asOfDate = null, { includeHidden = f
       ? Math.max(Math.min(base, cfg.elo_decay_floor), base - penalty)
       : base;
     rows.push({
-      hidden_for_inactivity: hidden,
       ...p,
+      hidden_for_inactivity: hidden,
       rating: Math.round(decayed),
       rating_undecayed: Math.round(base),
-      seed_rating: Math.round(seeds[p.id]),
-      rating_change: Math.round(decayed - seeds[p.id]),
+      seed_rating: Math.round(seedsForTarget[p.id]),
+      rating_change: Math.round(decayed - seedsForTarget[p.id]),
       inactive_months: months,
       inactivity_penalty: Math.round(base - decayed),
       matches_played: played[p.id] || 0,
@@ -374,200 +358,95 @@ function computeEloLadder(season, settings, asOfDate = null, { includeHidden = f
   rows.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
 
   // Movement is reported as places gained or lost, not points, matching how the
-  // ladder has always read. Same 7-day window the positional ladder uses.
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const priorRatings = { ...seeds };
-  for (const match of matches) {
-    if (String(match.sort_key || '').slice(0, 10) > weekAgo) break;
-    const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
-    const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
-    if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
-    const r = elo.applyMatch(priorRatings[winnerId], priorRatings[loserId], cfg.elo_k_factor);
-    priorRatings[winnerId] = r.winner;
-    priorRatings[loserId] = r.loser;
+  // ladder has always read.
+  const weekAgo = _daysAgo(7);
+  const priorPos = {};
+  if (weekAgo > targetRange.start) {
+    const before = computeEloLadder(seasonKey, settings, weekAgo, { includeHidden: true });
+    before.forEach((r, i) => { priorPos[r.id] = i + 1; });
   }
-  const priorOrder = rows
-    .map((r) => r.id)
-    .sort((a, b) => priorRatings[b] - priorRatings[a]);
-  const priorPos = Object.fromEntries(priorOrder.map((id, i) => [id, i + 1]));
 
-  // Best position within this season needs a per-match replay of the ordering,
-  // which is more work than it is worth; peak rating is the meaningful
-  // equivalent under a rating system and is already implied by rating_change.
   return rows.map((r, i) => ({
     ...r,
     position: i + 1,
     best_position: null,
-    rank_change: (priorPos[r.id] || i + 1) - (i + 1),
+    rank_change: priorPos[r.id] ? priorPos[r.id] - (i + 1) : 0,
   }));
+}
+
+function _dayBefore(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function _daysAgo(n) {
+  return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 }
 
 /**
  * The ladder as it should be displayed for a season.
  *
- * Dispatches on the season's own ladder_system so a past season is always
- * rendered by the rules it was played under. An ended season is served from its
- * frozen snapshot and never recomputed.
+ * Dispatches on the system that season is played under, so a past season is
+ * always rendered by the rules it was actually played by. A finished season is
+ * recomputed with its own end date as the cutoff, which makes it stable without
+ * anything being frozen.
  */
-function getLadderForSeason(seasonId = null) {
-  const db = getDB();
-  const season = seasonId
-    ? db.prepare('SELECT * FROM seasons WHERE id = ?').get(Number(seasonId))
-    : db.prepare('SELECT * FROM seasons WHERE is_current = 1').get();
+function getLadderForSeason(seasonKey = null) {
+  const settings = seasonModel.getSettings();
+  const monthDay = seasonsLib.startMonthDay(settings);
+  const all = seasonModel.getAllSeasons();
+  const season = seasonKey
+    ? all.find((s) => s.key === String(seasonKey)) || null
+    : all.find((s) => s.is_current) || all[0] || null;
 
-  // No seasons configured at all; fall back to the original all-time ladder.
   if (!season) return { season: null, system: 'leapfrog', frozen: false, rows: getLadder() };
 
-  if (season.status === 'ended') {
-    return { season, system: season.ladder_system, frozen: true, rows: getFrozenStandings(season.id) };
-  }
-
-  if (season.ladder_system === 'elo') {
-    const settings = Object.fromEntries(
-      db.prepare('SELECT key, value FROM settings').all().map((r) => [r.key, r.value])
-    );
-    return { season, system: 'elo', frozen: false, rows: computeEloLadder(season, settings) };
-  }
-
-  // The positional ranking itself is all-time by construction, but the W/L shown
-  // beside it belongs to the season being viewed, matching both the rating
-  // ladder and a frozen snapshot. Without this the same row reports a career
-  // record under one system and a season record under the other.
-  const seasonRecords = getSeasonRecords(season.id);
-  const rows = getLadder().map((r) => ({
-    ...r,
-    season_wins: seasonRecords[r.id]?.wins || 0,
-    season_losses: seasonRecords[r.id]?.losses || 0,
-  }));
-  return { season, system: 'leapfrog', frozen: false, rows };
-}
-
-/** A frozen season's standings, rehydrated with current player details. */
-function getFrozenStandings(seasonId) {
-  const db = getDB();
-  return db.prepare(`
-    SELECT s.position, s.rating, s.wins AS season_wins, s.losses AS season_losses,
-           p.id, p.name, p.email, p.phone, p.exclude_from_ladder, p.club_locker_rating, p.photo_path
-    FROM season_standings s
-    JOIN players p ON p.id = s.player_id
-    WHERE s.season_id = ?
-    ORDER BY s.position ASC
-  `).all(Number(seasonId)).map((r) => ({ ...r, rank_change: 0, best_position: null }));
-}
-
-/**
- * Freeze a season's final standings.
- *
- * Safe to re-run: the previous snapshot is replaced, which is what makes the
- * "re-freeze" action work after a late-reported score arrives.
- */
-function freezeSeason(seasonId) {
-  const db = getDB();
-  const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(Number(seasonId));
-  if (!season) throw Object.assign(new Error('Season not found'), { status: 404 });
-
-  // Compute against the live rules before marking it ended, so the snapshot
-  // reflects the season exactly as it stood.
-  // The snapshot is "the ladder as it stood at season end", so matches dated
-  // after the season are excluded. Without this, re-freezing an old season
-  // after the next one has started would pull the newer season's results in.
-  // Freeze as of the season's end, not as of the moment the admin clicked;
-  // otherwise the standings depend on how long they waited for late scores.
-  // Never freeze past today, so ending a season early doesn't count the future.
+  const range = seasonsLib.seasonRange(season.key, monthDay);
   const today = new Date().toISOString().slice(0, 10);
-  const cutoff = season.end_date < today ? season.end_date : today;
-  const live = { ...season, status: 'active' };
-  let rows;
+  const isPast = range.end < today;
+
   if (season.ladder_system === 'elo') {
-    const settings = Object.fromEntries(
-      db.prepare('SELECT key, value FROM settings').all().map((r) => [r.key, r.value])
-    );
-    rows = computeEloLadder(live, settings, cutoff, { includeHidden: true });
-  } else {
-    rows = getLadder(cutoff);
+    return { season, system: 'elo', frozen: isPast, rows: computeEloLadder(season.key, settings) };
   }
 
-  const seasonWins = getSeasonRecords(seasonId, cutoff);
-
-  const tx = db.transaction(() => {
-    db.prepare('DELETE FROM season_standings WHERE season_id = ?').run(Number(seasonId));
-    const insert = db.prepare(
-      'INSERT INTO season_standings (season_id, player_id, position, rating, wins, losses) VALUES (?, ?, ?, ?, ?, ?)'
-    );
-    rows.forEach((r, i) => {
-      const rec = seasonWins[r.id] || { wins: 0, losses: 0 };
-      insert.run(Number(seasonId), r.id, i + 1, r.rating ?? null, rec.wins, rec.losses);
-    });
-    db.prepare(`UPDATE seasons SET status = 'ended', ended_at = datetime('now') WHERE id = ?`).run(Number(seasonId));
-  });
-  tx();
-
-  return { frozen: rows.length };
+  // The positional ranking is an all-time replay by construction, but it is
+  // always cut off at the season's end so a match belonging to a later season
+  // can't leak in. For the current season that only excludes future-dated
+  // results, which is what you want anyway.
+  const rows = getLadder(range.end);
+  const seasonRecords = getSeasonRecords(season.key);
+  return {
+    season,
+    system: 'leapfrog',
+    frozen: isPast,
+    rows: rows.map((r) => ({
+      ...r,
+      season_wins: seasonRecords[r.id]?.wins || 0,
+      season_losses: seasonRecords[r.id]?.losses || 0,
+    })),
+  };
 }
 
-/** Reopen an ended season so it computes live again. */
-function reopenSeason(seasonId) {
-  const db = getDB();
-  const tx = db.transaction(() => {
-    db.prepare('DELETE FROM season_standings WHERE season_id = ?').run(Number(seasonId));
-    db.prepare(`UPDATE seasons SET status = 'active', ended_at = NULL WHERE id = ?`).run(Number(seasonId));
-  });
-  tx();
-}
+/** Per-player W/L within one season, across all three match types. */
+function getSeasonRecords(seasonKey) {
+  const range = seasonsLib.seasonRange(seasonKey, seasonModel.getStartMonthDay());
+  if (!range) return {};
 
-/**
- * Per-player W/L within one season, across all three match types.
- *
- * `asOfDate` bounds it to the same cutoff the standings use, so a league that
- * straddles a season boundary can't credit a result that hadn't happened yet.
- */
-function getSeasonRecords(seasonId, asOfDate = null) {
-  const db = getDB();
-  const cut = asOfDate
-    ? {
-      league: `AND substr(COALESCE(m.confirmed_at, w.date), 1, 10) <= @asOf`,
-      tourn:  `AND substr(COALESCE(tm.confirmed_at, tm.match_date), 1, 10) <= @asOf`,
-      pickup: `AND substr(pm.played_at, 1, 10) <= @asOf`,
-    }
-    : { league: '', tourn: '', pickup: '' };
-  const rows = db.prepare(`
-    SELECT player_id,
-           SUM(CASE WHEN won THEN 1 ELSE 0 END) AS wins,
-           SUM(CASE WHEN won THEN 0 ELSE 1 END) AS losses
-    FROM (
-      SELECT COALESCE(s1.sub_player_id, m.player1_id) AS player_id,
-             (m.winner_id = m.player1_id) AS won
-        FROM matches m
-        JOIN team_matchups tm ON m.matchup_id = tm.id
-        JOIN weeks w ON tm.week_id = w.id
-        JOIN leagues l ON w.league_id = l.id
-        LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL) AND l.season_id = @seasonId ${cut.league}
-      UNION ALL
-      SELECT COALESCE(s2.sub_player_id, m.player2_id),
-             (m.winner_id = m.player2_id)
-        FROM matches m
-        JOIN team_matchups tm ON m.matchup_id = tm.id
-        JOIN weeks w ON tm.week_id = w.id
-        JOIN leagues l ON w.league_id = l.id
-        LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL) AND l.season_id = @seasonId ${cut.league}
-      UNION ALL
-      SELECT tm.player1_id, (tm.winner_id = tm.player1_id)
-        FROM tournament_matches tm JOIN tournaments t ON t.id = tm.tournament_id
-        WHERE tm.winner_id IS NOT NULL AND tm.player1_id IS NOT NULL AND tm.player2_id IS NOT NULL AND t.season_id = @seasonId ${cut.tourn}
-      UNION ALL
-      SELECT tm.player2_id, (tm.winner_id = tm.player2_id)
-        FROM tournament_matches tm JOIN tournaments t ON t.id = tm.tournament_id
-        WHERE tm.winner_id IS NOT NULL AND tm.player1_id IS NOT NULL AND tm.player2_id IS NOT NULL AND t.season_id = @seasonId ${cut.tourn}
-      UNION ALL
-      SELECT pm.player1_id, (pm.winner_id = pm.player1_id) FROM pickup_matches pm WHERE pm.season_id = @seasonId ${cut.pickup}
-      UNION ALL
-      SELECT pm.player2_id, (pm.winner_id = pm.player2_id) FROM pickup_matches pm WHERE pm.season_id = @seasonId ${cut.pickup}
-    ) WHERE player_id IS NOT NULL
-    GROUP BY player_id
-  `).all(asOfDate ? { seasonId: Number(seasonId), asOf: asOfDate } : { seasonId: Number(seasonId) });
-  return Object.fromEntries(rows.map((r) => [r.player_id, { wins: r.wins, losses: r.losses }]));
+  const out = {};
+  const bump = (id, won) => {
+    if (id == null) return;
+    if (!out[id]) out[id] = { wins: 0, losses: 0 };
+    out[id][won ? 'wins' : 'losses'] += 1;
+  };
+
+  for (const m of getCompletedMatches(range)) {
+    const winnerId = m.winner_id === m.player1_id ? m.eff_p1_id : m.eff_p2_id;
+    const loserId  = m.winner_id === m.player1_id ? m.eff_p2_id : m.eff_p1_id;
+    bump(winnerId, true);
+    bump(loserId, false);
+  }
+  return out;
 }
 
 /**
@@ -628,49 +507,51 @@ function getPlayerLadderHistory(playerId) {
  * Rating change per match for one player, keyed `source:matchId`.
  *
  * Only rated seasons produce deltas; a positional season has no rating to
- * change. Computed by the same replay that produces the ladder, so the numbers
- * shown on a match always reconcile with the standings.
+ * change. Uses the same replay that produces the ladder, so the number shown on
+ * a match always reconciles with the standings.
  */
 function getPlayerMatchRatingDeltas(playerId) {
   const db = getDB();
   const id = Number(playerId);
   const deltas = {};
 
-  const ratedSeasons = db.prepare(`SELECT * FROM seasons WHERE ladder_system = 'elo'`).all();
-  if (!ratedSeasons.length) return deltas;
+  const settings = seasonModel.getSettings();
+  if (!settings.elo_start_season) return deltas;
 
-  const settings = Object.fromEntries(
-    db.prepare('SELECT key, value FROM settings').all().map((r) => [r.key, r.value])
-  );
+  const monthDay = seasonsLib.startMonthDay(settings);
   const cfg = elo.config(settings);
   const players = db.prepare(PLAYER_SELECT).all();
   const playerIds = new Set(players.map((p) => p.id));
   if (!playerIds.has(id)) return deltas;
 
-  for (const season of ratedSeasons) {
-    // Same seeding the ladder uses, so a delta is measured against the rating
-    // the player actually held at that point in the season.
-    const previous = db.prepare(`
-      SELECT * FROM seasons WHERE start_date < ? AND status = 'ended'
-      ORDER BY start_date DESC LIMIT 1
-    `).get(season.start_date);
-    const prior = previous
-      ? db.prepare('SELECT * FROM season_standings WHERE season_id = ?').all(previous.id)
-      : [];
-    const priorById = Object.fromEntries(prior.map((s) => [s.player_id, s]));
+  const cutoverYear = seasonsLib.seasonStartYear(settings.elo_start_season);
+  // Walk to the newest season that has activity, not merely to today's; a match
+  // can be dated ahead of the current season and still needs its delta.
+  const all = seasonModel.getAllSeasons();
+  const latestYear = seasonsLib.seasonStartYear(all[0]?.key || seasonModel.getCurrentSeasonKey());
+  if (cutoverYear == null || latestYear == null || latestYear < cutoverYear) return deltas;
 
-    const ratings = {};
-    for (const p of players) {
-      const pr = priorById[p.id];
-      ratings[p.id] = elo.seedRating({
-        previousRating: pr?.rating ?? null,
-        previousPosition: pr?.position ?? null,
-        ladderSize: prior.length,
-        clubLockerRating: p.club_locker_rating,
-      }, cfg);
-    }
+  const firstRange = seasonsLib.seasonRange(
+    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay
+  );
+  const priorOrder = getLadder(_dayBefore(firstRange.start));
+  const priorById = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
-    for (const match of getCompletedMatches(season.id)) {
+  const ratings = {};
+  for (const p of players) {
+    ratings[p.id] = elo.seedRating({
+      previousRating: null,
+      previousPosition: priorById[p.id]?.position ?? null,
+      ladderSize: priorOrder.length,
+      clubLockerRating: p.club_locker_rating,
+    }, cfg);
+  }
+
+  for (let year = cutoverYear; year <= latestYear; year++) {
+    const key = monthDay === '01-01'
+      ? String(year)
+      : `${year}/${String((year + 1) % 100).padStart(2, '0')}`;
+    for (const match of getCompletedMatches(seasonsLib.seasonRange(key, monthDay))) {
       const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
       const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
@@ -688,18 +569,6 @@ function getPlayerMatchRatingDeltas(playerId) {
   return deltas;
 }
 
-/**
- * Where one player stands on the ladder the rest of the app is showing.
- *
- * Goes through the same season dispatch the Ladder page and the dashboard ring
- * use, so the three surfaces cannot report different ranks for the same player.
- * It previously read the all-time positional ladder unconditionally, which
- * disagreed with both of them whenever the current season was a rating one.
- *
- * `best_position` stays a career figure and is absent under a rating season by
- * design; the profile derives the career numbers from the history series
- * instead, and labels them separately from the season rank returned here.
- */
 function getPlayerLadderStats(playerId) {
   const { season, system, frozen, rows } = getLadderForSeason();
   const row = rows.find((p) => p.id === Number(playerId)) || null;
@@ -716,7 +585,7 @@ function getPlayerLadderStats(playerId) {
 }
 
 module.exports = {
-  getLadder, getPlayerLadderStats, getPlayerLadderHistory, getPlayerMatchRatingDeltas, getLadderForSeason, computeEloLadder,
-  freezeSeason, reopenSeason, getFrozenStandings, getSeasonRecords,
+  getLadder, getPlayerLadderStats, getPlayerLadderHistory, getPlayerMatchRatingDeltas,
+  getLadderForSeason, computeEloLadder, getSeasonRecords,
   getCompletedMatches, getLastMatchDates,
 };

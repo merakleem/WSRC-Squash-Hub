@@ -1,5 +1,6 @@
 const express = require('express');
 const { getDB } = require('../database/db');
+const seasonModel = require('../models/seasonModel');
 const { wrap } = require('../middleware');
 
 const router = express.Router();
@@ -102,9 +103,10 @@ router.get('/activity', wrap(async (req, res) => {
   const allMatches = [...leagueMatches, ...tournamentMatchesRaw, ...pickupMatchesRaw]
     .sort((a, b) => (a.confirmed_at || '').localeCompare(b.confirmed_at || '') || 0);
 
-  // The replay below reproduces leapfrog positions. Only label matches with
-  // them while the current season is actually played under that system.
-  const currentSeason = db.prepare('SELECT ladder_system FROM seasons WHERE is_current = 1').get();
+  // The replay below reproduces positional ladder places. Only label matches
+  // with them while the current season is actually played that way; under a
+  // rating ladder those positions would be invented.
+  const currentSeason = seasonModel.getCurrentSeason();
   const showPositions = !currentSeason || currentSeason.ladder_system !== 'elo';
 
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 3650);

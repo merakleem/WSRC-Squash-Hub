@@ -140,54 +140,71 @@ export async function renderClubSettings() {
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
 
-  const [courts, bookingTypes, seasons] = await Promise.all([
+  const [courts, bookingTypes, seasons, settings] = await Promise.all([
     window.api.getCourts(),
     window.api.getBookingTypes(),
     window.api.getSeasons(),
+    window.api.getSeasonSettings(),
   ]);
+
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  const [startMonth, startDay] = String(settings.season_start_md || '09-01').split('-');
 
   content.innerHTML = `
     <div class="settings-page">
       <div class="settings-section">
         <div class="settings-section-header">
           <h2 class="settings-section-title">Seasons</h2>
-          <button class="btn btn-primary btn-sm" id="btnAddSeason">+ Add Season</button>
         </div>
         <p class="settings-section-desc">
-          Seasons group leagues, tournaments and ladder matches so player profiles can show
-          history by season. New leagues and matches are filed under the current season.
+          Seasons group match history so profiles can show a season at a time. They are worked out
+          from the date a match was played, so there is nothing to create or switch over: set the
+          day the year rolls over and it repeats every year.
         </p>
-        ${seasons.length === 0
-          ? `<div class="settings-empty">No seasons yet.</div>`
-          : `<div class="court-list">
-              ${seasons.map((s) => {
-                const total = s.usage.leagues + s.usage.tournaments + s.usage.pickups;
-                return `
-                <div class="court-item">
-                  <div class="court-item-name">
-                    ${esc(s.name)}${s.is_current ? '<span class="season-current-chip">Current</span>' : ''}${s.status === 'ended' ? '<span class="season-ended-chip">Final</span>' : ''}
-                    <div class="season-meta">
-                      ${s.ladder_system === 'elo' ? 'Rating ladder' : 'Position ladder'} ·
-                      ${formatShortDate(s.start_date)} – ${formatShortDate(s.end_date)}
-                      · ${total === 0 ? 'no data yet' : [
-                          s.usage.leagues     ? `${s.usage.leagues} league${s.usage.leagues === 1 ? '' : 's'}` : null,
-                          s.usage.tournaments ? `${s.usage.tournaments} tournament${s.usage.tournaments === 1 ? '' : 's'}` : null,
-                          s.usage.pickups     ? `${s.usage.pickups} ladder match${s.usage.pickups === 1 ? '' : 'es'}` : null,
-                        ].filter(Boolean).join(', ')}
-                    </div>
-                  </div>
-                  <div class="court-item-actions">
-                    ${s.status === 'ended'
-                      ? `<button class="btn btn-outline btn-sm" data-season-reopen="${s.id}">Reopen</button>`
-                      : `${s.is_current ? '' : `<button class="btn btn-outline btn-sm" data-season-current="${s.id}">Set Current</button>`}
-                         <button class="btn btn-outline btn-sm" data-season-end="${s.id}">End Season</button>`}
-                    <button class="btn btn-outline btn-sm" data-season-edit="${s.id}">Edit</button>
-                    <button class="btn btn-danger btn-sm" data-season-delete="${s.id}">Delete</button>
-                  </div>
-                </div>`;
-              }).join('')}
-            </div>`
-        }
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fSeasonStart">Season starts</label>
+            <div class="season-md">
+              <select class="form-control" id="fSeasonStartMonth">
+                ${MONTHS.map((m, i) => `<option value="${String(i + 1).padStart(2, '0')}" ${startMonth === String(i + 1).padStart(2, '0') ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+              <select class="form-control" id="fSeasonStartDay">
+                ${Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'))
+                  .map((d) => `<option value="${d}" ${startDay === d ? 'selected' : ''}>${Number(d)}</option>`).join('')}
+              </select>
+            </div>
+            <p class="form-hint">Every year on this day, a new season begins.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fEloStart">Rating ladder starts from</label>
+            <select class="form-control" id="fEloStart">
+              <option value="">Never — keep the position ladder</option>
+              ${(settings.selectable || seasons).map((s) => `<option value="${esc(s.key)}" ${settings.elo_start_season === s.key ? 'selected' : ''}>${esc(s.name)}${s.status === 'upcoming' ? ' (starts ' + formatShortDate(s.start_date) + ')' : ''}</option>`).join('')}
+            </select>
+            <p class="form-hint">
+              Seasons before this keep the original position ladder and never change. From this
+              season on, every match moves a rating.
+            </p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveSeasonSettings">Save</button>
+          </div>
+        </div>
+
+        <div class="court-list" style="margin-top:6px">
+          ${seasons.map((s) => `
+            <div class="court-item">
+              <div class="court-item-name">
+                ${esc(s.name)}${s.is_current ? '<span class="season-current-chip">Current</span>' : ''}
+                <div class="season-meta">
+                  ${s.ladder_system === 'elo' ? 'Rating ladder' : 'Position ladder'} ·
+                  ${formatShortDate(s.start_date)} – ${formatShortDate(s.end_date)}
+                  · ${s.usage.matches === 0 ? 'no matches' : `${s.usage.matches} match${s.usage.matches === 1 ? '' : 'es'}`}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>
       </div>
 
       <div class="settings-section">
@@ -237,39 +254,18 @@ export async function renderClubSettings() {
       </div>
     </div>`;
 
-  document.getElementById('btnAddSeason').addEventListener('click', openAddSeasonModal);
-
-  content.querySelectorAll('[data-season-edit]').forEach((btn) => {
-    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonEdit));
-    btn.addEventListener('click', () => openEditSeasonModal(season));
-  });
-
-  content.querySelectorAll('[data-season-delete]').forEach((btn) => {
-    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonDelete));
-    btn.addEventListener('click', () => deleteSeasonConfirm(season));
-  });
-
-  content.querySelectorAll('[data-season-end]').forEach((btn) => {
-    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonEnd));
-    btn.addEventListener('click', () => endSeasonConfirm(season));
-  });
-
-  content.querySelectorAll('[data-season-reopen]').forEach((btn) => {
-    const season = seasons.find((s) => s.id === Number(btn.dataset.seasonReopen));
-    btn.addEventListener('click', () => reopenSeasonConfirm(season));
-  });
-
-  content.querySelectorAll('[data-season-current]').forEach((btn) => {
-    const id = Number(btn.dataset.seasonCurrent);
-    btn.addEventListener('click', async () => {
-      try {
-        await window.api.setCurrentSeason(id);
-        toast('Current season updated');
-        renderClubSettings();
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-    });
+  document.getElementById('btnSaveSeasonSettings').addEventListener('click', async () => {
+    const md = `${document.getElementById('fSeasonStartMonth').value}-${document.getElementById('fSeasonStartDay').value}`;
+    try {
+      await window.api.updateSeasonSettings({
+        season_start_md: md,
+        elo_start_season: document.getElementById('fEloStart').value,
+      });
+      toast('Season settings saved');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   });
 
   document.getElementById('btnAddCourt').addEventListener('click', openAddCourtModal);
@@ -298,171 +294,6 @@ export async function renderClubSettings() {
     const id = Number(btn.dataset.btypeDelete);
     const bt = bookingTypes.find((b) => b.id === id);
     btn.addEventListener('click', () => deleteBookingTypeConfirm(bt));
-  });
-}
-
-// ===== SEASONS =====
-function _seasonFormHTML(season) {
-  const s = season || { name: '', start_date: '', end_date: '', is_current: 0 };
-  return `
-    <form id="seasonForm">
-      <div class="form-group">
-        <label class="form-label">Season Name</label>
-        <input class="form-control" id="fSeasonName" value="${esc(s.name)}" placeholder="e.g. Fall/Winter 2026" autofocus>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Start Date</label>
-          <input class="form-control" id="fSeasonStart" type="date" value="${esc(s.start_date)}">
-        </div>
-        <div class="form-group">
-          <label class="form-label">End Date</label>
-          <input class="form-control" id="fSeasonEnd" type="date" value="${esc(s.end_date)}">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Ladder System</label>
-        <select class="form-control" id="fSeasonSystem">
-          <option value="leapfrog" ${s.ladder_system !== 'elo' ? 'selected' : ''}>Position ladder: beat someone above you and take their spot</option>
-          <option value="elo" ${s.ladder_system === 'elo' ? 'selected' : ''}>Rating ladder: every match moves a rating</option>
-        </select>
-        <p class="form-hint">Held per season, so changing it never reorders a season already played.</p>
-      </div>
-      <label class="check-label">
-        <input type="checkbox" id="fSeasonCurrent" ${s.is_current ? 'checked disabled' : ''}>
-        <span>Make this the current season</span>
-      </label>
-      <p class="form-hint">
-        New leagues, tournaments and ladder matches are filed under the current season.
-        ${s.is_current ? 'This is already the current season. To move it, set another season as current instead.' : ''}
-      </p>
-      <div class="form-actions">
-        <button type="button" class="btn btn-outline" id="fSeasonCancel">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save</button>
-      </div>
-    </form>`;
-}
-
-function _readSeasonForm() {
-  return {
-    name: document.getElementById('fSeasonName').value.trim(),
-    start_date: document.getElementById('fSeasonStart').value,
-    end_date: document.getElementById('fSeasonEnd').value,
-    ladder_system: document.getElementById('fSeasonSystem').value,
-    is_current: document.getElementById('fSeasonCurrent').checked,
-  };
-}
-
-function openAddSeasonModal() {
-  modal.open('Add Season', _seasonFormHTML(null));
-  document.getElementById('fSeasonCancel').addEventListener('click', modal.close);
-  document.getElementById('seasonForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      await window.api.addSeason(_readSeasonForm());
-      modal.close();
-      toast('Season added');
-      renderClubSettings();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-}
-
-function openEditSeasonModal(season) {
-  modal.open('Edit Season', _seasonFormHTML(season));
-  document.getElementById('fSeasonCancel').addEventListener('click', modal.close);
-  document.getElementById('seasonForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      await window.api.updateSeason(season.id, _readSeasonForm());
-      modal.close();
-      toast('Season updated');
-      renderClubSettings();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-}
-
-function endSeasonConfirm(season) {
-  modal.open('End Season', `
-    <p>End <strong>${esc(season.name)}</strong>?</p>
-    <p class="text-muted" style="font-size:13px">
-      This freezes the final standings. The ladder for this season stops changing, even if more
-      scores are reported afterwards. Do this once every score is in.
-    </p>
-    <p class="text-muted" style="font-size:13px">
-      If a late score does arrive, you can Reopen the season, let it recalculate, and end it again.
-    </p>
-    <div class="form-actions">
-      <button class="btn btn-outline" id="fEndCancel">Cancel</button>
-      <button class="btn btn-primary" id="fEndConfirm">End Season</button>
-    </div>`);
-  document.getElementById('fEndCancel').addEventListener('click', modal.close);
-  document.getElementById('fEndConfirm').addEventListener('click', async () => {
-    try {
-      const r = await window.api.endSeason(season.id);
-      modal.close();
-      toast(`Season ended. ${r.frozen} standings frozen`);
-      renderClubSettings();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-}
-
-function reopenSeasonConfirm(season) {
-  modal.open('Reopen Season', `
-    <p>Reopen <strong>${esc(season.name)}</strong>?</p>
-    <p class="text-muted" style="font-size:13px">
-      The frozen standings are discarded and this season's ladder goes back to recalculating from
-      match results. End the season again once the late scores are in.
-    </p>
-    <div class="form-actions">
-      <button class="btn btn-outline" id="fReopenCancel">Cancel</button>
-      <button class="btn btn-primary" id="fReopenConfirm">Reopen</button>
-    </div>`);
-  document.getElementById('fReopenCancel').addEventListener('click', modal.close);
-  document.getElementById('fReopenConfirm').addEventListener('click', async () => {
-    try {
-      await window.api.reopenSeason(season.id);
-      modal.close();
-      toast('Season reopened');
-      renderClubSettings();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-}
-
-function deleteSeasonConfirm(season) {
-  const total = season.usage.leagues + season.usage.tournaments + season.usage.pickups;
-  modal.open('Delete Season', `
-    <p>Delete <strong>${esc(season.name)}</strong>?</p>
-    ${total > 0
-      ? `<p class="text-muted" style="font-size:13px">
-           ${season.usage.leagues} league(s), ${season.usage.tournaments} tournament(s) and
-           ${season.usage.pickups} ladder match(es) are filed under this season. Nothing is deleted;
-           they show as <strong>Unassigned</strong> on player profiles instead.
-           Leagues can be re-filed from the league's Options menu; tournaments and ladder matches
-           cannot currently be re-assigned.
-         </p>`
-      : `<p class="text-muted" style="font-size:13px">This season has no data filed under it.</p>`}
-    <div class="form-actions">
-      <button class="btn btn-outline" id="fSeasonDelCancel">Cancel</button>
-      <button class="btn btn-danger" id="fSeasonDelConfirm">Delete</button>
-    </div>`);
-  document.getElementById('fSeasonDelCancel').addEventListener('click', modal.close);
-  document.getElementById('fSeasonDelConfirm').addEventListener('click', async () => {
-    try {
-      await window.api.deleteSeason(season.id);
-      modal.close();
-      toast('Season deleted');
-      renderClubSettings();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
   });
 }
 
@@ -809,7 +640,7 @@ export async function renderDashboard() {
   // one card contradict the other two surfaces.
   const currentSeason = (playerData.seasons || []).find((s) => s.is_current) || null;
   const seasonHistory = currentSeason
-    ? (playerData.history || []).filter((m) => m.season_id === currentSeason.id)
+    ? (playerData.history || []).filter((m) => m.season_key === currentSeason.key)
     : (playerData.history || []);
   const wins = seasonHistory.filter((m) => m.result === 'W').length;
   const losses = seasonHistory.filter((m) => m.result === 'L').length;

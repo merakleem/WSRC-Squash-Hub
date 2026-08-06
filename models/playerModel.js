@@ -52,7 +52,6 @@ function getPlayerMatchHistory(id) {
       w.week_number,
       l.id          AS league_id,
       l.name        AS league_name,
-      l.season_id   AS season_id,
       d.name        AS division_name
     FROM (
       SELECT m.id, 1 AS played_as_p1,
@@ -203,7 +202,6 @@ function getPickupMatchHistory(id) {
       NULL AS week_number,
       NULL AS league_id,
       'Ladder Match' AS league_name,
-      pm.season_id AS season_id,
       NULL AS division_name,
       'pickup' AS source
     FROM pickup_matches pm
@@ -222,7 +220,6 @@ function getPlayerUpcomingMatches(id) {
       w.week_number,
       l.id          AS league_id,
       l.name        AS league_name,
-      l.season_id   AS season_id,
       d.name        AS division_name,
       CASE WHEN m.player1_id = ? THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
       CASE WHEN m.player1_id = ? THEN COALESCE(s2.sub_player_id, m.player2_id) ELSE COALESCE(s1.sub_player_id, m.player1_id) END AS opponent_id,
@@ -255,7 +252,6 @@ function getPlayerUpcomingMatches(id) {
       w.week_number,
       l.id          AS league_id,
       l.name        AS league_name,
-      l.season_id   AS season_id,
       d.name        AS division_name,
       CASE WHEN s.original_player_id = m.player1_id THEN COALESCE(sp2.name, p2.name) ELSE COALESCE(sp1.name, p1.name) END AS opponent_name,
       CASE WHEN s.original_player_id = m.player1_id THEN COALESCE(s2.sub_player_id, m.player2_id) ELSE COALESCE(s1.sub_player_id, m.player1_id) END AS opponent_id,

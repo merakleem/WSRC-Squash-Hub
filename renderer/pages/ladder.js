@@ -14,7 +14,7 @@ function _attachLadderSeasonTabs() {
       // Selecting the current season returns to the live ladder rather than
       // pinning to its id; otherwise there is no way back to "today", and
       // state.ladder would stay frozen for the rest of the session.
-      _ladderSeason = tab.dataset.ladderCurrent === '1' ? null : Number(tab.dataset.ladderSeason);
+      _ladderSeason = tab.dataset.ladderCurrent === '1' ? null : tab.dataset.ladderSeason;
       // A filter carried across seasons would silently hide most of the new one.
       _ladderQuery = '';
       renderLadder();
