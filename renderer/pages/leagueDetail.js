@@ -5,6 +5,14 @@ import { printBoxes, copyPublicLink, openMessagePlayersModal, openBulkInviteModa
 let leagueEditMode = false;
 export function resetLeagueEditMode() { leagueEditMode = false; }
 
+// View state for the league page: which tab is showing and which division is
+// selected. One division selection serves both Standings and Schedule;
+// Standings has no all-divisions table, so it falls back to a concrete
+// division there. Keyed to the league id so state never leaks between leagues.
+let _leagueTab = 'standings';
+let _leagueDivision = 'all';
+let _leagueViewFor = null;
+
 // Cache of court lists by league ID, populated when a league is loaded
 const _leagueCourtsCache = new Map();
 
@@ -27,6 +35,27 @@ export async function reloadLeagueDetail() {
   state.currentLeague = await window.api.getLeague(state.currentLeague.id);
   renderLeagueDetail();
   restoreOpenWeeks(openIds);
+}
+
+// Played/total for a week, counting only matches that can still be played.
+function _weekCounts(week) {
+  let total = 0;
+  let played = 0;
+  for (const mu of (week.matchups || [])) {
+    for (const m of (mu.matches || [])) {
+      if (m.skipped) continue;
+      total++;
+      if (m.player1_score != null && m.player2_score != null) played++;
+    }
+  }
+  return { total, played };
+}
+
+function _weekSummary({ total, played }) {
+  if (total === 0) return 'No matches';
+  if (played === 0) return 'Not played yet';
+  if (played === total) return `All ${total} played`;
+  return `${played} of ${total} played`;
 }
 
 export function renderLeagueDetail() {
@@ -117,84 +146,179 @@ export function renderLeagueDetail() {
   const isModern = league.setup_type === 'modern';
   const numPlayers = isModern ? (league.players || []).length : league.num_teams * league.num_divisions;
 
+  // Arriving at a different league resets the view to its defaults.
+  if (_leagueViewFor !== league.id) {
+    _leagueViewFor = league.id;
+    _leagueTab = 'standings';
+    _leagueDivision = 'all';
+  }
+  if (_leagueTab === 'players' && !adminMode) _leagueTab = 'standings';
+
   const weeks = league.weeks || [];
+  const divisions = (league.divisions || []).slice().sort((a, b) => a.level - b.level);
+
+  const myId = state.currentUser?.playerId;
+  const myDivision = (league.players || []).find((p) => p.player_id === myId)?.division_id ?? null;
+  const fallbackDivision = String(myDivision ?? divisions[0]?.id ?? 'all');
+
+  // ----- hero -----
+  const counts = weeks.map(_weekCounts);
+  const currentIdx = counts.findIndex((c) => c.total > 0 && c.played < c.total);
+  const currentWeekId = currentIdx >= 0 ? weeks[currentIdx].id : null;
+
   const endDate = weeks.length > 0 ? weeks[weeks.length - 1].date : null;
   const dateRange = endDate
     ? `${formatShortDate(league.start_date)} – ${formatShortDate(endDate)}`
     : formatShortDate(league.start_date);
+  const weekday = weeks.length
+    ? new Date(String(weeks[0].date).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }) + 's'
+    : null;
 
-  const statsHTML = isModern ? `
-    <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
-    <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
-    <div class="stat"><span class="stat-val">${weeks.length}</span><span class="stat-label">Weeks</span></div>
-    <div class="stat"><span class="stat-val">${dateRange}</span><span class="stat-label">Dates</span></div>` : `
-    <div class="stat"><span class="stat-val">${league.num_teams}</span><span class="stat-label">Teams</span></div>
-    <div class="stat"><span class="stat-val">${league.num_divisions}</span><span class="stat-label">Divisions</span></div>
-    <div class="stat"><span class="stat-val">${numPlayers}</span><span class="stat-label">Players</span></div>
-    <div class="stat"><span class="stat-val">${weeks.length}</span><span class="stat-label">Weeks</span></div>
-    <div class="stat"><span class="stat-val">${dateRange}</span><span class="stat-label">Dates</span></div>`;
+  const metaBits = (isModern
+    ? [`${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${numPlayers} players`, weekday]
+    : [`${league.num_teams} teams`, `${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${numPlayers} players`, weekday]
+  ).filter(Boolean).join(' · ');
 
-  content.innerHTML = `
-    <div class="league-header-card">
-      <div class="league-header-inner">
-        <h2>${esc(league.name)}${league.status === 'completed' ? ' <span class="league-completed-badge">Completed</span>' : ''}</h2>
-        <div class="league-header-divider"></div>
-        <div class="league-stats">${statsHTML}</div>
+  const segsHTML = weeks.map((w, i) => {
+    const cls = currentIdx === -1 || i < currentIdx ? ' lg-seg-done' : i === currentIdx ? ' lg-seg-now' : '';
+    return `<span class="lg-seg${cls}"></span>`;
+  }).join('');
+
+  const weekLabel = weeks.length
+    ? `Week ${currentIdx >= 0 ? currentIdx + 1 : weeks.length} of ${weeks.length}`
+    : '';
+
+  const heroHTML = `
+    <div class="lg-hero">
+      <div class="lg-hero-left">
+        <div class="lg-hero-title">
+          <h2>${esc(league.name)}</h2>
+          <span class="lg-status">${esc(String(league.status || 'active').toUpperCase())}</span>
+        </div>
+        ${metaBits ? `<span class="lg-hero-meta">${metaBits}</span>` : ''}
       </div>
-    </div>
-
-    ${adminMode ? `
-    <div class="section">
-      <div class="section-title">${isModern ? 'Divisions' : 'Rosters'} <div class="divider"></div></div>
-      ${isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
-    </div>
-    ` : ''}
-
-    <div class="section">
-      <div class="section-title">Standings <div class="divider"></div></div>
-      ${renderStandings(league)}
-    </div>
-
-    <div class="section">
-      <div class="section-title">Schedule <div class="divider"></div></div>
-      ${renderScheduleFilter(league)}
-      <div class="schedule-list${adminMode ? ' is-admin' : ''}" id="scheduleList">
-        ${(league.weeks || []).map((w) => renderWeekCard(w, league, adminMode)).join('')}
-      </div>
+      ${weeks.length ? `
+      <div class="lg-progress">
+        <div class="lg-progress-top">
+          <span class="lg-progress-week">${weekLabel}</span>
+          <span class="lg-progress-dates">${dateRange}</span>
+        </div>
+        <div class="lg-segs">${segsHTML}</div>
+      </div>` : ''}
     </div>`;
 
-  // Schedule division filter
-  const schFilter = content.querySelector('#schFilter');
-  if (schFilter) {
-    schFilter.addEventListener('click', (e) => {
+  // ----- tab bar + division pills -----
+  // The pills keep #schFilter and .std-tab[data-div-id]: they are the same
+  // control the schedule filter has always been, now shared with Standings.
+  const pillsHTML = divisions.length > 1 ? `
+    <div class="sch-filter lg-pills" id="schFilter">
+      <button class="std-tab lg-pill" data-div-id="all">All</button>
+      ${divisions.map((d) => `<button class="std-tab lg-pill" data-div-id="${d.id}">${esc(d.name)}</button>`).join('')}
+    </div>` : '';
+
+  const tabsHTML = `
+    <div class="lg-tabbar">
+      <div class="lg-tabs" id="lgTabs">
+        <button class="lg-tab" data-lg-tab="standings">Standings</button>
+        <button class="lg-tab" data-lg-tab="schedule">Schedule</button>
+        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">Players <span class="lg-admin-chip">ADMIN</span></button>` : ''}
+      </div>
+      ${pillsHTML}
+    </div>`;
+
+  const rosterHint = leagueEditMode
+    ? 'Edit mode on. Replace swaps a player out and hands their fixtures and history to the new player.'
+    : 'Division rosters in seeded order. Use <strong>Edit Players</strong> in the top bar to swap a player out.';
+
+  content.innerHTML = `
+    <div class="lg-page">
+      ${heroHTML}
+      ${tabsHTML}
+      <div class="lg-panel" id="lgPanelStandings">
+        ${renderStandings(league)}
+      </div>
+      <div class="lg-panel" id="lgPanelSchedule" hidden>
+        <div class="schedule-list${adminMode ? ' is-admin' : ''}" id="scheduleList">
+          ${weeks.map((w) => renderWeekCard(w, league, adminMode, w.id === currentWeekId)).join('')}
+        </div>
+      </div>
+      ${adminMode ? `
+      <div class="lg-panel" id="lgPanelPlayers" hidden>
+        <div class="lg-roster-hint">
+          <span class="lg-roster-hint-text">${rosterHint}</span>
+          <span class="lg-adminonly-chip">Admins only</span>
+        </div>
+        ${isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
+      </div>` : ''}
+    </div>`;
+
+  // ----- view state application: tabs + the shared division selector -----
+  const tabsEl = content.querySelector('#lgTabs');
+  const pillsEl = content.querySelector('#schFilter');
+  const panels = {
+    standings: content.querySelector('#lgPanelStandings'),
+    schedule: content.querySelector('#lgPanelSchedule'),
+    players: content.querySelector('#lgPanelPlayers'),
+  };
+
+  const applyDivision = () => {
+    const divId = _leagueDivision;
+    if (pillsEl) {
+      pillsEl.querySelectorAll('.std-tab').forEach((p) => p.classList.toggle('active', p.dataset.divId === divId));
+    }
+    // Schedule rows: the filtering behaviour #schFilter has always had.
+    const isAll = divId === 'all';
+    if (isModern) {
+      content.querySelectorAll('#scheduleList .matchup-block[data-division-id]').forEach((block) => {
+        block.hidden = !isAll && block.dataset.divisionId !== divId;
+      });
+    } else {
+      content.querySelectorAll('#scheduleList .match-row').forEach((row) => {
+        row.hidden = !isAll && row.dataset.divisionId !== divId;
+      });
+      content.querySelectorAll('#scheduleList .matchup-block').forEach((block) => {
+        block.hidden = !isAll && !block.querySelector('.match-row:not([hidden])');
+      });
+    }
+    // Standings panels: the .std-panel.active toggle, as before.
+    content.querySelectorAll('.std-panel').forEach((p) => {
+      p.classList.toggle('active', p.dataset.divId === divId);
+    });
+  };
+
+  const applyTab = () => {
+    // Standings has no all-divisions table; fall back to the viewer's own
+    // division, or the first.
+    if (_leagueTab === 'standings' && _leagueDivision === 'all') _leagueDivision = fallbackDivision;
+    tabsEl.querySelectorAll('.lg-tab').forEach((t) => t.classList.toggle('active', t.dataset.lgTab === _leagueTab));
+    for (const [key, el] of Object.entries(panels)) {
+      if (el) el.hidden = key !== _leagueTab;
+    }
+    if (pillsEl) {
+      pillsEl.hidden = _leagueTab === 'players';
+      const allPill = pillsEl.querySelector('.std-tab[data-div-id="all"]');
+      if (allPill) allPill.hidden = _leagueTab === 'standings';
+    }
+    applyDivision();
+  };
+
+  tabsEl.addEventListener('click', (e) => {
+    const tab = e.target.closest('.lg-tab');
+    if (!tab) return;
+    _leagueTab = tab.dataset.lgTab;
+    applyTab();
+  });
+
+  if (pillsEl) {
+    pillsEl.addEventListener('click', (e) => {
       const pill = e.target.closest('.std-tab');
       if (!pill) return;
-      const divId = pill.dataset.divId;
-      schFilter.querySelectorAll('.std-tab').forEach((p) => p.classList.toggle('active', p === pill));
-      const isAll = divId === 'all';
-      if (isModern) {
-        content.querySelectorAll('#scheduleList .matchup-block[data-division-id]').forEach((block) => {
-          block.hidden = !isAll && block.dataset.divisionId !== divId;
-        });
-      } else {
-        content.querySelectorAll('#scheduleList .match-row').forEach((row) => {
-          row.hidden = !isAll && row.dataset.divisionId !== divId;
-        });
-        content.querySelectorAll('#scheduleList .matchup-block').forEach((block) => {
-          block.hidden = !isAll && !block.querySelector('.match-row:not([hidden])');
-        });
-      }
+      _leagueDivision = pill.dataset.divId;
+      applyDivision();
     });
   }
 
-  // Standings tab switching (scoped to .std-container to avoid colliding with schedule filter pills)
-  content.querySelectorAll('.std-container .std-tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const divId = tab.dataset.divId;
-      content.querySelectorAll('.std-container .std-tab').forEach((t) => t.classList.toggle('active', t === tab));
-      content.querySelectorAll('.std-panel').forEach((p) => p.classList.toggle('active', p.dataset.divId === divId));
-    });
-  });
+  applyTab();
 
   // Week toggle
   content.querySelectorAll('.week-header').forEach((header) => {
@@ -264,20 +388,28 @@ export function renderLeagueDetail() {
 
 function renderRosters(league, editMode = false) {
   if (!league.teams || league.teams.length === 0) return '';
-  return `<div class="roster-grid">
+  const myId = state.currentUser?.playerId;
+  return `<div class="roster-grid lg-rosters">
     ${league.teams.map((team) => {
       const members = (league.players || [])
         .filter((p) => p.team_id === team.id)
         .sort((a, b) => a.division_level - b.division_level);
       return `
-        <div class="roster-team-card">
-          <div class="roster-team-title">${esc(team.name)}</div>
-          ${members.map((m) => `
-            <div class="roster-player">
+        <div class="roster-team-card lg-roster-card">
+          <div class="lg-card-head">
+            <span class="lg-card-label">${esc(team.name)}</span>
+            <span class="lg-card-meta">${members.length} player${members.length === 1 ? '' : 's'}</span>
+          </div>
+          ${members.map((m) => {
+            const isMe = myId != null && m.player_id === myId;
+            return `
+            <div class="roster-player lg-roster-row${isMe ? ' lg-me' : ''}">
               <span class="div-chip">${esc(m.division_name.replace(/^Division\s*/i, 'D'))}</span>
               <a class="player-link" data-player-id="${m.player_id}" href="#">${esc(m.player_name)}</a>
-              ${editMode ? `<button class="replace-btn" data-player-id="${m.player_id}" data-player-name="${esc(m.player_name)}">Replace</button>` : ''}
-            </div>`).join('')}
+              ${isMe ? '<span class="lg-you">YOU</span>' : ''}
+              ${editMode ? `<button class="replace-btn lg-replace" data-player-id="${m.player_id}" data-player-name="${esc(m.player_name)}">Replace</button>` : ''}
+            </div>`;
+          }).join('')}
         </div>`;
     }).join('')}
   </div>`;
@@ -285,19 +417,28 @@ function renderRosters(league, editMode = false) {
 
 function renderRostersModern(league, editMode = false) {
   if (!league.divisions || league.divisions.length === 0) return '';
-  return `<div class="roster-grid">
+  const myId = state.currentUser?.playerId;
+  return `<div class="roster-grid lg-rosters">
     ${league.divisions.map((div) => {
       const members = (league.players || [])
         .filter((p) => p.division_id === div.id)
         .sort((a, b) => a.skill_rank - b.skill_rank);
       return `
-        <div class="roster-team-card">
-          <div class="roster-team-title">${esc(div.name)}</div>
-          ${members.map((m) => `
-            <div class="roster-player">
+        <div class="roster-team-card lg-roster-card">
+          <div class="lg-card-head">
+            <span class="lg-card-label">${esc(div.name)}</span>
+            <span class="lg-card-meta">${members.length} player${members.length === 1 ? '' : 's'}</span>
+          </div>
+          ${members.map((m, i) => {
+            const isMe = myId != null && m.player_id === myId;
+            return `
+            <div class="roster-player lg-roster-row${isMe ? ' lg-me' : ''}">
+              <span class="lg-seed">${i + 1}</span>
               <a class="player-link" data-player-id="${m.player_id}" href="#">${esc(m.player_name)}</a>
-              ${editMode ? `<button class="replace-btn" data-player-id="${m.player_id}" data-player-name="${esc(m.player_name)}">Replace</button>` : ''}
-            </div>`).join('')}
+              ${isMe ? '<span class="lg-you">YOU</span>' : ''}
+              ${editMode ? `<button class="replace-btn lg-replace" data-player-id="${m.player_id}" data-player-name="${esc(m.player_name)}">Replace</button>` : ''}
+            </div>`;
+          }).join('')}
         </div>`;
     }).join('')}
   </div>`;
@@ -370,47 +511,45 @@ function renderStandings(league) {
     return '<p style="color:var(--text-muted);padding:8px 0 24px">No standings available.</p>';
   }
 
-  const tabsHTML = divIds.map((id, i) => `
-    <button class="std-tab${i === 0 ? ' active' : ''}" data-div-id="${id}">
-      ${esc(standings[id].division.name)}
-    </button>`).join('');
+  const myId = state.currentUser?.playerId;
 
-  const panelsHTML = divIds.map((id, i) => {
-    const players = standings[id].players;
+  // One card per division; the shared division selector decides which panel is
+  // .active, so every panel stays in the DOM as before.
+  const panelsHTML = divIds.map((id) => {
+    const { division, players } = standings[id];
+    const matchesPlayed = Math.round(players.reduce((sum, p) => sum + p.played, 0) / 2);
     const rows = players.map((p, idx) => {
-      const sign = p.gameDiff > 0 ? '+' : '';
-      const gdClass = p.gameDiff > 0 ? ' std-gd-pos' : p.gameDiff < 0 ? ' std-gd-neg' : '';
+      const isMe = myId != null && p.playerId === myId;
+      const gdText = p.gameDiff > 0 ? `+${p.gameDiff}` : p.gameDiff < 0 ? `−${Math.abs(p.gameDiff)}` : '0';
+      const gdClass = p.gameDiff > 0 ? ' lg-gd-pos' : p.gameDiff < 0 ? ' lg-gd-neg' : '';
+      const rankClass = isMe ? ' lg-rank-me' : idx === 0 ? ' lg-rank-first' : '';
       return `
-        <tr>
-          <td class="std-rank">${idx + 1}</td>
-          <td class="std-player"><span class="nav-player-link" data-player-id="${p.playerId}">${esc(p.name)}</span></td>
-          <td class="std-stat">${p.wins}</td>
-          <td class="std-stat">${p.losses}</td>
-          <td class="std-stat${gdClass}">${sign}${p.gameDiff}</td>
-          <td class="std-stat">${p.played}</td>
-        </tr>`;
+        <div class="lg-std-row${isMe ? ' lg-me' : ''}">
+          <span class="lg-std-rank${rankClass}">${idx + 1}</span>
+          <span class="lg-std-name">
+            <span class="nav-player-link${isMe ? ' lg-name-me' : ''}" data-player-id="${p.playerId}">${esc(p.name)}</span>
+            ${isMe ? '<span class="lg-you">YOU</span>' : ''}
+          </span>
+          <span class="lg-std-w">${p.wins}</span>
+          <span class="lg-std-l">${p.losses}</span>
+          <span class="lg-std-gd${gdClass}">${gdText}</span>
+          <span class="lg-std-gp">${p.played}</span>
+        </div>`;
     }).join('');
     return `
-      <div class="std-panel${i === 0 ? ' active' : ''}" data-div-id="${id}">
-        <table class="std-table">
-          <thead><tr>
-            <th class="std-rank">#</th>
-            <th class="std-player">Player</th>
-            <th class="std-stat">W</th>
-            <th class="std-stat">L</th>
-            <th class="std-stat">GD</th>
-            <th class="std-stat">GP</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+      <div class="std-panel lg-std-card" data-div-id="${id}">
+        <div class="lg-card-head">
+          <span class="lg-card-label">${esc(division.name)} standings</span>
+          <span class="lg-card-meta">${players.length} player${players.length === 1 ? '' : 's'} · ${matchesPlayed} match${matchesPlayed === 1 ? '' : 'es'} played</span>
+        </div>
+        <div class="lg-std-cols">
+          <span>#</span><span>Player</span><span>W</span><span>L</span><span>GD</span><span>GP</span>
+        </div>
+        ${rows}
       </div>`;
   }).join('');
 
-  return `
-    <div class="std-container">
-      <div class="std-tabs">${tabsHTML}</div>
-      ${panelsHTML}
-    </div>`;
+  return `<div class="std-container lg-std">${panelsHTML}</div>`;
 }
 
 function openTimingModal(btn) {
@@ -581,76 +720,76 @@ function openReplacePlayerModal(leagueId, oldPlayerId, oldPlayerName) {
   });
 }
 
-function renderScheduleFilter(league) {
-  const divs = (league.divisions || []).slice().sort((a, b) => a.level - b.level);
-  if (divs.length <= 1) return '';
-  const pills = divs.map((d) => `<button class="std-tab" data-div-id="${d.id}">${esc(d.name)}</button>`).join('');
-  return `<div class="sch-filter" id="schFilter">
-    <button class="std-tab active" data-div-id="all">All</button>
-    ${pills}
-  </div>`;
-}
+function renderWeekCard(week, league, adminMode = true, isCurrent = false) {
+  if (league.setup_type === 'modern') return renderWeekCardModern(week, league, adminMode, isCurrent);
 
-function renderWeekCard(week, league, adminMode = true) {
-  if (league.setup_type === 'modern') return renderWeekCardModern(week, league, adminMode);
-
+  const summary = _weekSummary(_weekCounts(week));
   const matchupsHTML = week.matchups.map((mu) => {
     if (mu.bye_team_id) {
       return `
-        <div class="matchup-block">
-          <div class="matchup-title">${esc(mu.bye_team_name)} <span class="bye-badge">BYE</span></div>
+        <div class="matchup-block lg-group">
+          <div class="matchup-title lg-group-title">${esc(mu.bye_team_name)} <span class="bye-badge">BYE</span></div>
         </div>`;
     }
     return `
-      <div class="matchup-block">
-        <div class="matchup-title">
+      <div class="matchup-block lg-group">
+        <div class="matchup-title lg-group-title">
           ${esc(mu.team1_name)} <span class="vs-badge">VS</span> ${esc(mu.team2_name)}
         </div>
-        ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
+        <div class="lg-matches">
+          ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
+        </div>
       </div>`;
   }).join('');
 
   return `
-    <div class="week-card" data-week-id="${week.id}">
-      <div class="week-header">
-        <div class="week-title">
-          <span class="week-num">Week ${week.week_number}</span>
-          <span class="week-date">${formatDate(week.date)}</span>
+    <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
+      <div class="week-header lg-week-header">
+        <div class="lg-week-lead">
+          <span class="lg-week-num">Week ${week.week_number}</span>
+          ${isCurrent ? '<span class="lg-thisweek">THIS WEEK</span>' : ''}
         </div>
+        <span class="lg-week-date">${formatDate(week.date)}</span>
+        <span class="lg-week-summary">${summary}</span>
         <svg class="week-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M6 9l6 6 6-6"/>
         </svg>
       </div>
-      <div class="week-body">${matchupsHTML}</div>
+      <div class="week-body lg-week-body">${matchupsHTML}</div>
     </div>`;
 }
 
-function renderWeekCardModern(week, league, adminMode = true) {
+function renderWeekCardModern(week, league, adminMode = true, isCurrent = false) {
+  const summary = _weekSummary(_weekCounts(week));
   const byes = week.byes || [];
   const matchupsHTML = week.matchups.map((mu) => {
     const divByes = byes.filter((b) => b.division_id === mu.division_id);
     const byesHTML = divByes.length
       ? `<div class="matchup-byes">Bye: ${divByes.map((b) => esc(b.player_name)).join(', ')}</div>` : '';
     return `
-      <div class="matchup-block" data-division-id="${mu.division_id}">
-        <div class="matchup-title">${esc(mu.division_name)}</div>
-        ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
+      <div class="matchup-block lg-group" data-division-id="${mu.division_id}">
+        <div class="matchup-title lg-group-title">${esc(mu.division_name)}</div>
+        <div class="lg-matches">
+          ${mu.matches.map((m) => renderMatchRow(m, league, adminMode)).join('')}
+        </div>
         ${byesHTML}
       </div>`;
   }).join('');
 
   return `
-    <div class="week-card" data-week-id="${week.id}">
-      <div class="week-header">
-        <div class="week-title">
-          <span class="week-num">Week ${week.week_number}</span>
-          <span class="week-date">${formatDate(week.date)}</span>
+    <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
+      <div class="week-header lg-week-header">
+        <div class="lg-week-lead">
+          <span class="lg-week-num">Week ${week.week_number}</span>
+          ${isCurrent ? '<span class="lg-thisweek">THIS WEEK</span>' : ''}
         </div>
+        <span class="lg-week-date">${formatDate(week.date)}</span>
+        <span class="lg-week-summary">${summary}</span>
         <svg class="week-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M6 9l6 6 6-6"/>
         </svg>
       </div>
-      <div class="week-body">${matchupsHTML}</div>
+      <div class="week-body lg-week-body">${matchupsHTML}</div>
     </div>`;
 }
 
@@ -685,7 +824,6 @@ function renderMatchRow(match, league, adminMode = true) {
   const newCourtName = leagueCourts.length > 0 && match.court_id
     ? leagueCourts.find((c) => c.id === match.court_id)?.name
     : null;
-  const showCourt = newCourtName != null || (league?.schedule_courts && match.court_number);
   const timingLabel = adminMode && newCourtName
     ? `${newCourtName}${match.match_time ? ' · ' + match.match_time : ''}`
     : (adminMode && league?.schedule_courts && match.court_number
@@ -702,29 +840,30 @@ function renderMatchRow(match, league, adminMode = true) {
     data-schedule-courts="${league && league.schedule_courts ? '1' : '0'}"
     data-num-courts="${league ? league.num_courts : 2}"` : `class="match-court-label"`;
   const courtInfo = (canEditTiming || timingLabel)
-    ? `<span ${timingAttrs}>${timingLabel || 'Set time'}</span>` : '';
+    ? `<span ${timingAttrs}>${timingLabel || 'Set time'}</span>`
+    : `<span class="match-court-label"></span>`;
+
+  // The row-level division chip only earns its place in box leagues, where a
+  // group holds matches from several divisions; modern groups are the division.
+  const divChip = league.setup_type !== 'modern'
+    ? `<span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>` : '';
 
   const isSkipped = !!match.skipped;
   const leagueId = league ? league.id : '';
 
-  const myId = state.currentUser?.playerId;
-  const isMyMatch = !adminMode && myId && (myId === match.player1_id || myId === match.player2_id);
-  const opponentName = isMyMatch
-    ? (myId === match.player1_id ? (match.sub2_name || match.player2_name) : (match.sub1_name || match.player1_name))
-    : null;
-
   if (isSkipped) {
     return `
-      <div class="match-row match-row-skipped" data-match-id="${match.id}" data-division-id="${match.division_id}">
-        <div class="match-meta">
-          <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
-        </div>
-        <span class="match-p1 match-player nav-player-link" style="opacity:0.4" data-player-id="${match.sub1_id || match.player1_id}">${esc(eff1Name)}</span>
-        <span class="match-vs" style="opacity:0.4">vs</span>
-        <span class="match-p2 match-player nav-player-link" style="opacity:0.4" data-player-id="${match.sub2_id || match.player2_id}">${esc(eff2Name)}</span>
+      <div class="match-row lg-match lg-match-skipped" data-match-id="${match.id}" data-division-id="${match.division_id}">
+        ${divChip}
+        <span class="match-court-label"></span>
+        <span class="lg-players">
+          <span class="match-p1 match-player nav-player-link" data-player-id="${match.sub1_id || match.player1_id}">${esc(eff1Name)}</span>
+          <span class="match-vs">vs</span>
+          <span class="match-p2 match-player nav-player-link" data-player-id="${match.sub2_id || match.player2_id}">${esc(eff2Name)}</span>
+        </span>
         <div class="match-actions">
           <span class="match-skipped-label">Skipped</span>
-          ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn" style="font-size:11px" data-match-id="${match.id}">Undo</button>` : ''}
+          ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn lg-ghost" data-match-id="${match.id}">Undo</button>` : ''}
         </div>
       </div>`;
   }
@@ -733,40 +872,40 @@ function renderMatchRow(match, league, adminMode = true) {
   if (hasScore) {
     scoreSection = `<div class="match-score">
          <span class="score-display">${match.player1_score} – ${match.player2_score}</span>
-         ${adminMode ? `<button class="btn btn-ghost btn-sm score-save-btn" style="font-size:11px;padding:4px 8px"
+         ${adminMode ? `<button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
            data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="false">Edit</button>` : ''}
        </div>`;
   } else if (adminMode) {
     scoreSection = `<div class="match-score">
          ${bo5ScoreInputHTML()}
-         <button class="btn btn-success btn-sm score-save-btn" style="font-size:11px"
+         <button class="btn btn-success btn-sm score-save-btn lg-save"
            data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="true">Save</button>
        </div>`;
   } else {
     scoreSection = `<div class="match-score">
-      <span class="text-muted" style="font-size:13px">—</span>
+      <span class="lg-notplayed">Not played</span>
     </div>`;
   }
 
   return `
-    <div class="match-row" data-match-id="${match.id}" data-division-id="${match.division_id}">
-      <div class="match-meta">
-        <span class="match-div-label">${esc(match.division_name.replace(/^Division\s*/i, 'D'))}</span>
-        ${courtInfo}
-      </div>
-      <span class="match-p1 match-player nav-player-link${p1Won ? ' winner' : ''}" data-player-id="${match.sub1_id || match.player1_id}">${p1SubBadge}${esc(eff1Name)}</span>
-      <span class="match-vs">vs</span>
-      <span class="match-p2 match-player nav-player-link${p2Won ? ' winner' : ''}" data-player-id="${match.sub2_id || match.player2_id}">${p2SubBadge}${esc(eff2Name)}</span>
+    <div class="match-row lg-match${hasScore ? ' lg-match-scored' : ''}" data-match-id="${match.id}" data-division-id="${match.division_id}">
+      ${divChip}
+      ${courtInfo}
+      <span class="lg-players">
+        <span class="match-p1 match-player nav-player-link${p1Won ? ' winner' : ''}" data-player-id="${match.sub1_id || match.player1_id}">${p1SubBadge}${esc(eff1Name)}</span>
+        <span class="match-vs">vs</span>
+        <span class="match-p2 match-player nav-player-link${p2Won ? ' winner' : ''}" data-player-id="${match.sub2_id || match.player2_id}">${p2SubBadge}${esc(eff2Name)}</span>
+      </span>
       <div class="match-actions">
         ${scoreSection}
-        ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn" style="font-size:11px"
+        ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn lg-ghost"
           data-match-id="${match.id}"
           data-league-id="${leagueId}"
           data-p1-id="${match.player1_id}" data-p1-name="${esc(match.player1_name)}"
           data-p2-id="${match.player2_id}" data-p2-name="${esc(match.player2_name)}"
           data-sub1-id="${match.sub1_id || ''}" data-sub1-name="${esc(match.sub1_name || '')}"
           data-sub2-id="${match.sub2_id || ''}" data-sub2-name="${esc(match.sub2_name || '')}">Sub</button>` : ''}
-${adminMode ? `<button class="btn btn-ghost btn-sm skip-btn" style="font-size:11px;color:var(--text-muted)" data-match-id="${match.id}">Skip</button>` : ''}
+        ${adminMode ? `<button class="btn btn-ghost btn-sm skip-btn lg-ghost lg-ghost-muted" data-match-id="${match.id}">Skip</button>` : ''}
       </div>
     </div>`;
 }
