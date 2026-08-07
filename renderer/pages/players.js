@@ -952,16 +952,18 @@ export function renderPlayerProfile() {
   const careerLast = ladderSeries[ladderSeries.length - 1] || null;
   const careerBest = _bestRankInWindow(ladderSeries, null);
 
+  // The summary sits above the chart rather than floating over it: as an
+  // overlay it covered the plot and blocked the points underneath it.
   const ladderPanelHTML = careerLast == null ? '' : `
     <div class="pp-ladder-card">
       <span class="pp-card-label pp-on-navy">Career ladder position · all seasons</span>
-      ${_ladderChartHTML(ladderSeries, seasons, 'desktop')}
-      <div class="pp-ladder-overlay">
+      <div class="pp-ladder-summary">
         <div class="pp-ladder-now">#${careerLast.position}</div>
         <div class="pp-ladder-of">of ${careerLast.ladder_size} players</div>
         <div class="pp-ladder-rule"></div>
         <div class="pp-ladder-best">#${careerBest}<span>Best ever</span></div>
       </div>
+      ${_ladderChartHTML(ladderSeries, seasons, 'desktop')}
     </div>`;
 
   const panelFor = (tabKey) => {

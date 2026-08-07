@@ -500,12 +500,20 @@ function getPlayerLadderHistory(playerId) {
     series.push({ date: String(match.sort_key || '').slice(0, 10), position, ladder_size: size });
   }
 
-  // Always end at today's standing so the line reaches the right edge.
-  const last = series[series.length - 1];
-  const today = new Date().toISOString().slice(0, 10);
-  if (!last || last.date !== today) series.push({ date: today, position, ladder_size: size });
+  // One point per day: several matches can land on the same date, and plotting
+  // each of them stacks dots vertically on the same x. Matches are replayed in
+  // order, so the last entry for a date is where the player finished that day,
+  // which is the only one worth charting.
+  const byDay = new Map();
+  for (const point of series) byDay.set(point.date, point);
+  const daily = [...byDay.values()];
 
-  return series;
+  // Always end at today's standing so the line reaches the right edge.
+  const today = new Date().toISOString().slice(0, 10);
+  const last = daily[daily.length - 1];
+  if (!last || last.date !== today) daily.push({ date: today, position, ladder_size: size });
+
+  return daily;
 }
 
 /**
