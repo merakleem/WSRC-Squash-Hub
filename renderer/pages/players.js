@@ -1045,6 +1045,27 @@ export function renderPlayerProfile() {
 
   document.getElementById('btnEditPhoto')?.addEventListener('click', () => openPhotoModal(p));
 
+  // Chart points: hover shows the label on a pointer device via CSS. Touch has
+  // no hover, so a tap opens one and closes any other, and a tap anywhere else
+  // dismisses it.
+  content.querySelectorAll('.pp-chart').forEach((chart) => {
+    chart.addEventListener('click', (e) => {
+      const pt = e.target.closest('.pp-chart-pt');
+      chart.querySelectorAll('.pp-chart-pt.is-open').forEach((el) => {
+        if (el !== pt) el.classList.remove('is-open');
+      });
+      if (pt) {
+        pt.classList.toggle('is-open');
+        e.stopPropagation();
+      }
+    });
+  });
+
+  content.addEventListener('click', (e) => {
+    if (e.target.closest('.pp-chart-pt')) return;
+    content.querySelectorAll('.pp-chart-pt.is-open').forEach((el) => el.classList.remove('is-open'));
+  });
+
   const panelEl = document.getElementById('ppPanel');
   const tabEls = [...content.querySelectorAll('.pp-tab[data-pp-tab]')];
 
@@ -1238,18 +1259,41 @@ function _ladderChartHTML(series, seasons, variant) {
   };
 
   // Every point in the series is a real position change, so every one gets a
-  // marker. A wider transparent circle over each carries the tooltip, since a
-  // 4px target is hard to hit.
+  // marker. The label sits in the markup rather than in a <title>, so it shows
+  // the instant the pointer arrives instead of after the browser's tooltip
+  // delay, and so it can be opened by tapping on a touch screen.
   const last = series.length - 1;
+  const shortDate = (d) => {
+    const dt = new Date(`${String(d).slice(0, 10)}T00:00:00Z`);
+    return `${MONTHS[dt.getUTCMonth()]} ${dt.getUTCDate()}`;
+  };
   const markers = series.map((pt, i) => {
-    const cx = x(pt.date).toFixed(1);
-    const cy = y(pt.position).toFixed(1);
+    const cx = x(pt.date);
+    const cy = y(pt.position);
     const dot = i === last
-      ? `<circle cx="${cx}" cy="${cy}" r="6" fill="#fff"/>`
-      : `<circle cx="${cx}" cy="${cy}" r="4" fill="#1a2150" stroke="#8fa8ff" stroke-width="2.5"/>`;
-    return `${dot}<circle class="pp-chart-hit" cx="${cx}" cy="${cy}" r="14" fill="transparent">
-      <title>#${pt.position} of ${pt.ladder_size} — ${fmt(pt.date)}</title>
-    </circle>`;
+      ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" fill="#fff"/>`
+      : `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="#1a2150" stroke="#8fa8ff" stroke-width="2.5"/>`;
+
+    const label = `#${pt.position} · ${shortDate(pt.date)}`;
+    // SVG can't measure text before paint, so the pill is sized from the label
+    // length and then kept inside the plot so it can't run off an edge.
+    const w = label.length * 7 + 18;
+    const cxClamped = Math.min(X1 - w / 2, Math.max(X0 + w / 2, cx));
+    // Flip below the dot near the top, where there is no room above it.
+    const above = cy > Y0 + 40;
+    const ty = above ? cy - 14 : cy + 14;
+
+    return `
+      <g class="pp-chart-pt" data-pt="${i}">
+        ${dot}
+        <circle class="pp-chart-hit" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="16" fill="transparent"/>
+        <g class="pp-chart-tip" transform="translate(${cxClamped.toFixed(1)}, ${ty.toFixed(1)})">
+          <rect x="${(-w / 2).toFixed(1)}" y="${above ? -22 : 0}" width="${w}" height="22" rx="6"
+            fill="#0d1330" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+          <text x="0" y="${above ? -7 : 15}" text-anchor="middle" font-family="Barlow, sans-serif"
+            font-size="12.5" font-weight="700" fill="#fff">${label}</text>
+        </g>
+      </g>`;
   }).join('');
 
   const lastPt = series[last];

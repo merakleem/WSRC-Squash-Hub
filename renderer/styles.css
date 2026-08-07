@@ -2162,8 +2162,14 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .pp-ladder-card-sm { padding: 16px 16px 10px; }
 .pp-on-navy { color: rgba(255,255,255,.7); }
 .pp-chart { width: 100%; height: auto; display: block; overflow: visible; }
-.pp-chart-hit { cursor: crosshair; }
-.pp-chart-hit:hover { fill: rgba(255,255,255,.08); }
+
+/* Point labels appear the moment the pointer arrives, with no transition, so
+   reading the chart never waits on an animation or a tooltip delay. Touch
+   devices get the same label by tapping, which sets .is-open. */
+.pp-chart-tip { opacity: 0; pointer-events: none; }
+.pp-chart-pt:hover .pp-chart-tip,
+.pp-chart-pt.is-open .pp-chart-tip { opacity: 1; }
+.pp-chart-pt:hover .pp-chart-hit { cursor: default; }
 .pp-chart-empty { padding: 26px 0; text-align: center; font-size: 13px; color: rgba(255,255,255,.6); }
 .pp-ladder-overlay {
   position: absolute;
