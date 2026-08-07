@@ -5921,8 +5921,11 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .lg-page .lg-pills {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 6px;
-  padding-right: 4px;
+  /* Overrides .sch-filter's legacy bottom padding, which made this box taller
+     than its pills and left them sitting high in the bar. */
+  padding: 0 4px 0 0;
   overflow-x: auto;
 }
 /* On the Players tab the pills are invisible but keep their space, so the tab
@@ -6169,7 +6172,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   font-weight: 600;
   color: var(--text);
 }
-.lg-page .lg-match .lg-ghost-muted { color: var(--text-muted); }
 .lg-page .lg-match-skipped { opacity: 1; background: #fafafa; }
 .lg-page .lg-match-skipped .match-player { opacity: .4; }
 .lg-page .lg-match-skipped .match-vs { opacity: .4; }

@@ -142,13 +142,6 @@ function removeMatchSub(matchId, originalPlayerId) {
   );
 }
 
-function skipMatch(matchId) {
-  return run(
-    'UPDATE matches SET skipped = 1, player1_score = NULL, player2_score = NULL, winner_id = NULL WHERE id = ?',
-    [matchId]
-  );
-}
-
 function unskipMatch(matchId) {
   return run('UPDATE matches SET skipped = 0 WHERE id = ?', [matchId]);
 }
@@ -233,7 +226,6 @@ module.exports = {
   updateMatchScore,
   setMatchSub,
   removeMatchSub,
-  skipMatch,
   unskipMatch,
   setSubForRemaining,
   getWeekByes,

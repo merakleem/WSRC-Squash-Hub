@@ -368,21 +368,17 @@ export function renderLeagueDetail() {
       btn.addEventListener('click', () => openTimingModal(btn));
     });
 
-    // Skip buttons
-    content.querySelectorAll('.skip-btn').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const matchId = Number(btn.dataset.matchId);
-        await fetch(`/api/matches/${matchId}/skip`, { method: 'PUT' });
-        reloadLeagueDetail();
-      });
-    });
-
-    // Unskip buttons
+    // Undo on a skipped match. Ending a league skips every unreported match,
+    // so this is the way back from that; it goes through the API helper
+    // because a bare fetch carries no CSRF token and the server rejects it.
     content.querySelectorAll('.unskip-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const matchId = Number(btn.dataset.matchId);
-        await fetch(`/api/matches/${matchId}/unskip`, { method: 'PUT' });
-        reloadLeagueDetail();
+        try {
+          await window.api.unskipMatch(Number(btn.dataset.matchId));
+          await reloadLeagueDetail();
+        } catch (err) {
+          toast(err.message || 'Could not restore the match', 'error');
+        }
       });
     });
   }
@@ -908,7 +904,6 @@ function renderMatchRow(match, league, adminMode = true) {
           data-p2-id="${match.player2_id}" data-p2-name="${esc(match.player2_name)}"
           data-sub1-id="${match.sub1_id || ''}" data-sub1-name="${esc(match.sub1_name || '')}"
           data-sub2-id="${match.sub2_id || ''}" data-sub2-name="${esc(match.sub2_name || '')}">Sub</button>` : ''}
-        ${adminMode ? `<button class="btn btn-ghost btn-sm skip-btn lg-ghost lg-ghost-muted" data-match-id="${match.id}">Skip</button>` : ''}
       </div>
     </div>`;
 }
@@ -927,7 +922,7 @@ async function saveMatchScore(btn) {
     const parts = scoreDisplay.textContent.split('–').map((s) => s.trim());
     row.querySelector('.match-score').innerHTML = `
       ${bo5ScoreInputHTML(parts[0], parts[1])}
-      <button class="btn btn-success btn-sm score-save-btn" style="font-size:11px"
+      <button class="btn btn-success btn-sm score-save-btn lg-save"
         data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="true">Save</button>`;
     row.querySelector('.score-save-btn').addEventListener('click', () =>
       saveMatchScore(row.querySelector('.score-save-btn'))
@@ -942,12 +937,15 @@ async function saveMatchScore(btn) {
   if (s1 === 0 && s2 === 0) {
     await window.api.updateMatchScore({ matchId, player1Score: null, player2Score: null, winnerId: null });
     toast('Score cleared', 'success');
+    // Toggle rather than reassign className: the spans also carry
+    // nav-player-link and their match-p1/p2 hooks, which a reassignment wiped.
     const playerSpans = row.querySelectorAll('.match-player');
-    playerSpans[0].className = 'match-player';
-    playerSpans[1].className = 'match-player';
+    playerSpans[0].classList.remove('winner');
+    playerSpans[1].classList.remove('winner');
+    row.classList.remove('lg-match-scored');
     row.querySelector('.match-score').innerHTML = `
       ${bo5ScoreInputHTML()}
-      <button class="btn btn-success btn-sm score-save-btn" style="font-size:11px"
+      <button class="btn btn-success btn-sm score-save-btn lg-save"
         data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="true">Save</button>`;
     row.querySelector('.score-save-btn').addEventListener('click', () =>
       saveMatchScore(row.querySelector('.score-save-btn'))
@@ -971,12 +969,15 @@ async function saveMatchScore(btn) {
 
   // Update winner highlight — use index-based querySelectorAll to avoid matching div.match-players
   const playerSpans = row.querySelectorAll('.match-player');
-  playerSpans[0].className = `match-player${winnerId === p1Id ? ' winner' : ''}`;
-  playerSpans[1].className = `match-player${winnerId === p2Id ? ' winner' : ''}`;
+  playerSpans[0].classList.toggle('winner', winnerId === p1Id);
+  playerSpans[1].classList.toggle('winner', winnerId === p2Id);
+  // The row itself has to move to its scored state, or it keeps the unscored
+  // background and the names never dim.
+  row.classList.add('lg-match-scored');
 
   row.querySelector('.match-score').innerHTML = `
     <span class="score-display">${s1} – ${s2}</span>
-    <button class="btn btn-ghost btn-sm score-save-btn" style="font-size:11px;padding:4px 8px"
+    <button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
       data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="false">Edit</button>`;
   row.querySelector('.score-save-btn').addEventListener('click', () =>
     saveMatchScore(row.querySelector('.score-save-btn'))

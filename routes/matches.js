@@ -152,11 +152,6 @@ router.delete('/matches/pickup/:id', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-router.put('/matches/:id/skip', requireAdmin, wrap(async (req, res) => {
-  await leagueModel.skipMatch(Number(req.params.id));
-  res.json({ ok: true });
-}));
-
 router.put('/matches/:id/unskip', requireAdmin, wrap(async (req, res) => {
   await leagueModel.unskipMatch(Number(req.params.id));
   res.json({ ok: true });

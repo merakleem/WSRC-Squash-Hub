@@ -41,6 +41,7 @@ if (typeof window !== 'undefined' && !window.api) {
     endLeague:        (id)=> _apiFetch('PUT',    `/api/leagues/${id}/end`),
 
     updateMatchScore: (d) => _apiFetch('PUT',    `/api/matches/${d.matchId}/score`, d),
+    unskipMatch:      (id)=> _apiFetch('PUT',    `/api/matches/${id}/unskip`),
     setMatchSub:      (d) => _apiFetch('PUT',    `/api/matches/${d.matchId}/sub`, d),
     removeMatchSub:   (d) => _apiFetch('DELETE', `/api/matches/${d.matchId}/sub`, d),
     setSubRemaining:  (d) => _apiFetch('PUT',    `/api/leagues/${d.leagueId}/sub-remaining`, d),
