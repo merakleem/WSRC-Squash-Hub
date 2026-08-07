@@ -57,8 +57,8 @@ export async function renderLadder() {
   const seasonBarHTML = seasons.length < 2 ? '' : `
     <div class="season-tabs" id="ladderSeasonTabs">
       ${seasons.map((s) => `
-        <button class="season-tab${season && s.id === season.id ? ' active' : ''}" data-ladder-season="${s.id}" data-ladder-current="${s.is_current ? 1 : 0}">
-          ${esc(s.name)}${s.is_current ? '' : s.status === 'ended' ? ' <span class="ldr-frozen-dot" title="Final standings">●</span>' : ''}
+        <button class="season-tab${season && s.id === season.id ? ' active' : ''}${s.is_current ? ' season-tab--current' : ''}" data-ladder-season="${s.id}" data-ladder-current="${s.is_current ? 1 : 0}">
+          ${esc(s.name)}
         </button>`).join('')}
     </div>`;
 
@@ -99,12 +99,7 @@ export async function renderLadder() {
   // positional ladder. The rating column carries the number only.
   const ratingCell = (p) => {
     if (!isElo) return '';
-    // A player back after a season away is worth marking; they were off the
-    // ladder entirely until this match.
-    const back = p.returning
-      ? `<span class="ldr-idle" title="Back after a season away">back</span>`
-      : '';
-    return `<span class="ldr-all-stat ldr-col-rating">${p.rating ?? '—'}${back}</span>`;
+    return `<span class="ldr-all-stat ldr-col-rating">${p.rating ?? '—'}</span>`;
   };
 
   // Rows are the page's main navigation, so they have to be reachable without a

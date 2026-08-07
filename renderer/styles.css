@@ -2331,6 +2331,18 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   border-color: var(--primary, var(--navy-deep));
   color: #fff;
 }
+/* The current season is the blue one; past seasons carry no marker, their
+   being concluded is implied. Blue also fills it while selected, so the
+   colour keeps meaning "current" rather than "where you are". */
+.season-tab--current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.season-tab--current.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 
 .photo-modal { text-align: center; }
 .photo-preview {
@@ -3246,21 +3258,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .ldr-rating-delta { font-size: 10px; font-weight: 700; margin-left: 4px; }
 .ldr-rating-delta.up { color: var(--win); }
 .ldr-rating-delta.down { color: var(--loss); }
-.ldr-idle {
-  display: inline-block;
-  margin-left: 4px;
-  padding: 1px 5px;
-  border-radius: 8px;
-  background: #f0f2f6;
-  color: var(--text-muted-2);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  cursor: help;
-}
-.ldr-frozen-dot { color: var(--text-muted-2); font-size: 9px; }
-
 .ldr-all-header {
   background: #f7f9fc;
   border-bottom: 1px solid #edf0f5;
@@ -3333,7 +3330,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .ldr-col-long  { display: none; }
   .ldr-col-short { display: inline; }
   /* The +/- delta and idle chip don't fit beside the rating on a phone. */
-  .ldr-rating-delta, .ldr-idle { display: none; }
+  .ldr-rating-delta { display: none; }
 }
 
 .ldr-you-chip {
