@@ -667,22 +667,21 @@ export function renderPlayerProfile() {
   const seasons = p.seasons || [];
   const seasonsById = Object.fromEntries(seasons.map((s) => [s.id, s]));
 
-  const playedSeasonIds = [...new Set(allHistory.map((m) => m.season_key).filter((k) => k != null))]
-    .sort((a, b) => (seasonsById[b]?.start_date || '').localeCompare(seasonsById[a]?.start_date || ''));
+  // Every season the club has had is offered, not only the ones this player
+  // appeared in. A season they sat out still shows the same page with an empty
+  // record, which reads as "you played none" rather than the season vanishing.
+  const seasonKeys = seasons.map((sn) => sn.key);
   const hasUnassigned = allHistory.some((m) => m.season_key == null);
 
-  // Default to the current season rather than all-time: the page is a season
-  // view now, and an unbounded history is what the redesign set out to remove.
-  const defaultSeason = seasons.find((s) => s.is_current && playedSeasonIds.includes(s.id))?.id
-    ?? playedSeasonIds[0]
+  const defaultSeason = seasons.find((sn) => sn.is_current)?.key
+    ?? seasonKeys[0]
     ?? (hasUnassigned ? 'none' : null);
 
-  // A remembered selection is only trusted when it belongs to this player and
-  // still resolves to rows; back navigation swaps the player without going
-  // through openPlayerProfile.
+  // A remembered selection is only trusted when it belongs to this player;
+  // back navigation swaps the player without going through openPlayerProfile.
   const selectionValid = _profileSeasonFor === p.id && (
     _profileSeason === null
-    || playedSeasonIds.includes(_profileSeason)
+    || seasonKeys.includes(_profileSeason)
     || (_profileSeason === 'none' && hasUnassigned)
   );
   const activeSeason = selectionValid ? _profileSeason : defaultSeason;
@@ -694,6 +693,7 @@ export function renderPlayerProfile() {
     // the Results default, so it now says so.
     _profileTab = 'results';
     _profileResultFilter = 'all';
+    _profileMobileView = null;
     _profileSeasonFor = p.id;
     _profileSeason = defaultSeason;
   }
@@ -762,7 +762,7 @@ export function renderPlayerProfile() {
       </div>`}`;
 
   const seasonOptions = [
-    ...playedSeasonIds.map((id) => ({ value: String(id), label: seasonsById[id]?.name || 'Season' })),
+    ...seasonKeys.map((key) => ({ value: key, label: seasonsById[key]?.name || 'Season' })),
     ...(hasUnassigned ? [{ value: 'none', label: 'Unassigned' }] : []),
     { value: 'all', label: 'All time' },
   ];
@@ -978,7 +978,19 @@ export function renderPlayerProfile() {
   // ===== MOBILE =====
   // A single scrolling column rather than tabs: record, recent results, then an
   // "all time" divider that signals the ladder card ignores the season filter.
-  const mobileHTML = `
+  // Tapping a quick link opens that panel over the column, with a way back.
+  // Without this the link set a desktop tab that mobile never renders, so
+  // nothing happened.
+  const MOBILE_TITLES = { results: 'Results', upcoming: 'Upcoming matches', tournaments: 'Tournaments', ladder: 'Ladder history' };
+  const mobileHTML = _profileMobileView ? `
+    <div class="pp-mobile">
+      <button class="pp-back" id="ppMobileBack">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+        Back
+      </button>
+      <h3 class="pp-subview-title">${esc(MOBILE_TITLES[_profileMobileView] || '')}</h3>
+      ${panelFor(_profileMobileView)}
+    </div>` : `
     <div class="pp-mobile">
       <div class="pp-season-row">
         ${seasonPillHTML}
@@ -1115,13 +1127,23 @@ export function renderPlayerProfile() {
     });
   }
 
-  // The mobile quick links point at desktop tabs, which aren't rendered there;
-  // they still need the full re-render they have always done.
-  content.querySelectorAll('.pp-quick-row[data-pp-tab]').forEach((el) => {
+  // Quick links and the "show all results" link open the panel. On desktop that
+  // is the tab; on mobile it opens as a sub-view, since there is no tab bar to
+  // switch. Both go through a full re-render.
+  content.querySelectorAll('.pp-quick-row[data-pp-tab], .pp-link[data-pp-tab]').forEach((el) => {
     el.addEventListener('click', () => {
-      _profileTab = el.dataset.ppTab;
+      const key = el.dataset.ppTab;
+      _profileTab = key;
+      // Only the mobile column renders these controls, so opening the sub-view
+      // here is safe; the desktop tab bar is unaffected by the flag.
+      if (window.matchMedia('(max-width: 768px)').matches) _profileMobileView = key;
       renderPlayerProfile();
     });
+  });
+
+  document.getElementById('ppMobileBack')?.addEventListener('click', () => {
+    _profileMobileView = null;
+    renderPlayerProfile();
   });
 
   document.getElementById('ppSeasonSelect')?.addEventListener('change', (e) => {
