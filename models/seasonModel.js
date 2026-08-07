@@ -51,11 +51,15 @@ function getAllSeasons() {
   const settings = getSettings();
   const monthDay = seasons.startMonthDay(settings);
   const bounds = getActivityBounds();
-  return seasons.listSeasons({
+  const list = seasons.listSeasons({
     earliestDate: bounds.earliest,
     latestDate: bounds.latest,
     monthDay,
-  }).map((s) => ({ ...s, ladder_system: seasons.ladderSystemFor(s.key, settings) }));
+  });
+  // The oldest season in the list is the club's first, and keeps the original
+  // positional ladder; everything after it is rated.
+  const firstKey = list.length ? list[list.length - 1].key : null;
+  return list.map((s) => ({ ...s, ladder_system: seasons.ladderSystemFor(s.key, firstKey) }));
 }
 
 /**
@@ -77,7 +81,7 @@ function getSelectableSeasons() {
     key: nextKey, id: nextKey, name: nextKey,
     start_date: range.start, end_date: range.end,
     is_current: false, status: 'upcoming',
-    ladder_system: seasons.ladderSystemFor(nextKey, getSettings()),
+    ladder_system: 'elo',
   }, ...all];
 }
 
@@ -130,18 +134,24 @@ function getSeasonUsage(key) {
   };
 }
 
-function updateSettings({ season_start_md, elo_start_season }) {
+function updateSettings({ season_start_md }) {
   const db = getDB();
-  const set = db.prepare(
-    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value'
-  );
-  if (season_start_md) set.run('season_start_md', season_start_md);
-  if (elo_start_season !== undefined) set.run('elo_start_season', elo_start_season || '');
+  if (season_start_md) {
+    db.prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value'
+    ).run('season_start_md', season_start_md);
+  }
   return getAllSeasons();
+}
+
+/** The club's first season, which keeps the positional ladder. */
+function getFirstSeasonKey() {
+  const all = getAllSeasons();
+  return all.length ? all[all.length - 1].key : null;
 }
 
 module.exports = {
   getSettings, getStartMonthDay, getAllSeasons, getSeasonByKey, getCurrentSeason,
   getCurrentSeasonKey, seasonKeyForDate, getSeasonUsage, updateSettings,
-  getEarliestActivityDate, getActivityBounds, getSelectableSeasons,
+  getEarliestActivityDate, getActivityBounds, getSelectableSeasons, getFirstSeasonKey,
 };

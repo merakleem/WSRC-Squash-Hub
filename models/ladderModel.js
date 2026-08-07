@@ -254,7 +254,7 @@ function getLadder(asOfDate = null) {
  * switchover seamless: day one of the rating ladder shows the order the
  * positional ladder ended on.
  */
-function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false } = {}) {
+function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
   const db = getDB();
   const cfg = elo.config(settings);
   const monthDay = seasonsLib.startMonthDay(settings);
@@ -262,7 +262,7 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   const playerIds = new Set(players.map((p) => p.id));
 
   const targetYear = seasonsLib.seasonStartYear(seasonKey);
-  const cutoverYear = seasonsLib.seasonStartYear(settings.elo_start_season || seasonKey);
+  const cutoverYear = seasonsLib.seasonStartYear(seasonModel.getFirstSeasonKey()) + 1;
 
   // Seed from where players finished the season before ratings began.
   const firstRatedRange = seasonsLib.seasonRange(
@@ -316,39 +316,41 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   }
 
   const targetRange = seasonsLib.seasonRange(seasonKey, monthDay);
-  const today = new Date().toISOString().slice(0, 10);
-  // A past season is measured at its own end, so its standings read as they
-  // stood then rather than decaying forever afterwards.
-  const asOf = asOfDate || (targetRange.end < today ? targetRange.end : today);
 
-  const lastMatch = getLastMatchDates();
+  // Who appears at all: you need a match in the previous season, or one in this
+  // season. Sit out a whole season and you drop off the ladder; play a single
+  // game and you are back on it, at the rating you left with. Nothing decays,
+  // so a return is never punished beyond the time already missed.
+  const prevKey = monthDay === '01-01'
+    ? String(targetYear - 1)
+    : `${targetYear - 1}/${String(targetYear % 100).padStart(2, '0')}`;
+  const prevRange = seasonsLib.seasonRange(prevKey, monthDay);
+  const firstYear = seasonsLib.seasonStartYear(seasonModel.getFirstSeasonKey());
+  // The club's first rated season has no season before it to have played in, so
+  // nobody is hidden on the strength of a season that never existed.
+  const hasPreviousSeason = firstYear != null && targetYear - 1 >= firstYear;
+
+  const playedPrev = new Set();
+  if (hasPreviousSeason) {
+    for (const m of getCompletedMatches(prevRange)) {
+      playedPrev.add(m.eff_p1_id);
+      playedPrev.add(m.eff_p2_id);
+    }
+  }
+
   const rows = [];
   for (const p of players) {
-    const { months, penalty } = elo.inactivityPenalty({
-      lastMatchDate: lastMatch[p.id] || null,
-      seasonStartDate: targetRange.start,
-      asOfDate: asOf,
-    }, cfg);
-
-    const hidden = elo.isHiddenForInactivity(months, cfg);
+    const activeThisSeason = (played[p.id] || 0) > 0;
+    const hidden = hasPreviousSeason && !activeThisSeason && !playedPrev.has(p.id);
     if (hidden && !includeHidden) continue;
 
-    const base = ratings[p.id];
-    // The floor bounds how far decay can push someone down; it must never lift
-    // a rating that was legitimately earned below it, which would mint points
-    // out of nothing and break the zero-sum property.
-    const decayed = penalty > 0
-      ? Math.max(Math.min(base, cfg.elo_decay_floor), base - penalty)
-      : base;
     rows.push({
       ...p,
       hidden_for_inactivity: hidden,
-      rating: Math.round(decayed),
-      rating_undecayed: Math.round(base),
+      rating: Math.round(ratings[p.id]),
       seed_rating: Math.round(seedsForTarget[p.id]),
-      rating_change: Math.round(decayed - seedsForTarget[p.id]),
-      inactive_months: months,
-      inactivity_penalty: Math.round(base - decayed),
+      rating_change: Math.round(ratings[p.id] - seedsForTarget[p.id]),
+      returning: hasPreviousSeason && activeThisSeason && !playedPrev.has(p.id),
       matches_played: played[p.id] || 0,
       season_wins: wins[p.id] || 0,
       season_losses: losses[p.id] || 0,
@@ -358,11 +360,14 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   rows.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
 
   // Movement is reported as places gained or lost, not points, matching how the
-  // ladder has always read.
+  // ladder has always read. The comparison run must not ask for movement itself,
+  // or it would recurse forever.
   const weekAgo = _daysAgo(7);
   const priorPos = {};
-  if (weekAgo > targetRange.start) {
-    const before = computeEloLadder(seasonKey, settings, weekAgo, { includeHidden: true });
+  if (withRankChange && weekAgo > targetRange.start) {
+    const before = computeEloLadder(seasonKey, settings, weekAgo, {
+      includeHidden: true, withRankChange: false,
+    });
     before.forEach((r, i) => { priorPos[r.id] = i + 1; });
   }
 
@@ -516,15 +521,13 @@ function getPlayerMatchRatingDeltas(playerId) {
   const deltas = {};
 
   const settings = seasonModel.getSettings();
-  if (!settings.elo_start_season) return deltas;
-
   const monthDay = seasonsLib.startMonthDay(settings);
   const cfg = elo.config(settings);
   const players = db.prepare(PLAYER_SELECT).all();
   const playerIds = new Set(players.map((p) => p.id));
   if (!playerIds.has(id)) return deltas;
 
-  const cutoverYear = seasonsLib.seasonStartYear(settings.elo_start_season);
+  const cutoverYear = seasonsLib.seasonStartYear(seasonModel.getFirstSeasonKey()) + 1;
   // Walk to the newest season that has activity, not merely to today's; a match
   // can be dated ahead of the current season and still needs its delta.
   const all = seasonModel.getAllSeasons();

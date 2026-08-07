@@ -99,10 +99,12 @@ export async function renderLadder() {
   // positional ladder. The rating column carries the number only.
   const ratingCell = (p) => {
     if (!isElo) return '';
-    const idle = p.inactive_months > 0
-      ? `<span class="ldr-idle" title="${p.inactive_months} month${p.inactive_months === 1 ? '' : 's'} without a match: −${p.inactivity_penalty}">idle</span>`
+    // A player back after a season away is worth marking; they were off the
+    // ladder entirely until this match.
+    const back = p.returning
+      ? `<span class="ldr-idle" title="Back after a season away">back</span>`
       : '';
-    return `<span class="ldr-all-stat ldr-col-rating">${p.rating ?? '—'}${idle}</span>`;
+    return `<span class="ldr-all-stat ldr-col-rating">${p.rating ?? '—'}${back}</span>`;
   };
 
   // Rows are the page's main navigation, so they have to be reachable without a

@@ -1174,61 +1174,99 @@ function _ladderChartHTML(series, seasons, variant) {
     return `<div class="pp-chart-empty">Not enough history to chart yet</div>`;
   }
 
-  const X0 = 36, X1 = 624, Y0 = 38, Y1 = 264;
+  // A wide viewBox with width:100%/height:auto fills the card edge to edge; the
+  // default preserveAspectRatio would otherwise letterbox a fixed-height chart.
+  const W = variant === 'mobile' ? 640 : 1000;
+  const H = variant === 'mobile' ? 300 : 340;
+  const X0 = 40, X1 = W - 16, Y0 = 30, Y1 = H - 56;
+
   const positions = series.map((pt) => pt.position);
   let best = Math.min(...positions);
   let worst = Math.max(...positions);
   if (best === worst) { best = Math.max(1, best - 1); worst = worst + 1; }
 
-  const dates = series.map((pt) => pt.date);
-  const t0 = new Date(`${dates[0]}T00:00:00Z`).getTime();
-  const t1 = new Date(`${dates[dates.length - 1]}T00:00:00Z`).getTime();
+  const ms = (d) => new Date(`${String(d).slice(0, 10)}T00:00:00Z`).getTime();
+  const t0 = ms(series[0].date);
+  const t1 = ms(series[series.length - 1].date);
   const span = t1 - t0 || 1;
 
-  const x = (d) => X0 + ((new Date(`${d}T00:00:00Z`).getTime() - t0) / span) * (X1 - X0);
+  const x = (d) => X0 + ((ms(d) - t0) / span) * (X1 - X0);
   const y = (pos) => Y0 + ((pos - best) / (worst - best)) * (Y1 - Y0);
 
   const pts = series.map((pt) => `${x(pt.date).toFixed(1)},${y(pt.position).toFixed(1)}`);
-  const area = `M${pts.join(' L')} L${X1},${Y1} L${X0},${Y1} Z`;
+  const area = `M${pts.join(' L')} L${X1.toFixed(1)},${Y1} L${X0},${Y1} Z`;
 
+  // Y gridlines at the best, middle and worst rank reached.
   const mid = Math.round((best + worst) / 2);
-  const gridY = [best, mid, worst];
+  const gridRows = [best, mid, worst].map((pos, i) => {
+    const gy = Y0 + (i / 2) * (Y1 - Y0);
+    return `<line x1="${X0}" y1="${gy}" x2="${X1}" y2="${gy}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+            <text x="${X0 - 10}" y="${gy + 4}" text-anchor="end" font-size="12" fill="rgba(255,255,255,.5)">#${pos}</text>`;
+  }).join('');
 
-  // Sample interior markers so a long series doesn't turn into a solid band.
-  const step = Math.max(1, Math.floor(series.length / 4));
-  const markers = series
-    .filter((_, i) => i % step === 0 && i !== series.length - 1)
-    .map((pt) => `<circle cx="${x(pt.date).toFixed(1)}" cy="${y(pt.position).toFixed(1)}" r="4" fill="#1a2150" stroke="#8fa8ff" stroke-width="2.5"/>`)
-    .join('');
+  // X axis is dated rather than labelled by season: evenly spaced ticks across
+  // the range, showing the year only when the span crosses one.
+  const tickCount = variant === 'mobile' ? 4 : 7;
+  const multiYear = new Date(t0).getUTCFullYear() !== new Date(t1).getUTCFullYear();
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const xTicks = Array.from({ length: tickCount }, (_, i) => {
+    const t = t0 + (span * i) / (tickCount - 1);
+    const d = new Date(t);
+    const px = X0 + ((t - t0) / span) * (X1 - X0);
+    const label = multiYear
+      ? `${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`
+      : `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+    const anchor = i === 0 ? 'start' : i === tickCount - 1 ? 'end' : 'middle';
+    return `<line x1="${px.toFixed(1)}" y1="${Y1}" x2="${px.toFixed(1)}" y2="${Y1 + 6}" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
+            <text x="${px.toFixed(1)}" y="${Y1 + 24}" text-anchor="${anchor}" font-size="12" fill="rgba(255,255,255,.55)">${label}</text>`;
+  }).join('');
 
-  const lastPt = series[series.length - 1];
+  // Season boundaries, so the dated axis still shows where one season ends.
+  const boundaries = (seasons || [])
+    .map((sn) => sn.start_date)
+    .filter((d) => d && ms(d) > t0 && ms(d) < t1)
+    .map((d) => {
+      const px = x(d).toFixed(1);
+      const label = (seasons.find((sn) => sn.start_date === d) || {}).name || '';
+      return `<line x1="${px}" y1="${Y0 - 10}" x2="${px}" y2="${Y1}" stroke="rgba(255,255,255,.22)" stroke-width="1" stroke-dasharray="3 3"/>
+              <text x="${px}" y="${Y0 - 14}" text-anchor="middle" font-size="11" fill="rgba(255,255,255,.55)">${esc(label)}</text>`;
+    }).join('');
+
+  const fmt = (d) => {
+    const dt = new Date(`${String(d).slice(0, 10)}T00:00:00Z`);
+    return `${MONTHS[dt.getUTCMonth()]} ${dt.getUTCDate()}, ${dt.getUTCFullYear()}`;
+  };
+
+  // Every point in the series is a real position change, so every one gets a
+  // marker. A wider transparent circle over each carries the tooltip, since a
+  // 4px target is hard to hit.
+  const last = series.length - 1;
+  const markers = series.map((pt, i) => {
+    const cx = x(pt.date).toFixed(1);
+    const cy = y(pt.position).toFixed(1);
+    const dot = i === last
+      ? `<circle cx="${cx}" cy="${cy}" r="6" fill="#fff"/>`
+      : `<circle cx="${cx}" cy="${cy}" r="4" fill="#1a2150" stroke="#8fa8ff" stroke-width="2.5"/>`;
+    return `${dot}<circle class="pp-chart-hit" cx="${cx}" cy="${cy}" r="14" fill="transparent">
+      <title>#${pt.position} of ${pt.ladder_size} — ${fmt(pt.date)}</title>
+    </circle>`;
+  }).join('');
+
+  const lastPt = series[last];
   const lastX = x(lastPt.date);
   const lastY = y(lastPt.position);
 
-  // X-axis labelled by season, using each season that overlaps the series.
-  const spanSeasons = (seasons || [])
-    .filter((s) => s.end_date >= dates[0] && s.start_date <= dates[dates.length - 1])
-    .sort((a, b) => a.start_date.localeCompare(b.start_date));
-  const xLabels = spanSeasons.map((s, i) => {
-    const cx = Math.min(X1, Math.max(X0, x(s.start_date > dates[0] ? s.start_date : dates[0])));
-    const anchor = i === 0 ? 'start' : i === spanSeasons.length - 1 ? 'end' : 'middle';
-    const px = anchor === 'end' ? X1 : anchor === 'start' ? X0 : cx;
-    return `<text x="${px}" y="300" text-anchor="${anchor}" font-size="12" fill="rgba(255,255,255,.5)">${esc(s.name)}</text>`;
-  }).join('');
-
   return `
-    <svg class="pp-chart pp-chart-${variant}" viewBox="0 0 640 320" role="img" aria-label="Ladder position over time">
-      ${gridY.map((pos, i) => {
-        const gy = Y0 + (i / 2) * (Y1 - Y0);
-        return `<line x1="${X0}" y1="${gy}" x2="${X1}" y2="${gy}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
-                <text x="26" y="${gy + 4}" text-anchor="end" font-size="12" fill="rgba(255,255,255,.5)">#${pos}</text>`;
-      }).join('')}
+    <svg class="pp-chart pp-chart-${variant}" viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="Ladder position over time, currently ranked ${lastPt.position} of ${lastPt.ladder_size}">
+      ${gridRows}
+      ${boundaries}
       <path d="${area}" fill="#8fa8ff" fill-opacity="0.14"/>
       <polyline points="${pts.join(' ')}" fill="none" stroke="#8fa8ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+      ${xTicks}
       ${markers}
-      <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="6" fill="#fff"/>
-      <text x="${Math.min(X1 - 8, lastX).toFixed(1)}" y="${(lastY - 17).toFixed(1)}" text-anchor="middle" font-family="Barlow, sans-serif" font-size="17" font-weight="700" fill="#fff">#${lastPt.position}</text>
-      ${xLabels}
+      <text x="${Math.min(X1 - 10, Math.max(X0 + 10, lastX)).toFixed(1)}" y="${(lastY - 16).toFixed(1)}"
+        text-anchor="middle" font-family="Barlow, sans-serif" font-size="17" font-weight="700" fill="#fff">#${lastPt.position}</text>
     </svg>`;
 }
 // ===== PROFILE PHOTO =====

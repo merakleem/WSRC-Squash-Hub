@@ -19,7 +19,6 @@ router.get('/seasons/settings', wrap(async (req, res) => {
   const settings = seasonModel.getSettings();
   res.json({
     season_start_md: seasons.startMonthDay(settings),
-    elo_start_season: settings.elo_start_season || '',
     current_season: seasonModel.getCurrentSeasonKey(),
     // Includes the upcoming season, so the switchover can be scheduled before
     // the season it names has begun.
@@ -28,7 +27,7 @@ router.get('/seasons/settings', wrap(async (req, res) => {
 }));
 
 router.put('/seasons/settings', requireAdmin, wrap(async (req, res) => {
-  const { season_start_md, elo_start_season } = req.body || {};
+  const { season_start_md } = req.body || {};
 
   if (season_start_md !== undefined) {
     if (!/^\d{2}-\d{2}$/.test(String(season_start_md))) {
@@ -42,12 +41,7 @@ router.put('/seasons/settings', requireAdmin, wrap(async (req, res) => {
     }
   }
 
-  if (elo_start_season) {
-    const known = seasonModel.getSelectableSeasons().some((s) => s.key === String(elo_start_season));
-    if (!known) return res.status(400).json({ error: 'Unknown season' });
-  }
-
-  res.json(await seasonModel.updateSettings({ season_start_md, elo_start_season }));
+  res.json(await seasonModel.updateSettings({ season_start_md }));
 }));
 
 module.exports = router;

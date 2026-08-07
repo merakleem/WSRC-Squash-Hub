@@ -160,7 +160,8 @@ export async function renderClubSettings() {
         <p class="settings-section-desc">
           Seasons group match history so profiles can show a season at a time. They are worked out
           from the date a match was played, so there is nothing to create or switch over: set the
-          day the year rolls over and it repeats every year.
+          day the year rolls over and it repeats every year. The first season keeps the original
+          position ladder; every season after it uses ratings.
         </p>
         <div class="season-settings">
           <div class="form-group">
@@ -175,17 +176,6 @@ export async function renderClubSettings() {
               </select>
             </div>
             <p class="form-hint">Every year on this day, a new season begins.</p>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="fEloStart">Rating ladder starts from</label>
-            <select class="form-control" id="fEloStart">
-              <option value="">Never — keep the position ladder</option>
-              ${(settings.selectable || seasons).map((s) => `<option value="${esc(s.key)}" ${settings.elo_start_season === s.key ? 'selected' : ''}>${esc(s.name)}${s.status === 'upcoming' ? ' (starts ' + formatShortDate(s.start_date) + ')' : ''}</option>`).join('')}
-            </select>
-            <p class="form-hint">
-              Seasons before this keep the original position ladder and never change. From this
-              season on, every match moves a rating.
-            </p>
           </div>
           <div class="form-actions" style="justify-content:flex-start">
             <button class="btn btn-primary" id="btnSaveSeasonSettings">Save</button>
@@ -257,10 +247,7 @@ export async function renderClubSettings() {
   document.getElementById('btnSaveSeasonSettings').addEventListener('click', async () => {
     const md = `${document.getElementById('fSeasonStartMonth').value}-${document.getElementById('fSeasonStartDay').value}`;
     try {
-      await window.api.updateSeasonSettings({
-        season_start_md: md,
-        elo_start_season: document.getElementById('fEloStart').value,
-      });
+      await window.api.updateSeasonSettings({ season_start_md: md });
       toast('Season settings saved');
       renderClubSettings();
     } catch (err) {
