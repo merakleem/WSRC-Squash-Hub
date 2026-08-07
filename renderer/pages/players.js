@@ -745,7 +745,7 @@ export function renderPlayerProfile() {
     + (ladder.rating == null ? '' : `<span class="pp-hstat-label-extra"> · ${Number(ladder.rating)}</span>`);
 
   const rankMoveHTML = !ladder.rank_change ? ''
-    : `<span class="pp-hstat-move ${ladder.rank_change > 0 ? 'pp-pos' : 'pp-neg'}" title="Places moved in the last 7 days">${ladder.rank_change > 0 ? '↑' : '↓'}${Math.abs(ladder.rank_change)}</span>`;
+    : `<span class="pp-hstat-move ${ladder.rank_change > 0 ? 'pp-pos' : 'pp-neg'}" title="Places moved in the last 7 days"><svg class="mv-tri" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 3 L10.2 8.6 L1.8 8.6 Z" fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>${Math.abs(ladder.rank_change)}</span>`;
 
   const headerStatsHTML = `
     ${ladder.position == null ? '' : `

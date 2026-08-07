@@ -83,8 +83,11 @@ export async function renderLadder() {
 
   const rankChangeBadge = (change) => {
     if (!change || change === 0) return '';
-    if (change > 0) return `<span class="ldr-change ldr-change-up">↑${change}</span>`;
-    return `<span class="ldr-change ldr-change-down">↓${Math.abs(change)}</span>`;
+    // A glyph arrow sits on the text baseline and never lines up with the
+    // number beside it; an inline SVG in a flex-centred badge does.
+    const tri = `<svg class="mv-tri" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 3 L10.2 8.6 L1.8 8.6 Z" fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>`;
+    if (change > 0) return `<span class="ldr-change ldr-change-up">${tri}${change}</span>`;
+    return `<span class="ldr-change ldr-change-down">${tri}${Math.abs(change)}</span>`;
   };
 
   // W/L belongs to the season being viewed under either system, so the numbers

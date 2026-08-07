@@ -1884,6 +1884,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 /* Places gained or lost, beside the rank it applies to. Colour comes from
    .pp-pos / .pp-neg, which are declared below. */
 .pp-hstat-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 12px;
   font-weight: 700;
   padding: 2px 6px;
@@ -1891,6 +1894,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   background: rgba(255,255,255,.14);
   white-space: nowrap;
 }
+.pp-hstat-move .mv-tri { width: 9px; height: 9px; }
 .pp-hstat-label {
   font-size: 10px;
   font-weight: 600;
@@ -3119,6 +3123,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 
 /* Rank change pills */
 .ldr-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-family: 'Barlow', sans-serif;
   font-size: 11px;
   font-weight: 700;
@@ -3126,6 +3133,17 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   border-radius: 4px;
   line-height: 1;
 }
+
+/* Shared movement triangle. Flex centring is what actually squares it up with
+   the number; the glyph arrows it replaces sat on the text baseline. */
+.mv-tri {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  display: block;
+}
+.ldr-change-down .mv-tri,
+.pp-neg .mv-tri { transform: rotate(180deg); }
 .ldr-change-up   { background: var(--win-bg); color: var(--win); }
 .ldr-change-down { background: var(--loss-bg); color: var(--loss); }
 /* Movement is the one thing on this page that changed since the last visit, so
