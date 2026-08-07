@@ -360,15 +360,34 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   rows.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
 
   // Movement is reported as places gained or lost, not points, matching how the
-  // ladder has always read. The comparison run must not ask for movement itself,
-  // or it would recurse forever.
+  // ladder has always read.
+  //
+  // The comparison point is a week back, clamped to the season start: for the
+  // season's first week that means movement since it began, rather than no
+  // movement at all, which is what comparing against a date before the season
+  // existed used to produce.
+  // Measured to the same point the standings are: today for a live season,
+  // the season's own end for one that has finished.
+  const measuredAt = asOfDate
+    || (targetRange.end < new Date().toISOString().slice(0, 10)
+        ? targetRange.end
+        : new Date().toISOString().slice(0, 10));
   const weekAgo = _daysAgo(7);
+  const since = weekAgo > targetRange.start ? weekAgo : targetRange.start;
   const priorPos = {};
-  if (withRankChange && weekAgo > targetRange.start) {
-    const before = computeEloLadder(seasonKey, settings, weekAgo, {
+  // The comparison run must not ask for movement itself, or it would recurse.
+  if (withRankChange && since < measuredAt) {
+    // Ask for everyone, then narrow to exactly the players on show now. The
+    // earlier run would otherwise hide anyone who had not played by then but
+    // has since, leaving those players out of the comparison and shifting the
+    // prior position of everyone below them.
+    const before = computeEloLadder(seasonKey, settings, since, {
       includeHidden: true, withRankChange: false,
     });
-    before.forEach((r, i) => { priorPos[r.id] = i + 1; });
+    const shown = new Set(rows.map((r) => r.id));
+    before
+      .filter((r) => shown.has(r.id))
+      .forEach((r, i) => { priorPos[r.id] = i + 1; });
   }
 
   return rows.map((r, i) => ({
