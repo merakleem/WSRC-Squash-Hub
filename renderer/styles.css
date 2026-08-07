@@ -5918,15 +5918,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .lg-tab:hover { background: var(--surface-2); }
 .lg-tab.active { background: var(--primary); color: #fff; }
-.lg-admin-chip {
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: #eaefff;
-  color: #3550c8;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .06em;
-}
 .lg-page .lg-pills {
   margin-left: auto;
   display: flex;
@@ -5934,6 +5925,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   padding-right: 4px;
   overflow-x: auto;
 }
+/* On the Players tab the pills are invisible but keep their space, so the tab
+   bar's height is identical on every tab. */
+.lg-page .lg-pills.lg-pills-off { visibility: hidden; }
 .lg-page .lg-pill {
   padding: 6px 13px;
   border: 1px solid var(--border);
@@ -6192,15 +6186,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   margin-bottom: 14px;
 }
 .lg-roster-hint-text { font-size: 13.5px; color: var(--text-muted); flex: 1; }
-.lg-adminonly-chip {
-  flex-shrink: 0;
-  padding: 4px 11px;
-  border-radius: 20px;
-  background: #eaefff;
-  color: #3550c8;
-  font-size: 11.5px;
-  font-weight: 600;
-}
 .lg-page .roster-grid.lg-rosters {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

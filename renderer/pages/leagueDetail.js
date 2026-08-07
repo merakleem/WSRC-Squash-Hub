@@ -160,11 +160,21 @@ export function renderLeagueDetail() {
   const myId = state.currentUser?.playerId;
   const myDivision = (league.players || []).find((p) => p.player_id === myId)?.division_id ?? null;
   const fallbackDivision = String(myDivision ?? divisions[0]?.id ?? 'all');
+  // With no All option the selection is always a concrete division.
+  if (_leagueDivision === 'all') _leagueDivision = fallbackDivision;
 
   // ----- hero -----
-  const counts = weeks.map(_weekCounts);
-  const currentIdx = counts.findIndex((c) => c.total > 0 && c.played < c.total);
-  const currentWeekId = currentIdx >= 0 ? weeks[currentIdx].id : null;
+  // The current week is decided by the calendar: a week becomes current on its
+  // own date and stays current until the next week's date arrives, regardless
+  // of how many of its matches have been reported. Before the first week's
+  // date, week 1 is the one coming up.
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  let currentIdx = -1;
+  weeks.forEach((w, i) => { if (String(w.date).slice(0, 10) <= todayIso) currentIdx = i; });
+  if (currentIdx === -1 && weeks.length > 0) currentIdx = 0;
+  const leagueDone = league.status === 'completed';
+  const currentWeekId = !leagueDone && currentIdx >= 0 ? weeks[currentIdx].id : null;
 
   const endDate = weeks.length > 0 ? weeks[weeks.length - 1].date : null;
   const dateRange = endDate
@@ -180,12 +190,12 @@ export function renderLeagueDetail() {
   ).filter(Boolean).join(' · ');
 
   const segsHTML = weeks.map((w, i) => {
-    const cls = currentIdx === -1 || i < currentIdx ? ' lg-seg-done' : i === currentIdx ? ' lg-seg-now' : '';
+    const cls = leagueDone || i < currentIdx ? ' lg-seg-done' : i === currentIdx ? ' lg-seg-now' : '';
     return `<span class="lg-seg${cls}"></span>`;
   }).join('');
 
   const weekLabel = weeks.length
-    ? `Week ${currentIdx >= 0 ? currentIdx + 1 : weeks.length} of ${weeks.length}`
+    ? `Week ${leagueDone ? weeks.length : currentIdx + 1} of ${weeks.length}`
     : '';
 
   const heroHTML = `
@@ -212,7 +222,6 @@ export function renderLeagueDetail() {
   // control the schedule filter has always been, now shared with Standings.
   const pillsHTML = divisions.length > 1 ? `
     <div class="sch-filter lg-pills" id="schFilter">
-      <button class="std-tab lg-pill" data-div-id="all">All</button>
       ${divisions.map((d) => `<button class="std-tab lg-pill" data-div-id="${d.id}">${esc(d.name)}</button>`).join('')}
     </div>` : '';
 
@@ -221,7 +230,7 @@ export function renderLeagueDetail() {
       <div class="lg-tabs" id="lgTabs">
         <button class="lg-tab" data-lg-tab="standings">Standings</button>
         <button class="lg-tab" data-lg-tab="schedule">Schedule</button>
-        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">Players <span class="lg-admin-chip">ADMIN</span></button>` : ''}
+        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">Players</button>` : ''}
       </div>
       ${pillsHTML}
     </div>`;
@@ -246,7 +255,6 @@ export function renderLeagueDetail() {
       <div class="lg-panel" id="lgPanelPlayers" hidden>
         <div class="lg-roster-hint">
           <span class="lg-roster-hint-text">${rosterHint}</span>
-          <span class="lg-adminonly-chip">Admins only</span>
         </div>
         ${isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
       </div>` : ''}
@@ -266,18 +274,18 @@ export function renderLeagueDetail() {
     if (pillsEl) {
       pillsEl.querySelectorAll('.std-tab').forEach((p) => p.classList.toggle('active', p.dataset.divId === divId));
     }
-    // Schedule rows: the filtering behaviour #schFilter has always had.
-    const isAll = divId === 'all';
+    // Schedule rows: the filtering behaviour #schFilter has always had, now
+    // always scoped to one division.
     if (isModern) {
       content.querySelectorAll('#scheduleList .matchup-block[data-division-id]').forEach((block) => {
-        block.hidden = !isAll && block.dataset.divisionId !== divId;
+        block.hidden = block.dataset.divisionId !== divId;
       });
     } else {
       content.querySelectorAll('#scheduleList .match-row').forEach((row) => {
-        row.hidden = !isAll && row.dataset.divisionId !== divId;
+        row.hidden = row.dataset.divisionId !== divId;
       });
       content.querySelectorAll('#scheduleList .matchup-block').forEach((block) => {
-        block.hidden = !isAll && !block.querySelector('.match-row:not([hidden])');
+        block.hidden = !block.querySelector('.match-row:not([hidden])');
       });
     }
     // Standings panels: the .std-panel.active toggle, as before.
@@ -287,18 +295,13 @@ export function renderLeagueDetail() {
   };
 
   const applyTab = () => {
-    // Standings has no all-divisions table; fall back to the viewer's own
-    // division, or the first.
-    if (_leagueTab === 'standings' && _leagueDivision === 'all') _leagueDivision = fallbackDivision;
     tabsEl.querySelectorAll('.lg-tab').forEach((t) => t.classList.toggle('active', t.dataset.lgTab === _leagueTab));
     for (const [key, el] of Object.entries(panels)) {
       if (el) el.hidden = key !== _leagueTab;
     }
-    if (pillsEl) {
-      pillsEl.hidden = _leagueTab === 'players';
-      const allPill = pillsEl.querySelector('.std-tab[data-div-id="all"]');
-      if (allPill) allPill.hidden = _leagueTab === 'standings';
-    }
+    // The pills stay in the layout on Players (visibility, not display), so
+    // the bar keeps the same height on every tab.
+    if (pillsEl) pillsEl.classList.toggle('lg-pills-off', _leagueTab === 'players');
     applyDivision();
   };
 
