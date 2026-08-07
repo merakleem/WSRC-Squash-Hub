@@ -581,8 +581,11 @@ let _profileSeason = null;
 let _profileSeasonFor = null;
 // Desktop panel and the Results source filter. Reset with the season selection
 // so a stale tab never opens on a different player.
-let _profileTab = 'season';
+let _profileTab = 'results';
 let _profileResultFilter = 'all';
+// Mobile has no tab bar, so a quick link opens the panel as a sub-view over the
+// column. null means the column itself is showing.
+let _profileMobileView = null;
 
 export async function openPlayerProfile(id, { pushHistory = true } = {}) {
   const player = await window.api.getPlayerHistory(id);
