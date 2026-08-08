@@ -6328,10 +6328,11 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .em-fab {
   position: fixed;
   right: 28px;
-  bottom: 86px;
+  bottom: 24px;
   z-index: 60;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0;
   height: 56px;
   width: 56px;
@@ -6343,16 +6344,25 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   cursor: pointer;
   overflow: hidden;
   box-shadow: 0 4px 14px rgba(192, 57, 43, .34), 0 2px 6px rgba(0, 0, 0, .12);
-  transition: width .16s ease, padding .16s ease, gap .16s ease, border-radius .16s ease, box-shadow .16s ease;
+  transition: width .16s ease, padding .16s ease, gap .16s ease, border-radius .16s ease,
+              box-shadow .16s ease, bottom .22s ease;
 }
+/* The self-bar only slides up once your own row scrolls out of view, so the
+   button clears it on demand rather than reserving the space permanently and
+   floating above nothing the rest of the time. */
+.content:has(.ldr-selfbar.show) .em-fab { bottom: 86px; }
 .em-fab-icon { width: 24px; height: 24px; flex: none; }
+/* Collapsed to zero width, not merely transparent: an invisible label still
+   takes part in the flex layout and pushes the icon off centre. */
 .em-fab-label {
+  max-width: 0;
   font-family: 'Barlow', sans-serif;
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
   opacity: 0;
-  transition: opacity .16s ease;
+  overflow: hidden;
+  transition: max-width .16s ease, opacity .16s ease;
 }
 /* Keyboard focus produces the same expanded state as hover. */
 .em-fab:hover,
@@ -6364,7 +6374,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   box-shadow: 0 6px 20px rgba(192, 57, 43, .42), 0 2px 8px rgba(0, 0, 0, .16);
 }
 .em-fab:hover .em-fab-label,
-.em-fab:focus-visible .em-fab-label { opacity: 1; }
+.em-fab:focus-visible .em-fab-label { max-width: 180px; opacity: 1; }
 .em-fab:focus-visible { outline: 3px solid rgba(192, 57, 43, .35); outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -6375,17 +6385,18 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 @media (max-width: 768px) {
   .em-fab {
     right: 18px;
-    bottom: 84px;
+    bottom: 20px;
     height: 58px;
     width: 58px;
   }
+  .content:has(.ldr-selfbar.show) .em-fab { bottom: 84px; }
   .em-fab:hover, .em-fab:focus-visible {
     width: 58px;
     border-radius: 50%;
     padding: 0;
     gap: 0;
   }
-  .em-fab:hover .em-fab-label, .em-fab:focus-visible .em-fab-label { opacity: 0; }
+  .em-fab:hover .em-fab-label, .em-fab:focus-visible .em-fab-label { max-width: 0; opacity: 0; }
 }
 
 /* --- Modal --- */
