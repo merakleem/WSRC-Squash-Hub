@@ -6324,7 +6324,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 /* ===== ENTER A MATCH — FAB + MODAL ===== */
 
 /* Fixed to the viewport, not the ladder's scroll container, so it holds still
-   as the list moves. The 86px bottom offset clears the sticky self-bar. */
+   as the list moves. Sized by its label on desktop and icon-only on touch,
+   rather than expanding on hover: animating between the two means animating to
+   width:auto, which browsers snap rather than interpolate, and the resulting
+   jump read as a bounce. A permanent label is also easier to find. */
 .em-fab {
   position: fixed;
   right: 28px;
@@ -6333,70 +6336,55 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 8px;
   height: 56px;
-  width: 56px;
-  padding: 0;
+  padding: 0 22px 0 17px;
   border: none;
-  border-radius: 50%;
+  border-radius: 28px;
   background: var(--danger);
   color: #fff;
   cursor: pointer;
-  overflow: hidden;
   box-shadow: 0 4px 14px rgba(192, 57, 43, .34), 0 2px 6px rgba(0, 0, 0, .12);
-  transition: width .16s ease, padding .16s ease, gap .16s ease, border-radius .16s ease,
-              box-shadow .16s ease, bottom .22s ease;
+  transition: box-shadow .18s ease, transform .18s ease, bottom .22s ease;
 }
 /* The self-bar only slides up once your own row scrolls out of view, so the
    button clears it on demand rather than reserving the space permanently and
    floating above nothing the rest of the time. */
 .content:has(.ldr-selfbar.show) .em-fab { bottom: 86px; }
 .em-fab-icon { width: 24px; height: 24px; flex: none; }
-/* Collapsed to zero width, not merely transparent: an invisible label still
-   takes part in the flex layout and pushes the icon off centre. */
 .em-fab-label {
-  max-width: 0;
   font-family: 'Barlow', sans-serif;
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-width .16s ease, opacity .16s ease;
 }
-/* Keyboard focus produces the same expanded state as hover. */
-.em-fab:hover,
-.em-fab:focus-visible {
-  width: auto;
-  border-radius: 28px;
-  padding: 0 22px 0 17px;
-  gap: 8px;
+/* Shadow and lift only: both interpolate cleanly, so there is nothing to snap. */
+.em-fab:hover {
+  transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(192, 57, 43, .42), 0 2px 8px rgba(0, 0, 0, .16);
 }
-.em-fab:hover .em-fab-label,
-.em-fab:focus-visible .em-fab-label { max-width: 180px; opacity: 1; }
+.em-fab:active { transform: translateY(0); }
 .em-fab:focus-visible { outline: 3px solid rgba(192, 57, 43, .35); outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .em-fab, .em-fab-label { transition: none; }
+  .em-fab { transition: none; }
+  .em-fab:hover { transform: none; }
 }
 
-/* No hover on touch, so it stays a circle and never expands. */
+/* No room for a label beside the content on a phone, so it reduces to the icon
+   and leans on its position and colour instead. */
 @media (max-width: 768px) {
   .em-fab {
     right: 18px;
     bottom: 20px;
     height: 58px;
     width: 58px;
-  }
-  .content:has(.ldr-selfbar.show) .em-fab { bottom: 84px; }
-  .em-fab:hover, .em-fab:focus-visible {
-    width: 58px;
-    border-radius: 50%;
     padding: 0;
     gap: 0;
+    border-radius: 50%;
   }
-  .em-fab:hover .em-fab-label, .em-fab:focus-visible .em-fab-label { max-width: 0; opacity: 0; }
+  .content:has(.ldr-selfbar.show) .em-fab { bottom: 84px; }
+  .em-fab-label { display: none; }
 }
 
 /* --- Modal --- */
