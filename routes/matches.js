@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
+const seasonModel = require('../models/seasonModel');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
 const { sendEmail, isConfigured: emailConfigured } = require('../lib/email');
 
@@ -118,7 +119,7 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
   const submitterId = req.session.playerId;
   const isAdminUser = req.session.role === 'admin';
 
-  let { player1Id, player2Id, player1Score, player2Score } = req.body;
+  let { player1Id, player2Id, player1Score, player2Score, playedOn } = req.body;
   player1Id    = Number(player1Id);
   player2Id    = Number(player2Id);
   player1Score = Number(player1Score);
@@ -139,10 +140,37 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
     && player1Score !== player2Score;
   if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 games (e.g. 3-1, 2-3).' });
 
+  // When the match was played, as opposed to when it was reported. Everything
+  // downstream already reads pickup_matches.played_at: which season the match
+  // belongs to, where it sits in the rating replay, the ladder history chart
+  // and the activity feed. So a date here lands correctly without further
+  // wiring, and omitting it keeps today's behaviour of stamping now.
+  let playedAt = null;
+  if (playedOn) {
+    const day = String(playedOn).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(new Date(`${day}T00:00:00Z`).getTime())) {
+      return res.status(400).json({ error: 'Invalid date.' });
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if (day > today) return res.status(400).json({ error: 'A match cannot be played in the future.' });
+
+    // Not before the current season: an earlier date files the match into a
+    // finished season, where it would quietly affect a different ladder than
+    // the one the submitter is looking at.
+    const season = seasonModel.getCurrentSeason();
+    if (season && day < season.start_date) {
+      return res.status(400).json({ error: `That date is before the ${season.name} season started.` });
+    }
+    // Keep the stored shape identical to CURRENT_TIMESTAMP's, since every
+    // reader slices the first ten characters off it.
+    playedAt = `${day} 12:00:00`;
+  }
+
   const winnerId = player1Score > player2Score ? player1Id : player2Id;
   db.prepare(
-    'INSERT INTO pickup_matches (player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId);
+    `INSERT INTO pickup_matches (player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id, played_at)
+     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`
+  ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId, playedAt);
 
   res.json({ ok: true });
 }));

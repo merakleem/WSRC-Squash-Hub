@@ -6320,3 +6320,348 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 
   .lg-page .roster-grid.lg-rosters { grid-template-columns: 1fr; }
 }
+
+/* ===== ENTER A MATCH — FAB + MODAL ===== */
+
+/* Fixed to the viewport, not the ladder's scroll container, so it holds still
+   as the list moves. The 86px bottom offset clears the sticky self-bar. */
+.em-fab {
+  position: fixed;
+  right: 28px;
+  bottom: 86px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 56px;
+  width: 56px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(192, 57, 43, .34), 0 2px 6px rgba(0, 0, 0, .12);
+  transition: width .16s ease, padding .16s ease, gap .16s ease, border-radius .16s ease, box-shadow .16s ease;
+}
+.em-fab-icon { width: 24px; height: 24px; flex: none; }
+.em-fab-label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity .16s ease;
+}
+/* Keyboard focus produces the same expanded state as hover. */
+.em-fab:hover,
+.em-fab:focus-visible {
+  width: auto;
+  border-radius: 28px;
+  padding: 0 22px 0 17px;
+  gap: 8px;
+  box-shadow: 0 6px 20px rgba(192, 57, 43, .42), 0 2px 8px rgba(0, 0, 0, .16);
+}
+.em-fab:hover .em-fab-label,
+.em-fab:focus-visible .em-fab-label { opacity: 1; }
+.em-fab:focus-visible { outline: 3px solid rgba(192, 57, 43, .35); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .em-fab, .em-fab-label { transition: none; }
+}
+
+/* No hover on touch, so it stays a circle and never expands. */
+@media (max-width: 768px) {
+  .em-fab {
+    right: 18px;
+    bottom: 84px;
+    height: 58px;
+    width: 58px;
+  }
+  .em-fab:hover, .em-fab:focus-visible {
+    width: 58px;
+    border-radius: 50%;
+    padding: 0;
+    gap: 0;
+  }
+  .em-fab:hover .em-fab-label, .em-fab:focus-visible .em-fab-label { opacity: 0; }
+}
+
+/* --- Modal --- */
+.em-modal { display: flex; flex-direction: column; gap: 18px; }
+.em-sheet-handle { display: none; }
+
+.em-section { display: flex; flex-direction: column; gap: 8px; }
+
+.em-label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--text-muted);
+}
+.em-label-row { display: flex; align-items: baseline; gap: 10px; }
+.em-hint { font-size: 12px; color: #93a2b5; }
+
+.em-vs {
+  font-family: 'Barlow', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #93a2b5;
+}
+.em-vs-stacked { text-align: center; padding: 2px 0; }
+
+.em-players-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; }
+.em-player-col { min-width: 0; }
+
+/* The submitter's own row: inert by having no affordance at all, rather than by
+   a lock icon. */
+.em-self-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.em-self-avatar {
+  width: 32px; height: 32px; flex: none;
+  border-radius: 50%;
+  background: var(--avatar-bg, var(--primary));
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 12px; font-weight: 700;
+  overflow: hidden;
+}
+.em-self-avatar.has-photo { background: none; }
+.em-self-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.em-self-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.em-you-chip {
+  margin-left: auto;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #fff;
+  color: var(--primary);
+  font-family: 'Barlow', sans-serif;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+/* --- Search (reuses the existing pu-search-* mechanism) --- */
+.em-modal .pu-search-wrap { position: relative; }
+.em-modal .pu-search-input {
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+.em-modal .pu-search-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  z-index: 5;
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(28, 43, 58, .12);
+  max-height: 230px;
+  overflow-y: auto;
+}
+.em-modal .pu-search-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.em-modal .pu-search-option:hover { background: var(--surface-2); }
+.em-opt-avatar {
+  width: 28px; height: 28px; flex: none;
+  border-radius: 50%;
+  background: var(--avatar-bg, #e7ebf2);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px; font-weight: 700;
+  overflow: hidden;
+}
+.em-opt-avatar.has-photo { background: none; }
+.em-opt-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.em-opt-name { font-size: 14px; color: var(--text); }
+.em-modal .pu-search-empty { padding: 10px 12px; font-size: 14px; color: var(--text-muted); }
+
+/* --- Who won --- */
+.em-winner-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.em-winner-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .12s ease, background .12s ease;
+}
+.em-winner-card:disabled { opacity: .55; cursor: default; }
+.em-winner-avatar {
+  width: 30px; height: 30px; flex: none;
+  border-radius: 50%;
+  background: var(--avatar-bg, #e7ebf2);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px; font-weight: 700;
+  overflow: hidden;
+}
+.em-winner-avatar.has-photo { background: none; }
+.em-winner-avatar img { width: 100%; height: 100%; object-fit: cover; }
+/* Names truncate; they must never wrap and reflow the card. */
+.em-winner-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.em-winner-card--selected { border-color: #0f7b3f; background: #e8f6ee; }
+.em-winner-card--selected .em-winner-name { font-weight: 700; }
+/* A photo already identifies the player, so only initials take the green fill. */
+.em-winner-card--selected .em-winner-avatar:not(.has-photo) { background: #0f7b3f; }
+.em-check { width: 18px; height: 18px; flex: none; color: #0f7b3f; }
+
+/* --- Games --- */
+.em-games-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.em-games-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.em-games-score { font-family: 'Barlow', sans-serif; font-size: 20px; font-weight: 700; color: var(--text); }
+.em-games-caption { font-size: 11.5px; color: var(--text-muted); }
+.em-games-card--selected { border-color: var(--primary); background: #eef2ff; }
+.em-games-card--selected .em-games-score { color: var(--primary); }
+.em-games-card--selected .em-games-caption { font-weight: 600; }
+
+/* --- Date played --- */
+.em-date-section { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; }
+.em-date-controls { display: flex; align-items: center; gap: 8px; }
+.em-today-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.em-today-chip--active { border-color: var(--primary); background: #eef2ff; color: var(--primary); }
+.em-date-input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+}
+
+/* --- Confirmation --- */
+.em-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #bfe3cd;
+  border-radius: 10px;
+  background: #e8f6ee;
+}
+.em-confirm-text { font-size: 13.5px; color: var(--text); }
+
+/* --- Footer --- */
+.em-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid #f0f3f7;
+}
+.em-missing { font-size: 12.5px; color: #93a2b5; }
+.em-footer-btns { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.em-submit {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.em-submit:disabled { opacity: .45; cursor: default; }
+
+.em-modal [hidden] { display: none !important; }
+
+/* Shell tweaks scoped to this modal via :has(), so they unset themselves when
+   any other modal opens and modal.close() needs no new cleanup. */
+.modal-overlay:has(.em-modal) { background: rgba(28, 43, 58, .55); }
+.modal:has(.em-modal) { width: 540px; border-radius: 16px; }
+.modal-body:has(.em-modal) { padding: 20px 22px; }
+
+/* --- Mobile: bottom sheet --- */
+@media (max-width: 768px) {
+  /* :has() rather than a class on the shell so the sheet styling unsets itself
+     when any other modal opens, without touching modal.close(). */
+  .modal:has(.em-modal) {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    top: auto;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    max-height: 92vh;
+    border-radius: 18px 18px 0 0;
+    transform: none;
+  }
+  .em-sheet-handle {
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: -4px auto 2px;
+    border-radius: 999px;
+    background: #dce3ed;
+  }
+  .modal-body:has(.em-modal) { padding: 16px; }
+  .em-winner-grid, .em-games-grid { gap: 8px; }
+  .em-date-section { flex-direction: column; align-items: stretch; gap: 8px; }
+  .em-footer {
+    position: sticky;
+    bottom: 0;
+    flex-direction: column;
+    align-items: stretch;
+    background: #fff;
+    padding-bottom: 4px;
+  }
+  .em-footer-btns { flex-direction: column-reverse; margin-left: 0; }
+  .em-footer-btns .btn { width: 100%; }
+}

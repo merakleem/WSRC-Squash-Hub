@@ -29,6 +29,27 @@ export function resetLadderSeason() {
   _ladderQuery = '';
 }
 
+// A fourth way into the existing "enter a match" modal, alongside the dashboard
+// quick action, the empty state's button and the players page. Hidden on a
+// finished season, and for a viewer who is neither a player nor an admin, since
+// neither could produce a valid submission.
+function _fabHTML(frozen) {
+  if (frozen) return '';
+  if (!state.currentUser?.playerId && !isAdmin()) return '';
+  return `
+    <button class="em-fab" id="ldrEnterMatch" aria-label="Enter a match">
+      <svg class="em-fab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+      <span class="em-fab-label">Enter a match</span>
+    </button>`;
+}
+
+function _wireFab() {
+  document.getElementById('ldrEnterMatch')?.addEventListener('click', () => window.openPickupGameModal());
+}
+
 // ===== LADDER PAGE =====
 export async function renderLadder() {
   document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>`;
@@ -73,8 +94,10 @@ export async function renderLadder() {
           <p>${season ? `No matches have been played in ${esc(season.name)} yet.` : 'Add players on the Players page and they will appear here.'}</p>
           ${ladderResult.frozen ? '' : `<button class="btn btn-primary" id="ldrEmptyReport">Report a ladder match</button>`}
         </div>
-      </div>`;
+      </div>
+      ${_fabHTML(ladderResult.frozen)}`;
     document.getElementById('ldrEmptyReport')?.addEventListener('click', () => window.openPickupGameModal());
+    _wireFab();
     _attachLadderSeasonTabs();
     return;
   }
@@ -201,12 +224,14 @@ export async function renderLadder() {
         </div>
       </div>
       ${selfBarHTML}
-    </div>`;
+    </div>
+    ${_fabHTML(ladderResult.frozen)}`;
 
   const listEl = document.getElementById('ladderList');
   const rowsEl = document.getElementById('ldrRows');
   const searchEl = document.getElementById('ldrSearch');
   const selfBar = document.getElementById('ldrSelfBar');
+  _wireFab();
 
   const openRow = (el) => window.openPlayerProfile(Number(el.dataset.id));
 

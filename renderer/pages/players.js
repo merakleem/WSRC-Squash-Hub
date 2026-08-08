@@ -1428,16 +1428,28 @@ export async function openPickupGameModal() {
   const adminMode = isAdmin();
   const myId = state.currentUser?.playerId;
 
-  modal.open('Report Ladder Match Score', '<div class="modal-loading">Loading players…</div>', { medium: true });
+  modal.open('Enter a match', '<div class="modal-loading">Loading players…</div>', { medium: true });
 
   const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
-  const myName = adminMode ? '' : (allPlayers.find((p) => p.id === myId)?.name || 'Me');
+  const me = allPlayers.find((p) => p.id === myId);
+  const myName = adminMode ? '' : (me?.name || 'Me');
 
-  const presets = [
-    { p1: 3, p2: 0 }, { p1: 3, p2: 1 }, { p1: 3, p2: 2 },
-    { p1: 0, p2: 3 }, { p1: 1, p2: 3 }, { p1: 2, p2: 3 },
-  ];
-  let selected = null;
+  // The scoreline is asked as two questions — who won, then how many games the
+  // loser took — and folded back into the player1/player2 pair the API has
+  // always taken. `games` is the LOSER's count, so 0 is a real answer: every
+  // check on it must be `!== null`, never truthiness.
+  let winner = null;   // 1 | 2 | null
+  let games  = null;   // 0 | 1 | 2 | null
+
+  const todayISO = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  let playedOn = todayISO;
+  // A date before the current season would file the match into a finished
+  // ladder, so the picker stops there. The server enforces the same bound.
+  let seasonStart = null;
+  let seasonName = '';
 
   function searchSelectorHTML(id, placeholder) {
     return `<div class="pu-search-wrap">
@@ -1463,14 +1475,19 @@ export async function openPickupGameModal() {
         .filter((p) => p.id !== excludeId && (!q || p.name.toLowerCase().includes(q)))
         .slice(0, 10);
       listEl.innerHTML = filtered.map((p) =>
-        `<div class="pu-search-option" data-id="${p.id}">${esc(p.name)}</div>`
+        `<div class="pu-search-option" data-id="${p.id}" data-name="${esc(p.name)}">
+          ${avatarHTML(p, 'em-opt-avatar')}
+          <span class="em-opt-name">${esc(p.name)}</span>
+        </div>`
       ).join('') || `<div class="pu-search-empty">No players found</div>`;
       listEl.style.display = 'block';
       listEl.querySelectorAll('.pu-search-option').forEach((opt) => {
         opt.addEventListener('mousedown', (e) => {
           e.preventDefault();
           hiddenEl.value = opt.dataset.id;
-          searchEl.value = opt.textContent;
+          // dataset.name, not textContent: the row now carries an avatar, whose
+          // initials would otherwise be pasted into the field alongside the name.
+          searchEl.value = opt.dataset.name;
           clearEl.style.display = '';
           listEl.style.display = 'none';
           onChange();
@@ -1491,114 +1508,236 @@ export async function openPickupGameModal() {
     });
   }
 
-  function resolveNames() {
-    const p1Name = adminMode
-      ? (() => { const v = document.getElementById('puP1')?.value; return v ? allPlayers.find((p) => p.id === Number(v))?.name || 'Player 1' : 'Player 1'; })()
-      : myName;
-    const p2val = document.getElementById('puP2')?.value;
-    const p2Name = p2val
-      ? allPlayers.find((p) => p.id === Number(p2val))?.name || (adminMode ? 'Player 2' : 'Opponent')
-      : (adminMode ? 'Player 2' : 'Opponent');
-    return { p1Name, p2Name };
+  const p1Id = () => (adminMode ? Number(document.getElementById('puP1')?.value) || null : myId || null);
+  const p2Id = () => Number(document.getElementById('puP2')?.value) || null;
+  const bothChosen = () => !!(p1Id() && p2Id());
+
+  function playerFor(slot) {
+    const id = slot === 1 ? p1Id() : p2Id();
+    return id ? allPlayers.find((p) => p.id === id) || null : null;
   }
-
-  function canSelectPreset() {
-    const hasP2 = !!document.getElementById('puP2')?.value;
-    if (!adminMode) return hasP2;
-    return !!(document.getElementById('puP1')?.value && hasP2);
+  function nameFor(slot) {
+    const p = playerFor(slot);
+    if (p) return p.name;
+    if (slot === 1) return adminMode ? 'Player 1' : myName;
+    return adminMode ? 'Player 2' : 'Opponent';
   }
+  const firstName = (n) => String(n || '').split(' ')[0];
 
-  function renderPresets() {
-    const { p1Name, p2Name } = resolveNames();
-    const can = canSelectPreset();
+  const CHECK_SVG = `<svg class="em-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>`;
 
-    document.getElementById('puP1Label').textContent = p1Name;
-    const p2Label = document.getElementById('puP2Label');
-    p2Label.textContent = p2Name;
-    p2Label.classList.toggle('pu-player-name--muted', !can);
+  const GAME_OPTIONS = [
+    { games: 0, caption: 'in three' },
+    { games: 1, caption: 'in four' },
+    { games: 2, caption: 'in five' },
+  ];
 
-    const grid = document.getElementById('puPresetGrid');
-    grid.innerHTML = presets.map((pr) => {
-      const p1wins = pr.p1 > pr.p2;
-      const winnerScore = Math.max(pr.p1, pr.p2);
-      const loserScore  = Math.min(pr.p1, pr.p2);
-      const isSel = selected && selected.p1 === pr.p1 && selected.p2 === pr.p2;
-      const winnerFirst = (p1wins ? p1Name : p2Name).split(' ')[0];
-      return `<button class="tr-preset-btn${isSel ? ' tr-preset-btn--selected' : ''}" data-p1="${pr.p1}" data-p2="${pr.p2}"${!can ? ' disabled' : ''}>
-        <span class="tr-preset-score">${winnerScore}–${loserScore}</span>
-        <span class="tr-preset-winner">${can ? `${esc(winnerFirst)} wins` : '—'}</span>
+  function renderWinner() {
+    const can = bothChosen();
+    document.getElementById('emWinnerHint').textContent =
+      can ? '' : (adminMode ? 'Choose both players' : 'Pick an opponent first');
+
+    document.getElementById('emWinnerGrid').innerHTML = [1, 2].map((slot) => {
+      const p = playerFor(slot);
+      const sel = winner === slot;
+      return `<button type="button" class="em-winner-card${sel ? ' em-winner-card--selected' : ''}"
+        data-slot="${slot}"${can ? '' : ' disabled'}>
+        ${avatarHTML(p || { name: nameFor(slot) }, 'em-winner-avatar')}
+        <span class="em-winner-name">${esc(nameFor(slot))}</span>
+        ${sel ? CHECK_SVG : ''}
       </button>`;
     }).join('');
+  }
 
-    grid.querySelectorAll('.tr-preset-btn:not([disabled])').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selected = { p1: Number(btn.dataset.p1), p2: Number(btn.dataset.p2) };
-        grid.querySelectorAll('.tr-preset-btn').forEach((b) =>
-          b.classList.toggle('tr-preset-btn--selected',
-            Number(b.dataset.p1) === selected.p1 && Number(b.dataset.p2) === selected.p2));
-        document.getElementById('puSubmit').disabled = false;
-      });
-    });
+  function renderGames() {
+    const section = document.getElementById('emGamesSection');
+    // Hidden rather than disabled until a winner exists: the question has no
+    // meaning yet, so it should not be on screen.
+    section.hidden = winner === null;
+    if (winner === null) return;
+
+    document.getElementById('emGamesHint').textContent = `${firstName(nameFor(winner))}'s games first`;
+    document.getElementById('emGamesGrid').innerHTML = GAME_OPTIONS.map((o) => {
+      const sel = games === o.games;
+      return `<button type="button" class="em-games-card${sel ? ' em-games-card--selected' : ''}" data-games="${o.games}">
+        <span class="em-games-score">3–${o.games}</span>
+        <span class="em-games-caption">${o.caption}</span>
+      </button>`;
+    }).join('');
+  }
+
+  const isComplete = () => bothChosen() && winner !== null && games !== null;
+
+  function renderConfirm() {
+    const box = document.getElementById('emConfirm');
+    box.hidden = !isComplete();
+    if (box.hidden) return;
+    const loser = winner === 1 ? 2 : 1;
+    box.innerHTML = `${CHECK_SVG}<span class="em-confirm-text">${esc(nameFor(winner))} beat ${esc(nameFor(loser))} 3–${games}</span>`;
+  }
+
+  function renderFooter() {
+    let note = '';
+    if (!bothChosen()) note = adminMode ? 'Choose both players' : 'Choose your opponent';
+    else if (winner === null || games === null) note = 'Pick a winner and a scoreline';
+    document.getElementById('emMissing').textContent = note;
+    document.getElementById('puSubmit').disabled = !isComplete();
+  }
+
+  function update() {
+    renderWinner();
+    renderGames();
+    renderConfirm();
+    renderFooter();
   }
 
   function onPlayerChange() {
-    selected = null;
-    document.getElementById('puSubmit').disabled = true;
-    renderPresets();
+    // A different pairing invalidates both halves of the scoreline.
+    winner = null;
+    games = null;
+    update();
   }
 
-  const selectorsHTML = adminMode
-    ? `<div class="pu-selectors-row">
-        <div class="pu-selector-col">
-          <label class="form-label">Player 1</label>
-          ${searchSelectorHTML('puP1', 'Search player…')}
-        </div>
-        <div class="pu-vs-divider">vs</div>
-        <div class="pu-selector-col">
-          <label class="form-label">Player 2</label>
-          ${searchSelectorHTML('puP2', 'Search player…')}
+  const playersSectionHTML = adminMode
+    ? `<div class="em-section">
+        <div class="em-label">Players</div>
+        <div class="em-players-row">
+          <div class="em-player-col">${searchSelectorHTML('puP1', 'Search players…')}</div>
+          <div class="em-vs">vs</div>
+          <div class="em-player-col">${searchSelectorHTML('puP2', 'Search players…')}</div>
         </div>
       </div>`
-    : `<div class="form-group" style="margin:0">
-        <label class="form-label">Opponent</label>
+    : `<div class="em-section">
+        <div class="em-self-card">
+          ${avatarHTML(me || { name: myName }, 'em-self-avatar')}
+          <span class="em-self-name">${esc(myName)}</span>
+          <span class="em-you-chip">YOU</span>
+        </div>
+        <div class="em-vs em-vs-stacked">vs</div>
         ${searchSelectorHTML('puP2', 'Search opponent…')}
       </div>`;
 
   document.getElementById('modalBody').innerHTML = `
-    <div class="pu-modal">
-      ${selectorsHTML}
-      <div class="pu-matchup-display">
-        <span class="pu-player-name" id="puP1Label">${esc(adminMode ? 'Player 1' : myName)}</span>
-        <span class="pu-vs-badge">vs</span>
-        <span class="pu-player-name pu-player-name--muted" id="puP2Label">${esc(adminMode ? 'Player 2' : 'Opponent')}</span>
+    <div class="em-modal">
+      <div class="em-sheet-handle" aria-hidden="true"></div>
+      ${playersSectionHTML}
+
+      <div class="em-section">
+        <div class="em-label-row">
+          <span class="em-label">Who won?</span>
+          <span class="em-hint" id="emWinnerHint"></span>
+        </div>
+        <div class="em-winner-grid" id="emWinnerGrid"></div>
       </div>
-      <div class="tr-preset-grid" id="puPresetGrid"></div>
-      <div class="tr-score-actions">
-        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
-        <button type="button" class="btn btn-primary" id="puSubmit" disabled>Log Game</button>
+
+      <div class="em-section" id="emGamesSection" hidden>
+        <div class="em-label-row">
+          <span class="em-label">Games</span>
+          <span class="em-hint" id="emGamesHint"></span>
+        </div>
+        <div class="em-games-grid" id="emGamesGrid"></div>
+      </div>
+
+      <div class="em-section em-date-section">
+        <span class="em-label">Date played</span>
+        <div class="em-date-controls">
+          <button type="button" class="em-today-chip em-today-chip--active" id="emToday">Today</button>
+          <input type="date" class="em-date-input" id="emDate" value="${todayISO}" max="${todayISO}">
+        </div>
+      </div>
+
+      <div class="em-confirm" id="emConfirm" hidden></div>
+
+      <div class="em-footer">
+        <span class="em-missing" id="emMissing"></span>
+        <div class="em-footer-btns">
+          <button type="button" class="btn btn-ghost" id="emCancel">Cancel</button>
+          <button type="button" class="btn em-submit" id="puSubmit" disabled>Log match</button>
+        </div>
       </div>
     </div>`;
 
-  renderPresets();
+  update();
 
   if (adminMode) {
-    wireSearch('puP1', () => Number(document.getElementById('puP2').value) || null, onPlayerChange);
-    wireSearch('puP2', () => Number(document.getElementById('puP1').value) || null, onPlayerChange);
+    wireSearch('puP1', () => p2Id(), onPlayerChange);
+    wireSearch('puP2', () => p1Id(), onPlayerChange);
   } else {
     wireSearch('puP2', myId, onPlayerChange);
   }
 
+  document.getElementById('emWinnerGrid').addEventListener('click', (e) => {
+    const btn = e.target.closest('.em-winner-card');
+    if (!btn || btn.disabled) return;
+    const slot = Number(btn.dataset.slot);
+    // Switching winner keeps the games count: 3–1 means the same shape of match
+    // either way round, and re-asking for it would be busywork.
+    winner = winner === slot ? null : slot;
+    update();
+  });
+
+  document.getElementById('emGamesGrid').addEventListener('click', (e) => {
+    const btn = e.target.closest('.em-games-card');
+    if (!btn) return;
+    const g = Number(btn.dataset.games);
+    games = games === g ? null : g;
+    update();
+  });
+
+  const dateEl = document.getElementById('emDate');
+  const todayChip = document.getElementById('emToday');
+  function setDate(value) {
+    playedOn = value || todayISO;
+    dateEl.value = playedOn;
+    todayChip.classList.toggle('em-today-chip--active', playedOn === todayISO);
+  }
+  dateEl.addEventListener('change', () => {
+    let v = dateEl.value;
+    if (!v) { setDate(todayISO); return; }
+    if (v > todayISO) { toast('A match cannot be played in the future.', 'warning'); v = todayISO; }
+    else if (seasonStart && v < seasonStart) {
+      toast(`That date is before the ${seasonName} season started.`, 'warning');
+      v = seasonStart;
+    }
+    setDate(v);
+  });
+  todayChip.addEventListener('click', () => setDate(todayISO));
+
+  document.getElementById('emCancel').addEventListener('click', () => modal.close());
+
+  // Bounding the picker needs the season boundary, which nothing else on this
+  // screen knows. Fetched after the modal is usable so a slow reply never
+  // blocks entry, and the server rejects an out-of-range date regardless.
+  window.api.getSeasons().then((seasons) => {
+    const current = (seasons || []).find((s) => s.is_current);
+    if (!current || !document.getElementById('emDate')) return;
+    seasonStart = current.start_date;
+    seasonName = current.name;
+    document.getElementById('emDate').setAttribute('min', seasonStart);
+  }).catch(() => {});
+
   document.getElementById('puSubmit').addEventListener('click', async () => {
-    const p1Id = adminMode ? Number(document.getElementById('puP1').value) : myId;
-    const p2Id = Number(document.getElementById('puP2').value);
-    if (!p1Id || !p2Id) { toast('Please select both players.', 'warning'); return; }
-    if (p1Id === p2Id)  { toast('Players must be different.', 'warning'); return; }
-    if (!selected)      { toast('Please select a score.', 'warning'); return; }
+    const p1 = p1Id();
+    const p2 = p2Id();
+    if (!p1 || !p2)   { toast('Please select both players.', 'warning'); return; }
+    if (p1 === p2)    { toast('Players must be different.', 'warning'); return; }
+    if (winner === null || games === null) { toast('Please select a score.', 'warning'); return; }
+    const winnerIsP1 = winner === 1;
     const btn = document.getElementById('puSubmit');
     btn.disabled = true;
     btn.textContent = 'Submitting…';
     try {
-      await window.api.logPickupGame({ player1Id: p1Id, player2Id: p2Id, player1Score: selected.p1, player2Score: selected.p2 });
+      await window.api.logPickupGame({
+        player1Id: p1,
+        player2Id: p2,
+        player1Score: winnerIsP1 ? 3 : games,
+        player2Score: winnerIsP1 ? games : 3,
+        // Left off for a match played today so the row keeps a real timestamp
+        // rather than a flattened midday one, which is what orders same-day
+        // matches in the rating replay.
+        ...(playedOn !== todayISO ? { playedOn } : {}),
+      });
       toast('Ladder match recorded!', 'success');
       modal.close();
       if (state.page === 'ladder') window.renderLadder();
@@ -1606,7 +1745,7 @@ export async function openPickupGameModal() {
     } catch (err) {
       toast(err.message || 'Failed to log game', 'error');
       btn.disabled = false;
-      btn.textContent = 'Log Game';
+      btn.textContent = 'Log match';
     }
   });
 }
