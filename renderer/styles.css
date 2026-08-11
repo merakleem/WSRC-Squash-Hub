@@ -5410,6 +5410,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   line-height: 1;
   letter-spacing: .07em;
   text-transform: uppercase;
+  z-index: 5;
 }
 .cb-col { flex: 1; min-width: 150px; position: relative; border-left: 1px solid #f0f3f7; }
 
@@ -5477,16 +5478,37 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-block--editing .cb-block-edit { opacity: 1; }
 
 /* One veil over the whole past region rather than a label on every cell. */
-.cb-veil {
+/* Spans the courts but not the hour gutter, so the times stay legible. Offset
+   by the grid's own 28px padding plus the 64px gutter. */
+.cb-past {
+  position: absolute;
+  top: 0;
+  left: 92px;
+  right: 28px;
+  z-index: 3;
+  background: rgba(233, 238, 244, .82);
+  pointer-events: none;
+}
+.cb-past-label {
   position: absolute;
   left: 0;
   right: 0;
-  top: 0;
-  z-index: 2;
-  background: rgba(250, 251, 253, .72);
-  pointer-events: none;
+  bottom: 12px;
+  margin: 0 auto;
+  width: max-content;
+  max-width: 90%;
+  padding: 6px 15px;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid #dce3ed;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: #93a2b5;
+  white-space: nowrap;
 }
-.cb-now { position: absolute; left: -1px; right: -1px; height: 2px; background: #c0392b; z-index: 3; }
+/* Above the veil, so the boundary it marks stays crisp. */
+.cb-now { position: absolute; left: -1px; right: -1px; height: 2px; background: #c0392b; z-index: 4; }
 
 .cb-past-banner {
   padding: 9px 28px;
