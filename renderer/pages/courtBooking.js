@@ -381,12 +381,13 @@ function _dateRowHTML() {
     </div>`;
 
   if (mobile) {
+    // No week strip on mobile: the arrows cover near days and the calendar the
+    // rest, and the vertical space is better spent on the rail and the courts.
     return `
       <div class="cb-date-card">
         <div class="cb-date-row">
           ${prev}${dateBlock}${next}${cal}
         </div>
-        <div class="cb-week">${_weekStrip()}</div>
         ${_calendarHTML()}
       </div>`;
   }
