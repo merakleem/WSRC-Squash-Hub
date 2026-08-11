@@ -373,20 +373,31 @@ function _dateRowHTML() {
 
   // Order matters: the week strip sits directly after the day arrows, not
   // pushed to the far edge, so the whole control reads as one cluster.
+  //
+  // The popover hangs off the button itself rather than the bar's right edge.
+  // The design anchors it to the edge, but its frame is only as wide as the
+  // controls; on a wider screen that stranded the calendar in empty space far
+  // from the button that opened it.
   return `
     <div class="cb-date-bar">
       <div class="cb-date-row cb-date-row--desktop">
         ${prev}${dateBlock}${next}
         <div class="cb-week">${_weekStrip()}</div>
-        ${cal}
+        <div class="cb-cal-anchor">${cal}${_calendarHTML()}</div>
       </div>
-      ${_calendarHTML()}
     </div>`;
 }
 
 // ── Desktop grid ──────────────────────────────────────────────────────────────
 function _buildCourtColumn(courtId, isToday, isPast, nm) {
   const slots = getCourtSlots(cb.date, courtId);
+
+  // Drawn per column rather than as one layer across the whole grid, so the
+  // hour gutter down the left stays white.
+  let bands = '';
+  for (let h = 6; h < DAY_END / 60; h += 2) {
+    bands += `<div class="cb-band" style="top:${topFor(h * 60)}px"></div>`;
+  }
 
   const blocks = slots.map(s => {
     const h = topFor(s.startMin + s.durationMinutes) - topFor(s.startMin);
@@ -427,7 +438,7 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
     : '';
   const nowLine = isToday ? `<div class="cb-now" style="top:${topFor(nm)}px"></div>` : '';
 
-  return `${openSlots}${blocks}${veil}${nowLine}`;
+  return `${bands}${openSlots}${blocks}${veil}${nowLine}`;
 }
 
 function _buildGrid() {
@@ -438,12 +449,6 @@ function _buildGrid() {
   if (cb.status === 'loading') return `<div class="cb-centered"><div class="cb-spinner"></div></div>`;
   if (cb.status === 'error')   return `<div class="cb-centered cb-error">Couldn't load the schedule. Please try again.</div>`;
   if (!cb.courts.length)       return `<div class="cb-centered">No courts available.</div>`;
-
-  // Every other hour gets a filled band instead of a rule every 30 minutes.
-  const bands = [];
-  for (let h = 6; h < DAY_END / 60; h += 2) {
-    bands.push(`<div class="cb-band" style="top:${topFor(h * 60)}px"></div>`);
-  }
 
   const hours = [];
   for (let h = 6; h < DAY_END / 60; h++) {
@@ -458,7 +463,6 @@ function _buildGrid() {
       ${cb.courts.map(c => `<div class="cb-court-header-cell">${esc(c.name)}</div>`).join('')}
     </div>
     <div class="cb-grid" style="height:${GRID_H}px">
-      <div class="cb-bands">${bands.join('')}</div>
       <div class="cb-gutter">${hours.join('')}${nowChip}</div>
       ${cb.courts.map(c => `<div class="cb-col">${_buildCourtColumn(c.id, isToday, isPast, nm)}</div>`).join('')}
     </div>`;

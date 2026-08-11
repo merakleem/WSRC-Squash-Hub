@@ -4359,7 +4359,8 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-tab--active .cb-tab-count { background: #1e2758; color: #fff; }
 
 /* --- Date bar --- */
-.cb-date-bar { padding: 20px 28px 16px; position: relative; z-index: 5; flex-shrink: 0; }
+.cb-date-bar { padding: 20px 28px 16px; position: relative; z-index: 10; flex-shrink: 0; }
+.cb-cal-anchor { position: relative; flex: none; }
 .cb-date-row { display: flex; align-items: center; gap: 14px; }
 .cb-icon-btn {
   flex: none;
@@ -4430,7 +4431,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-cal {
   position: absolute;
   top: calc(100% + 8px);
-  right: 18px;
+  right: 0;
   z-index: 20;
   padding: 16px;
   background: #fff;
@@ -4482,7 +4483,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-court-header {
   position: sticky;
   top: 0;
-  z-index: 6;
+  /* Above the grid's own layers, but below the date bar so the calendar
+     popover opens over it rather than behind it. */
+  z-index: 5;
   display: flex;
   padding: 0 28px;
   background: #fafbfd;
@@ -4504,9 +4507,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 
 .cb-grid { display: flex; position: relative; padding: 0 28px; }
-.cb-bands { position: absolute; left: 28px; right: 28px; top: 0; bottom: 0; pointer-events: none; }
-/* Two-hour bands carry the rhythm instead of a rule every 30 minutes. */
-.cb-band { position: absolute; left: 0; right: 0; height: 76px; background: #fafbfd; }
+/* Two-hour bands carry the rhythm instead of a rule every 30 minutes. They live
+   inside each column, so the hour gutter is not striped along with them. */
+.cb-band { position: absolute; left: 0; right: 0; height: 76px; background: #fafbfd; pointer-events: none; }
 .cb-gutter { width: 64px; flex: none; position: relative; }
 .cb-hour {
   position: absolute;
