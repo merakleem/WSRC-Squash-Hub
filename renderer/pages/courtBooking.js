@@ -36,9 +36,16 @@ function minToTime(min) {
 
 function fmtTime(min) {
   let h = Math.floor(min / 60), m = min % 60;
-  const ap = h >= 12 ? 'PM' : 'AM';
+  const ap = (h < 12 || h === 24) ? 'AM' : 'PM';
   h = h % 12 || 12;
   return `${h}:${String(m).padStart(2,'0')} ${ap}`;
+}
+
+// Grid slot labels carry no meridiem: the hour is already on the gutter beside
+// them, and the column is only ~150px wide.
+function fmtShort(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${h % 12 || 12}:${String(m).padStart(2,'0')}`;
 }
 
 // Rail labels carry the meridiem on the hour and bare minutes in between, so a
@@ -49,17 +56,11 @@ function fmtPill(min) {
   return m === 0 ? `${h12} ${h >= 12 ? 'PM' : 'AM'}` : `${h12}:${String(m).padStart(2,'0')}`;
 }
 
+// "5:00–6:00 PM" when both ends share a meridiem, "11:00 AM – 1:00 PM" when
+// they do not.
 function fmtRange(startMin, durMin) {
-  return `${fmtTime(startMin)} – ${fmtTime(startMin + durMin)}`;
-}
-
-// "7:00–8:00 PM" — the meridiem is dropped from the start when both ends share
-// it, which is how the summary line reads in the design.
-function fmtRangeCompact(startMin, durMin) {
-  const end = startMin + durMin;
-  const sameHalf = (startMin >= 720) === (end >= 720);
-  const s = fmtTime(startMin);
-  return `${sameHalf ? s.replace(/ (AM|PM)$/, '') : s}–${fmtTime(end)}`;
+  const a = fmtTime(startMin), b = fmtTime(startMin + durMin);
+  return a.slice(-2) === b.slice(-2) ? `${a.slice(0, -3)}–${b}` : `${a} – ${b}`;
 }
 
 function topFor(min) {
@@ -72,8 +73,9 @@ function nowMin() {
 }
 
 function durLabel(d) {
+  if (d < 60) return `${d} min`;
   const h = Math.floor(d / 60), m = d % 60;
-  return (h ? h + 'h' : '') + (h && m ? ' ' : '') + (m ? m + 'm' : '');
+  return `${h}${m ? '.5' : ''} hr${(h > 1 || m) ? 's' : ''}`;
 }
 
 function isMobile() {
@@ -89,11 +91,10 @@ function fmtDateDisplay(dateStr) {
   return { weekday: WD_LONG[d.getDay()], monthDay: `${MO_LONG[d.getMonth()]} ${d.getDate()}` };
 }
 
-// "Wed 12 Aug" for the summary line. Built from the parts rather than by
-// re-cutting a long date string, which breaks the moment the long format moves.
+// "Wed, Aug 12" for the summary line.
 function fmtShortDate(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
-  return `${WD_SHORT[d.getDay()]} ${d.getDate()} ${MO_LONG[d.getMonth()].slice(0, 3)}`;
+  return `${WD_SHORT[d.getDay()]}, ${MO_LONG[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
 }
 
 function fmtLongDate(dateStr) {
@@ -122,6 +123,10 @@ function getMaxEnd(slots, startMin, editId = null) {
     if (s.startMin >= startMin && s.startMin < end) end = s.startMin;
   }
   return end;
+}
+
+function _initials(n) {
+  return String(n || '').split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 }
 
 function myName() {
@@ -246,12 +251,13 @@ function _scrollToNow() {
 const ICON = {
   chevL: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>',
   chevR: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
-  cal:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>',
+  cal:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 3v3M16 3v3"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/></svg>',
-  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>',
   search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
   pencil:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
-  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg>',
 };
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -299,9 +305,10 @@ function _weekStrip() {
     const dt = new Date(d + 'T12:00:00');
     const sel = d === cb.date;
     const isToday = d === today;
-    return `<button class="cb-day${sel ? ' cb-day--sel' : ''}${!sel && isToday ? ' cb-day--today' : ''}" data-date="${d}">
+    return `<button class="cb-day${sel ? ' cb-day--sel' : ''}" data-date="${d}">
       <span class="cb-day-wd">${WD_SHORT[dt.getDay()][0]}</span>
       <span class="cb-day-n">${dt.getDate()}</span>
+      <span class="cb-day-dot${!sel && isToday ? ' cb-day-dot--on' : ''}"></span>
     </button>`;
   }).join('');
 }
@@ -328,9 +335,11 @@ function _calendarHTML() {
   return `
     <div class="cb-cal" id="cbCal">
       <div class="cb-cal-head">
-        <button class="cb-cal-nav" id="cbCalPrev" aria-label="Previous month">${ICON.chevL}</button>
         <span class="cb-cal-month">${MO_LONG[m - 1]} ${y}</span>
-        <button class="cb-cal-nav" id="cbCalNext" aria-label="Next month">${ICON.chevR}</button>
+        <div class="cb-cal-navs">
+          <button class="cb-cal-nav" id="cbCalPrev" aria-label="Previous month">${ICON.chevL}</button>
+          <button class="cb-cal-nav" id="cbCalNext" aria-label="Next month">${ICON.chevR}</button>
+        </div>
       </div>
       <div class="cb-cal-wd">${['S','M','T','W','T','F','S'].map(w => `<span>${w}</span>`).join('')}</div>
       <div class="cb-cal-grid">${cells.join('')}</div>
@@ -342,32 +351,35 @@ function _dateRowHTML() {
   const { weekday, monthDay } = fmtDateDisplay(cb.date);
   const mobile = isMobile();
 
-  const nav = `
-    <button class="cb-icon-btn" id="cbPrevDay" aria-label="Previous day">${ICON.chevL}</button>`;
+  const prev = `<button class="cb-icon-btn" id="cbPrevDay" aria-label="Previous day">${ICON.chevL}</button>`;
+  const next = `<button class="cb-icon-btn" id="cbNextDay" aria-label="Next day">${ICON.chevR}</button>`;
+  const cal  = `<button class="cb-icon-btn${cb.calOpen ? ' cb-icon-btn--on' : ''}" id="cbCalBtn" aria-label="Choose a date">${ICON.cal}</button>`;
   const dateBlock = `
     <div class="cb-date-block">
       <div class="cb-date-wd">${esc(weekday.toUpperCase())}${isToday ? '<span class="cb-today-pill">Today</span>' : ''}</div>
       <div class="cb-date-md">${esc(monthDay)}</div>
     </div>`;
-  const after = `
-    <button class="cb-icon-btn" id="cbNextDay" aria-label="Next day">${ICON.chevR}</button>
-    <button class="cb-icon-btn${cb.calOpen ? ' cb-icon-btn--on' : ''}" id="cbCalBtn" aria-label="Choose a date">${ICON.cal}</button>`;
 
   if (mobile) {
     return `
       <div class="cb-date-card">
         <div class="cb-date-row">
-          ${nav}${dateBlock}${after}
+          ${prev}${dateBlock}${next}${cal}
         </div>
         <div class="cb-week">${_weekStrip()}</div>
         ${_calendarHTML()}
       </div>`;
   }
 
+  // Order matters: the week strip sits directly after the day arrows, not
+  // pushed to the far edge, so the whole control reads as one cluster.
   return `
-    <div class="cb-date-row cb-date-row--desktop">
-      ${nav}${dateBlock}${after.replace('id="cbNextDay"', 'id="cbNextDay"')}
-      <div class="cb-week">${_weekStrip()}</div>
+    <div class="cb-date-bar">
+      <div class="cb-date-row cb-date-row--desktop">
+        ${prev}${dateBlock}${next}
+        <div class="cb-week">${_weekStrip()}</div>
+        ${cal}
+      </div>
       ${_calendarHTML()}
     </div>`;
 }
@@ -386,10 +398,10 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
     return `
       <div class="cb-block cb-block--${kind}${canEdit ? ' cb-block--editable' : ''}${editing ? ' cb-block--editing' : ''}"
         data-bid="${s.id}" data-court="${courtId}"
-        style="top:${topFor(s.startMin)}px;height:${Math.max(h - 3, 18)}px">
+        style="top:${topFor(s.startMin) + 1}px;height:${Math.max(h - 3, 16)}px">
         <span class="cb-block-title">${esc(mine ? 'You' : s.title)}</span>
         <span class="cb-block-time">${fmtRange(s.startMin, s.durationMinutes)}</span>
-        ${canEdit ? '<span class="cb-block-edit">Edit</span>' : ''}
+        ${mine ? '<span class="cb-block-edit">Edit</span>' : ''}
       </div>`;
   }).join('');
 
@@ -398,24 +410,24 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
     for (let m = DAY_START; m < DAY_END; m += SLOT_MIN) {
       const covered = slots.some(s => m < s.startMin + s.durationMinutes && (m + SLOT_MIN) > s.startMin);
       if (covered) continue;
-      const slotPast = isToday && m < nm;
+      // A slot that has been and gone is simply not drawn. The whole morning is
+      // veiled instead, rather than repeating "no longer available" down the
+      // column.
+      if (isToday && m < nm) continue;
       const selected = cb.panel === 'book' && cb.courtId === courtId && cb.panelStartMin === m;
-      openSlots += slotPast
-        ? `<div class="cb-slot cb-slot--past" style="top:${topFor(m) + 1}px">
-             <span class="cb-slot-na">No longer available</span>
-           </div>`
-        : `<div class="cb-slot cb-slot--open${selected ? ' cb-slot--sel' : ''}" data-start="${m}" data-court="${courtId}"
-             style="top:${topFor(m) + 1}px">
-             <span class="cb-slot-time">${fmtTime(m)}</span><span class="cb-slot-plus">+</span>
-           </div>`;
+      openSlots += `<div class="cb-slot cb-slot--open${selected ? ' cb-slot--sel' : ''}" data-start="${m}" data-court="${courtId}"
+        style="top:${topFor(m) + 1}px">
+        <span class="cb-slot-time">${fmtShort(m)}</span><span class="cb-slot-plus">+</span>
+      </div>`;
     }
   }
 
-  const nowLine = isToday
-    ? `<div class="cb-now" style="top:${topFor(nm)}px"></div>`
+  const veil = isToday && nm > DAY_START
+    ? `<div class="cb-veil" style="height:${topFor(Math.min(nm, DAY_END))}px"></div>`
     : '';
+  const nowLine = isToday ? `<div class="cb-now" style="top:${topFor(nm)}px"></div>` : '';
 
-  return `${openSlots}${blocks}${nowLine}`;
+  return `${openSlots}${blocks}${veil}${nowLine}`;
 }
 
 function _buildGrid() {
@@ -434,15 +446,20 @@ function _buildGrid() {
   }
 
   const hours = [];
-  for (let h = 6; h <= DAY_END / 60; h++) {
+  for (let h = 6; h < DAY_END / 60; h++) {
     hours.push(`<div class="cb-hour" style="top:${Math.max(0, topFor(h * 60) - 7)}px">${h % 12 || 12} ${h < 12 ? 'AM' : 'PM'}</div>`);
   }
+  const nowChip = isToday ? `<span class="cb-now-chip" style="top:${topFor(nm) + 1}px">Now</span>` : '';
 
   return `
     ${isPast ? '<div class="cb-past-banner">Past date · view only</div>' : ''}
+    <div class="cb-court-header">
+      <div class="cb-court-header-spacer"></div>
+      ${cb.courts.map(c => `<div class="cb-court-header-cell">${esc(c.name)}</div>`).join('')}
+    </div>
     <div class="cb-grid" style="height:${GRID_H}px">
       <div class="cb-bands">${bands.join('')}</div>
-      <div class="cb-gutter">${hours.join('')}</div>
+      <div class="cb-gutter">${hours.join('')}${nowChip}</div>
       ${cb.courts.map(c => `<div class="cb-col">${_buildCourtColumn(c.id, isToday, isPast, nm)}</div>`).join('')}
     </div>`;
 }
@@ -606,10 +623,6 @@ function _buildBody() {
 
   return `
     ${_dateRowHTML()}
-    <div class="cb-court-header">
-      <div class="cb-court-header-spacer"></div>
-      ${cb.courts.map(c => `<div class="cb-court-header-cell">${esc(c.name)}</div>`).join('')}
-    </div>
     <div class="cb-grid-wrap" id="cbGridWrap">${_buildGrid()}</div>`;
 }
 
@@ -821,7 +834,7 @@ function _buildPanelInner() {
   const taken = new Set([state.currentUser?.playerId, ...cb.panelPlayers].filter(Boolean));
   const playerChips = cb.panelPlayers.map(pid => {
     const p = state.players?.find(pl => pl.id === pid);
-    return `<span class="cb-chip">${esc(p?.name || 'Player')}<button class="cb-chip-x" data-remove="${pid}" aria-label="Remove">×</button></span>`;
+    return `<span class="cb-chip cb-chip--other">${esc(p?.name || 'Player')}<button class="cb-chip-x" data-remove="${pid}" aria-label="Remove">×</button></span>`;
   }).join('');
 
   const results = cb.panelSearch.trim()
@@ -830,73 +843,90 @@ function _buildPanelInner() {
   const searchDropdown = (results.length || cb.panelSearch.trim()) ? `
     <div class="cb-search-results" id="cbSearchDropdown">
       ${results.length
-        ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}">${esc(p.name)}</div>`).join('')
+        ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${esc(_initials(p.name))}</span><span>${esc(p.name)}</span></div>`).join('')
         : '<div class="cb-search-empty">No players found</div>'}
     </div>` : '';
 
   const others = isEdit ? _otherNames(booking || {}) : [];
   const playerCount = 1 + cb.panelPlayers.length;
 
-  return `
-    <button class="cb-panel-close" id="cbPanelClose" aria-label="Close">${ICON.close}</button>
-    <div class="cb-panel-scroll">
-      <div class="cb-panel-kicker">${isEdit ? 'Your booking' : 'Reserve a court'}</div>
-      <h2 class="cb-panel-court">${esc(courtName)}</h2>
-      <div class="cb-panel-when">${esc(fmtLongDate(date))} · ${fmtTime(startMin)}</div>
+  const room = 3 - cb.panelPlayers.length;
+  const holdWarn = warn;
 
+  return `
+    <div class="cb-panel-head">
+      <div class="cb-panel-head-row">
+        <div class="cb-panel-headings">
+          <span class="cb-panel-kicker">${isEdit ? 'Your booking' : 'Reserve a court'}</span>
+          <span class="cb-panel-court">${esc(courtName)}</span>
+          <span class="cb-panel-when">${esc(fmtLongDate(date))} · ${fmtTime(startMin)}</span>
+        </div>
+        <button class="cb-panel-close" id="cbPanelClose" aria-label="Close">${ICON.close}</button>
+      </div>
       ${isEdit ? `
         <div class="cb-note">
           ${ICON.pencil}
           <span>Booked by you${others.length ? ` with ${esc(others.join(', '))}` : ''}</span>
         </div>`
       : `
-        <div class="cb-hold${warn ? ' cb-hold--warn' : ''}">
+        <div class="cb-hold${holdWarn ? ' cb-hold--warn' : ''}">
           ${ICON.clock}
-          <span>Slot held for you</span>
+          <span class="cb-hold-text">${holdWarn ? 'Hold expiring' : 'Slot held for you'}</span>
           <span class="cb-hold-count" id="cbTimerDisplay">${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}</span>
         </div>`}
+    </div>
 
+    <div class="cb-panel-scroll">
       <div class="cb-section">
-        <div class="cb-label">Duration</div>
+        <div class="cb-section-head">
+          <span class="cb-label">Duration</span>
+          <span class="cb-range">${fmtRange(startMin, cb.panelDuration)}</span>
+        </div>
         <div class="cb-stepper">
           <button class="cb-step" id="cbDurMinus"${canShrink ? '' : ' disabled'} aria-label="Shorter">−</button>
           <span class="cb-step-val" id="cbDurValue">${durLabel(cb.panelDuration)}</span>
           <button class="cb-step" id="cbDurPlus"${canGrow ? '' : ' disabled'} aria-label="Longer">+</button>
         </div>
-        ${nextStart ? `<div class="cb-note-line">The next booking starts at ${fmtTime(nextStart)}.</div>` : ''}
+        ${canGrow ? '' : `<span class="cb-hint">${nextStart ? `The next booking starts at ${fmtTime(nextStart)}.` : 'That is the end of the day.'}</span>`}
       </div>
 
       <div class="cb-section">
-        <div class="cb-label">Playing with <span class="cb-label-opt">(Optional)</span></div>
+        <div class="cb-section-head">
+          <span class="cb-label">Playing with</span>
+          <span class="cb-optional">Optional</span>
+          <span class="cb-room">${room} more</span>
+        </div>
         <div class="cb-chips">
-          <span class="cb-chip cb-chip--me">${esc(myName())}<span class="cb-chip-you">you</span></span>
+          <span class="cb-chip cb-chip--me"><span class="cb-chip-dot"></span>${esc(myName())}<span class="cb-chip-you">you</span></span>
           ${playerChips}
         </div>
         ${cb.panelPlayers.length < 3 ? `
           <div class="cb-search-wrap">
-            <span class="cb-search-icon">${ICON.search}</span>
             <input class="cb-search-input" id="cbPlayerSearch" type="text" placeholder="Search club players…" value="${esc(cb.panelSearch)}" autocomplete="off">
-          </div>
-          ${searchDropdown}` : ''}
+            ${searchDropdown}
+          </div>` : ''}
       </div>
+    </div>
 
-      <div class="cb-summary">${esc(courtName)} · ${esc(fmtShortDate(date))} · ${fmtRangeCompact(startMin, cb.panelDuration)} · ${playerCount} player${playerCount === 1 ? '' : 's'}</div>
-
+    <div class="cb-panel-footer">
+      <div class="cb-summary">
+        ${ICON.check}
+        <span>${esc(courtName)} · ${esc(fmtShortDate(date))} · ${fmtRange(startMin, cb.panelDuration)} · ${playerCount} player${playerCount === 1 ? '' : 's'}</span>
+      </div>
       ${cb.panelAskCancel ? `
-      <div class="cb-inline-confirm cb-inline-confirm--panel">
-        <span class="cb-inline-confirm-text">Cancel this booking and release the court? This cannot be undone.</span>
-        <div class="cb-inline-confirm-btns">
+      <div class="cb-confirm-row">
+        <span class="cb-confirm-text">Cancel this booking and release the court? This cannot be undone.</span>
+        <div class="cb-confirm-btns">
           <button class="cb-btn cb-btn--outline" id="cbKeepBooking">Keep it</button>
           <button class="cb-btn cb-btn--danger" id="cbConfirmCancel">Cancel booking</button>
         </div>
       </div>` : ''}
-    </div>
-
-    <div class="cb-panel-footer">
-      <button class="cb-btn cb-btn--primary" id="cbPanelConfirm"${cb.panelBusy ? ' disabled' : ''}>
-        ${cb.panelBusy ? (isEdit ? 'Saving…' : 'Booking…') : (isEdit ? 'Save changes' : 'Confirm booking')}
-      </button>
-      <button class="cb-btn cb-btn--ghost" id="cbPanelCancel">${isEdit ? 'Close' : 'Cancel'}</button>
+      <div class="cb-actions">
+        <button class="cb-btn cb-btn--ghost" id="cbPanelCancel">${isEdit ? 'Close' : 'Cancel'}</button>
+        <button class="cb-btn cb-btn--primary" id="cbPanelConfirm"${cb.panelBusy ? ' disabled' : ''}>
+          ${cb.panelBusy ? (isEdit ? 'Saving…' : 'Booking…') : (isEdit ? 'Save changes' : 'Confirm booking')}
+        </button>
+      </div>
       ${isEdit && !cb.panelAskCancel ? `<button class="cb-cancel-booking" id="cbCancelBooking">Cancel booking</button>` : ''}
     </div>`;
 }
@@ -1015,10 +1045,10 @@ function _updateSearchDropdown() {
   div.className = 'cb-search-results';
   div.id = 'cbSearchDropdown';
   div.innerHTML = results.length
-    ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}">${esc(p.name)}</div>`).join('')
+    ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${esc(_initials(p.name))}</span><span>${esc(p.name)}</span></div>`).join('')
     : '<div class="cb-search-empty">No players found</div>';
 
-  wrap.insertAdjacentElement('afterend', div);
+  wrap.appendChild(div);
   div.querySelectorAll('.cb-search-result').forEach(result => {
     result.addEventListener('click', () => _addPlayer(Number(result.dataset.pid)));
   });
