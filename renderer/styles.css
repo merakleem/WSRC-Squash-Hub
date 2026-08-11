@@ -4315,7 +4315,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   overflow: hidden;
 }
 .cb-page { flex: 1; display: flex; flex-direction: column; min-height: 0; background: #fff; }
-.cb-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.cb-body { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
 
 /* --- Tabs, hosted in the app's own top bar ---
    The bar stretches so a tab's 2px underline can sit on the bar's own bottom
@@ -4735,6 +4735,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Keep the browser's own pull-to-refresh out of it: a native pull here
+     reloads the whole app instead of refreshing the list. */
+  overscroll-behavior-y: contain;
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -4742,6 +4745,38 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   background: #f6f8fb;
 }
 .cb-mhead { font-size: 12.5px; color: #6b7e93; }
+
+/* --- Pull to refresh --- */
+.cb-ptr {
+  position: absolute;
+  left: 50%;
+  margin-left: -18px;
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e7ebf2;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(28, 43, 58, .14);
+  color: #93a2b5;
+  pointer-events: none;
+}
+.cb-ptr-arrow { width: 17px; height: 17px; transition: transform .15s ease; }
+.cb-ptr--ready { color: #3550c8; }
+.cb-ptr--ready .cb-ptr-arrow { transform: rotate(180deg); }
+.cb-ptr--busy .cb-ptr-arrow { display: none; }
+.cb-ptr--busy::after {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e7ebf2;
+  border-top-color: #5b7cf9;
+  border-radius: 50%;
+  animation: cb-spin .8s linear infinite;
+}
 .cb-mrow {
   flex-shrink: 0;
   display: flex;
