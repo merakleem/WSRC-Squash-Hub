@@ -361,7 +361,7 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
   const nowMinutes = (nowH || 0) * 60 + (nowM || 0);
 
   const rows = db.prepare(`
-    SELECT b.id, b.court_id, b.date, b.start_time, b.duration_minutes, b.name, b.info,
+    SELECT b.id, b.court_id, b.group_id, b.date, b.start_time, b.duration_minutes, b.name, b.info,
            c.name AS court_name, c.sort_order
     FROM bookings b
     JOIN booking_players bp ON bp.booking_id = b.id
@@ -394,13 +394,31 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
     playersByBookingId.get(row.booking_id).push({ id: row.player_id, name: row.player_name });
   }
 
+  // A booking spanning several courts is one row here, but it should read as
+  // all of them: "Court 1 + Court 2", not just the one its anchor sits on.
+  const groupIds = [...new Set(rows.map((r) => r.group_id).filter(Boolean))];
+  const courtsByGroup = new Map();
+  if (groupIds.length) {
+    const spans = db.prepare(
+      `SELECT b.group_id, c.name AS court_name
+       FROM bookings b LEFT JOIN courts c ON c.id = b.court_id
+       WHERE b.group_id IN (${groupIds.map(() => '?').join(',')})
+       ORDER BY c.sort_order ASC, b.court_id ASC`
+    ).all(...groupIds);
+    for (const row of spans) {
+      if (!courtsByGroup.has(row.group_id)) courtsByGroup.set(row.group_id, []);
+      courtsByGroup.get(row.group_id).push(row.court_name || 'Court');
+    }
+  }
+
   // Same field names the schedule returns, so the page can hand a row from
   // either source to the same panel code.
   return rows.map((b) => ({
     id: b.id,
     source: 'custom',
     courtId: b.court_id,
-    courtName: b.court_name || 'Court',
+    courtName: (courtsByGroup.get(b.group_id) || [b.court_name || 'Court']).join(' + '),
+    courtCount: (courtsByGroup.get(b.group_id) || [1]).length,
     date: b.date,
     startTime: b.start_time,
     durationMinutes: b.duration_minutes,
