@@ -91,6 +91,7 @@ if (typeof window !== 'undefined' && !window.api) {
     bulkInviteLeague:     (id)    => _apiFetch('POST',   `/api/leagues/${id}/bulk-invite`),
     createReservation:  (d)       => _apiFetch('POST',   '/api/reservations', d),
     releaseReservation: (id)      => _apiFetch('DELETE', `/api/reservations/${id}`),
+    getMyBookings:      ()        => _apiFetch('GET',    '/api/my-bookings'),
     confirmBooking:     (d)       => _apiFetch('POST',   '/api/player-bookings', d),
     updateMyBooking:    (id, d)   => _apiFetch('PUT',    `/api/player-bookings/${id}`, d),
     cancelMyBooking:    (id)      => _apiFetch('DELETE', `/api/player-bookings/${id}`),
