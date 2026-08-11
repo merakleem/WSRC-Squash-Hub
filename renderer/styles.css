@@ -4655,10 +4655,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-date-card .cb-today-pill { font-size: 9.5px; }
 .cb-date-card .cb-icon-btn { width: 36px; height: 36px; border-radius: 9px; }
 .cb-date-card .cb-icon-btn svg { width: 16px; height: 16px; }
-.cb-date-card .cb-week { margin-left: 0; gap: 5px; }
-.cb-date-card .cb-day { flex: 1; width: auto; min-width: 0; padding: 8px 0 7px; }
-.cb-date-card .cb-day-n { font-size: 16px; }
-.cb-date-card .cb-day-dot { display: none; }
 /* Full width of the card rather than anchored to the icon, which would push it
    off a 390px screen. */
 .cb-date-card .cb-cal { left: 0; right: 0; border-radius: 12px; padding: 13px; box-shadow: 0 16px 34px rgba(28, 43, 58, .16); }
