@@ -6,7 +6,7 @@ const seasonModel = require('./seasonModel');
 // ===== SHARED QUERIES =====
 
 const PLAYER_SELECT = `
-  SELECT id, name, email, phone, exclude_from_ladder, club_locker_rating, photo_path
+  SELECT id, name, email, phone, exclude_from_ladder, club_locker_rating, photo_path, created_at
   FROM players
   WHERE exclude_from_ladder = 0 OR exclude_from_ladder IS NULL
   ORDER BY
@@ -105,22 +105,135 @@ function getLastMatchDates() {
 }
 
 /**
+ * Each player's first recorded match day.
+ *
+ * Used to keep a join date honest: a player row created after a result was
+ * entered for them would otherwise look like they joined too late to have
+ * played it, and the match would be dropped from the replay.
+ */
+function getFirstMatchDates() {
+  const db = getDB();
+  const rows = db.prepare(`
+    SELECT player_id, MIN(d) AS first_date FROM (
+      SELECT m.player1_id AS player_id, COALESCE(m.confirmed_at, w.date) AS d
+        FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
+        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+      UNION ALL
+      SELECT m.player2_id, COALESCE(m.confirmed_at, w.date)
+        FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
+        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+      UNION ALL
+      SELECT s.sub_player_id, COALESCE(m.confirmed_at, w.date)
+        FROM match_subs s JOIN matches m ON m.id = s.match_id
+        JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
+        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+      UNION ALL
+      SELECT tm.player1_id, COALESCE(tm.confirmed_at, tm.match_date) FROM tournament_matches tm WHERE tm.winner_id IS NOT NULL
+      UNION ALL
+      SELECT tm.player2_id, COALESCE(tm.confirmed_at, tm.match_date) FROM tournament_matches tm WHERE tm.winner_id IS NOT NULL
+      UNION ALL
+      SELECT pm.player1_id, pm.played_at FROM pickup_matches pm
+      UNION ALL
+      SELECT pm.player2_id, pm.played_at FROM pickup_matches pm
+    ) WHERE player_id IS NOT NULL AND d IS NOT NULL
+    GROUP BY player_id
+  `).all();
+  return Object.fromEntries(rows.map((r) => [r.player_id, String(r.first_date).slice(0, 10)]));
+}
+
+/**
+ * The day a player joined the ladder: their row's creation date, except that a
+ * match always counts. A player row created after a result was entered for them
+ * would otherwise look like they joined too late to have played it.
+ */
+function _joinDay(player, firstMatchDates) {
+  const created = String(player.created_at || '').slice(0, 10);
+  const first = firstMatchDates?.[player.id];
+  if (first && (!created || first < created)) return first;
+  return created;
+}
+
+/**
+ * Where a player slots into a ranking on the day they join: immediately above
+ * the highest-placed member rated below them, which is the same club_locker_rating
+ * comparison that seeded the ladder originally.
+ *
+ * Unrated members are skipped rather than treated as the lowest rating. The
+ * original seed could put them all at the bottom because nothing had been
+ * played yet, but they climb like anyone else, and by now one of them sits at
+ * #2. Counting that as "rated below" would drop every rated arrival straight
+ * in beneath them, near the top of the ladder.
+ *
+ * An arriving player with no rating has nothing to compare on, so they start at
+ * the bottom and climb.
+ */
+function _joinIndex(ranking, player, playerMap) {
+  const rating = player.club_locker_rating;
+  if (rating == null) return ranking.length;
+  for (let i = 0; i < ranking.length; i++) {
+    const otherRating = playerMap[ranking[i]]?.club_locker_rating;
+    if (otherRating == null) continue;
+    if (Number(otherRating) < Number(rating)) return i;
+  }
+  return ranking.length;
+}
+
+/**
+ * The ladder timeline: every join and every match, in the order they happened.
+ *
+ * Joins carry `created_at`, but a match is allowed to pull a join earlier. A
+ * player's row can be created after a result is entered for them - importing a
+ * season's results before its roster would do it - and dropping those matches
+ * would lose real history, so the join is treated as no later than the first
+ * match the player appears in.
+ */
+function _ladderTimeline(players, matches) {
+  const firstMatchDay = {};
+  for (const m of matches) {
+    const day = String(m.sort_key || '').slice(0, 10);
+    if (!day) continue;
+    for (const id of [m.eff_p1_id, m.eff_p2_id]) {
+      if (id != null && (!firstMatchDay[id] || day < firstMatchDay[id])) firstMatchDay[id] = day;
+    }
+  }
+
+  const joins = players.map((p) => ({ kind: 'join', day: _joinDay(p, firstMatchDay), player: p }));
+
+  // Joins before matches on the same day, so a player who joins and plays that
+  // day is on the ladder before their result is applied. Otherwise stable, so
+  // same-day joins keep the club_locker_rating order they were listed in.
+  return [
+    ...joins,
+    ...matches.map((m) => ({ kind: 'match', day: String(m.sort_key || '').slice(0, 10), match: m })),
+  ].sort((a, b) => (a.day || '').localeCompare(b.day || '') || (a.kind === b.kind ? 0 : a.kind === 'join' ? -1 : 1));
+}
+
+/**
  * Compute the current ladder ranking.
  *
- * Initial order: club_locker_rating DESC (NULLs last, then alphabetical).
- * Then each confirmed match is replayed chronologically:
- *   - If the lower-ranked player wins, they jump up to the loser's position
- *     and everyone between shifts down one.
+ * Initial order: club_locker_rating DESC (NULLs last, then alphabetical),
+ * over the players who had joined when the ladder began. Then the timeline is
+ * replayed chronologically:
+ *   - A player joining slots in by club_locker_rating among whoever is on the
+ *     ladder that day, and everyone below them shifts down one.
+ *   - If the lower-ranked player wins a match, they jump up to the loser's
+ *     position and everyone between shifts down one.
  *   - If the higher-ranked player wins, no change.
  *
+ * Joins are part of the replay rather than a fixed starting roster because the
+ * ladder is derived, never stored: seeding it from today's roster would place
+ * every current member at the beginning of time, so adding one player rewrote
+ * the standings of every season that had already finished.
+ *
  * `asOfDate` (YYYY-MM-DD) reconstructs the ladder as it stood on that date by
- * ignoring later matches. Omit it for the live ladder.
+ * ignoring later matches and anyone who had not joined yet. Omit it for the
+ * live ladder.
  */
 function getLadder(asOfDate = null) {
   const db = getDB();
 
   const players = db.prepare(`
-    SELECT id, name, email, phone, exclude_from_ladder, club_locker_rating, photo_path
+    SELECT id, name, email, phone, exclude_from_ladder, club_locker_rating, photo_path, created_at
     FROM players
     WHERE exclude_from_ladder = 0 OR exclude_from_ladder IS NULL
     ORDER BY
@@ -179,14 +292,34 @@ function getLadder(asOfDate = null) {
     .sort((a, b) => (a.sort_key || '').localeCompare(b.sort_key || '') || 0);
 
   const playerIds = new Set(players.map((p) => p.id));
-  let ranking = players.map((p) => p.id);
+  const playerMap = Object.fromEntries(players.map((p) => [p.id, p]));
+  const timeline = _ladderTimeline(players, matches);
+
+  // The ladder is empty until people join it; nobody is present before their
+  // own arrival, which is what keeps a new member out of finished seasons.
+  let ranking = [];
 
   // Best position ever held. Nothing persists historical standings, so it is
   // derived from the same replay that produces the current ranking.
   const bestPosition = {};
-  ranking.forEach((id, i) => { bestPosition[id] = i + 1; });
 
-  for (const match of matches) {
+  for (const event of timeline) {
+    // A join dated after the cutoff has not happened yet from the requested
+    // date's point of view, so that player is simply not on this ladder.
+    if (asOfDate && event.day && event.day > asOfDate) continue;
+
+    if (event.kind === 'join') {
+      const id = event.player.id;
+      if (ranking.includes(id)) continue;
+      const at = _joinIndex(ranking, event.player, playerMap);
+      ranking.splice(at, 0, id);
+      bestPosition[id] = at + 1;
+      // Everyone the arrival pushed down may now be at a worse position, but
+      // never a better one, so only the arrival itself needs recording.
+      continue;
+    }
+
+    const match = event.match;
     const effWinnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
     const effLoserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
 
@@ -213,11 +346,18 @@ function getLadder(asOfDate = null) {
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   let rankingSevenDaysAgo = null;
 
-  let replayRanking = players.map((p) => p.id);
-  for (const match of matches) {
-    if (rankingSevenDaysAgo === null && (match.sort_key || '') >= cutoff) {
+  let replayRanking = [];
+  for (const event of timeline) {
+    if (asOfDate && event.day && event.day > asOfDate) continue;
+    if (rankingSevenDaysAgo === null && (event.day || '') >= cutoff) {
       rankingSevenDaysAgo = [...replayRanking];
     }
+    if (event.kind === 'join') {
+      if (replayRanking.includes(event.player.id)) continue;
+      replayRanking.splice(_joinIndex(replayRanking, event.player, playerMap), 0, event.player.id);
+      continue;
+    }
+    const match = event.match;
     const effWinnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
     const effLoserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
     if (!playerIds.has(effWinnerId) || !playerIds.has(effLoserId)) continue;
@@ -229,7 +369,6 @@ function getLadder(asOfDate = null) {
   }
   if (rankingSevenDaysAgo === null) rankingSevenDaysAgo = [...ranking];
 
-  const playerMap = Object.fromEntries(players.map((p) => [p.id, p]));
   return ranking.map((id, i) => {
     const oldIdx = rankingSevenDaysAgo.indexOf(id);
     const rankChange = oldIdx !== -1 ? (oldIdx + 1) - (i + 1) : 0;
@@ -258,7 +397,18 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   const db = getDB();
   const cfg = elo.config(settings);
   const monthDay = seasonsLib.startMonthDay(settings);
-  const players = db.prepare(PLAYER_SELECT).all();
+  const allPlayers = db.prepare(PLAYER_SELECT).all();
+
+  // A season cannot contain someone who had not joined by the time it ended.
+  // Without this, adding a member today put them into every finished season's
+  // ladder and shifted the rating of everyone already in it.
+  const targetEnd = seasonsLib.seasonRange(seasonKey, monthDay).end;
+  const horizon = asOfDate && asOfDate < targetEnd ? asOfDate : targetEnd;
+  const firstMatch = getFirstMatchDates();
+  const players = allPlayers.filter((p) => {
+    const day = _joinDay(p, firstMatch);
+    return !day || day <= horizon;
+  });
   const playerIds = new Set(players.map((p) => p.id));
 
   const targetYear = seasonsLib.seasonStartYear(seasonKey);
@@ -489,16 +639,40 @@ function getPlayerLadderHistory(playerId) {
   const playerIds = new Set(players.map((p) => p.id));
   if (!playerIds.has(id)) return [];
 
-  const ranking = players.map((p) => p.id);
   const matches = getCompletedMatches();
-  const size = ranking.length;
+  const playerMap = Object.fromEntries(players.map((p) => [p.id, p]));
+  const timeline = _ladderTimeline(players, matches);
 
+  // Same replay as the live ladder, including arrivals: the line has to start
+  // where the player joined, and the ladder it is measured against grows as
+  // other members arrive.
+  const ranking = [];
   const series = [];
-  let position = ranking.indexOf(id) + 1;
-  const firstDate = matches.length ? String(matches[0].sort_key || '').slice(0, 10) : null;
-  if (firstDate) series.push({ date: firstDate, position, ladder_size: size });
+  let position = null;
+  // How big the ladder was at the end of each day. A point is only recorded
+  // when the player moves, so the size captured at that instant is stale by the
+  // end of a day that added more members - the bulk import put 68 on the ladder
+  // in one go, which would otherwise chart as "23rd of 23".
+  const sizeByDay = {};
+  const record = (date) => {
+    const next = ranking.indexOf(id) + 1;
+    if (next === 0 || next === position) return;
+    position = next;
+    series.push({ date, position, ladder_size: ranking.length });
+  };
 
-  for (const match of matches) {
+  for (const event of timeline) {
+    if (event.kind === 'join') {
+      if (ranking.includes(event.player.id)) continue;
+      ranking.splice(_joinIndex(ranking, event.player, playerMap), 0, event.player.id);
+      // Another arrival can push this player down a place, which is a real
+      // move on their chart, so every join is a candidate point.
+      record(event.day);
+      sizeByDay[event.day] = ranking.length;
+      continue;
+    }
+
+    const match = event.match;
     const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
     const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
     if (!playerIds.has(winnerId) || !playerIds.has(loserId)) continue;
@@ -513,11 +687,11 @@ function getPlayerLadderHistory(playerId) {
     // Record only when this player actually moved. A full indexOf per match is
     // a few thousand operations over the club's whole history; not worth
     // optimising into range arithmetic that would be easy to get subtly wrong.
-    const next = ranking.indexOf(id) + 1;
-    if (next === position) continue;
-    position = next;
-    series.push({ date: String(match.sort_key || '').slice(0, 10), position, ladder_size: size });
+    const day = String(match.sort_key || '').slice(0, 10);
+    record(day);
+    sizeByDay[day] = ranking.length;
   }
+  const size = ranking.length;
 
   // One point per day: several matches can land on the same date, and plotting
   // each of them stacks dots vertically on the same x. Matches are replayed in
@@ -525,7 +699,10 @@ function getPlayerLadderHistory(playerId) {
   // which is the only one worth charting.
   const byDay = new Map();
   for (const point of series) byDay.set(point.date, point);
-  const daily = [...byDay.values()];
+  const daily = [...byDay.values()].map((point) => ({
+    ...point,
+    ladder_size: sizeByDay[point.date] ?? point.ladder_size,
+  }));
 
   // Always end at today's standing so the line reaches the right edge.
   const today = new Date().toISOString().slice(0, 10);
