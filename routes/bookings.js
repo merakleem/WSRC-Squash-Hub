@@ -1,5 +1,6 @@
 const express = require('express');
 const { getDB } = require('../database/db');
+const { clubNow } = require('../lib/clock');
 const bookingModel = require('../models/bookingModel');
 const { reservations, RESERVATION_TTL_MS, hasBookingConflict, hasReservationConflict, nextReservationId } = require('../lib/reservations');
 const { wrap, requireAdmin, requireAuth } = require('../middleware');
@@ -77,11 +78,10 @@ router.post('/player-bookings', requireAuth, wrap(async (req, res) => {
 }));
 
 router.get('/my-bookings', requireAuth, wrap(async (req, res) => {
-  // Server clock, not the client's: the page uses this list to decide what is
-  // still upcoming, and a device with a wrong date should not change that.
-  const now = new Date();
-  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  // Club time, not the container's and not the client's. The container runs UTC,
+  // which is already tomorrow by early evening here; the client's clock is not
+  // something a booking list should depend on.
+  const { date, time } = clubNow();
   res.json(bookingModel.getUpcomingBookingsForPlayer(req.session.playerId, date, time));
 }));
 
