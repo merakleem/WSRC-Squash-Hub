@@ -4567,6 +4567,23 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-slot--sel .cb-slot-time { color: #3550c8; }
 .cb-slot--sel .cb-slot-plus { opacity: 1; }
 
+/* A slot that has passed looks exactly like one that has not, so the grid does
+   not empty out as the day goes on. The difference shows only when you reach
+   for it: no highlight, a blocked cursor, and the reason in place of the time. */
+.cb-slot--past { cursor: not-allowed; }
+.cb-slot-na {
+  display: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #93a2b5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cb-slot--past:hover { background: #f4f6f9; border-color: #e7ebf2; }
+.cb-slot--past:hover .cb-slot-time { display: none; }
+.cb-slot--past:hover .cb-slot-na { display: block; }
+
 .cb-block {
   position: absolute;
   left: 6px;
@@ -4607,36 +4624,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-block--editing .cb-block-edit { opacity: 1; }
 
 /* One veil over the whole past region rather than a label on every cell. */
-/* Spans the courts but not the hour gutter, so the times stay legible. Offset
-   by the grid's own 28px padding plus the 64px gutter. */
-.cb-past {
-  position: absolute;
-  top: 0;
-  left: 92px;
-  right: 28px;
-  z-index: 3;
-  background: rgba(233, 238, 244, .82);
-  pointer-events: none;
-}
-.cb-past-label {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 12px;
-  margin: 0 auto;
-  width: max-content;
-  max-width: 90%;
-  padding: 6px 15px;
-  border-radius: 20px;
-  background: #fff;
-  border: 1px solid #dce3ed;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: .01em;
-  color: #93a2b5;
-  white-space: nowrap;
-}
-/* Above the veil, so the boundary it marks stays crisp. */
 .cb-now { position: absolute; left: -1px; right: -1px; height: 2px; background: #c0392b; z-index: 4; }
 
 .cb-past-banner {
