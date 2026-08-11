@@ -50,6 +50,12 @@ router.post('/player-bookings', requireAuth, wrap(async (req, res) => {
     return res.status(410).json({ error: 'Reservation has expired.' });
   }
   const finalDuration = Number(durationMinutes) || rsv.durationMinutes;
+  // Players book on a 30-minute grid. Enforced here as well as in the UI, so a
+  // stale page or a hand-made request cannot leave an odd-length booking that
+  // the grid has no way to draw or offer.
+  if (!Number.isInteger(finalDuration) || finalDuration < 30 || finalDuration % 30 !== 0) {
+    return res.status(400).json({ error: 'Bookings must be in 30-minute increments.' });
+  }
   const db = getDB();
   if (hasBookingConflict(rsv.courtId, rsv.date, rsv.startTime, finalDuration)) {
     reservations.delete(String(reservationId));
@@ -103,8 +109,12 @@ router.put('/player-bookings/:id', requireAuth, wrap(async (req, res) => {
   }
   const { durationMinutes, playerIds } = req.body;
   if (durationMinutes) {
+    const minutes = Number(durationMinutes);
+    if (!Number.isInteger(minutes) || minutes < 30 || minutes % 30 !== 0) {
+      return res.status(400).json({ error: 'Bookings must be in 30-minute increments.' });
+    }
     db.prepare('UPDATE bookings SET duration_minutes = ? WHERE id = ?')
-      .run(Number(durationMinutes), Number(req.params.id));
+      .run(minutes, Number(req.params.id));
   }
   if (Array.isArray(playerIds)) {
     const allIds = [...new Set([req.session.playerId, ...playerIds.map(Number)])].slice(0, 4);

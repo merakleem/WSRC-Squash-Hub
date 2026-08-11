@@ -146,6 +146,13 @@ function myName() {
   return me?.name || 'You';
 }
 
+// Players book in 30-minute increments only, so any duration is rounded down to
+// a whole number of them and never falls below one.
+function _fitDuration(available, preferred = 60) {
+  const whole = Math.floor(available / SLOT_MIN) * SLOT_MIN;
+  return Math.max(SLOT_MIN, Math.min(preferred, whole));
+}
+
 function _panelStartMin() {
   const isEdit = cb.panel === 'edit';
   return isEdit
@@ -791,7 +798,9 @@ function _openPanel(mode, opts = {}) {
   cb.panel = mode;
   cb.panelStartMin  = opts.startMin ?? null;
   cb.panelBooking   = opts.booking  ?? null;
-  cb.panelDuration  = mode === 'edit' ? (opts.booking?.durationMinutes || 30) : 30;
+  cb.panelDuration  = mode === 'edit'
+    ? _fitDuration(opts.booking?.durationMinutes || SLOT_MIN, opts.booking?.durationMinutes || SLOT_MIN)
+    : SLOT_MIN;
   cb.panelPlayers   = mode === 'edit'
     ? (opts.booking?.players || []).filter(p => p.id !== state.currentUser?.playerId).map(p => p.id)
     : [];
@@ -1100,11 +1109,13 @@ async function _startReservation(startMin) {
       document.querySelector('.cb-hold')?.classList.toggle('cb-hold--warn', s < 60);
     }, 1000);
 
-    // Default to an hour, or less when the next booking is sooner.
+    // Default to an hour, or the largest whole 30-minute block that fits when
+    // the next booking is sooner. Taking the raw gap produced odd lengths: a
+    // booking at 8:45 left 45 minutes, which is not something a player may book.
     const slots = getCourtSlots(cb.date, cb.courtId);
     const maxEnd = getMaxEnd(slots, startMin);
     _openPanel('book', { startMin });
-    cb.panelDuration = Math.min(60, Math.max(SLOT_MIN, maxEnd - startMin));
+    cb.panelDuration = _fitDuration(maxEnd - startMin);
     _renderPanel();
   } catch (e) {
     toast(e.message || 'This slot is not available.', 'error');
