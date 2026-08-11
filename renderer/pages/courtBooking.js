@@ -770,7 +770,76 @@ function _attachBodyListeners() {
   _attachMineListeners();
 }
 
+// Pull down from the top of the list to refresh, as native apps do. Custom
+// rather than the browser's own pull-to-refresh, which would reload the whole
+// SPA; this one re-fetches the schedule and bookings in place.
+function _attachPullToRefresh() {
+  if (!isMobile()) return;
+  const list = document.querySelector('.cb-mlist');
+  const body = document.getElementById('cbBody');
+  if (!list || !body || list._ptrWired) return;
+  list._ptrWired = true;
+
+  const THRESHOLD = 64;
+  let startY = null, dist = 0, active = false;
+
+  const chip = document.createElement('div');
+  chip.className = 'cb-ptr';
+  chip.innerHTML = '<svg class="cb-ptr-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
+
+  const listTop = typeof list.offsetTop === 'number' && !Number.isNaN(list.offsetTop) ? list.offsetTop : 0;
+
+  list.addEventListener('touchstart', (e) => {
+    // Only from the very top, and never while the sheet is open or loading.
+    if ((list.scrollTop || 0) > 0 || cb.panel || cb.status !== 'ok') return;
+    startY = e.touches?.[0]?.clientY ?? null;
+    dist = 0;
+    active = false;
+  }, { passive: true });
+
+  list.addEventListener('touchmove', (e) => {
+    if (startY == null) return;
+    const y = e.touches?.[0]?.clientY;
+    if (y == null) return;
+    const dy = y - startY;
+    if (dy <= 0 && !active) { startY = null; return; }
+    active = true;
+    dist = Math.min(90, dy / 2.2);   // resistance, so the pull feels weighted
+    if (!chip.parentNode) {
+      chip.style.top = `${listTop}px`;
+      body.appendChild(chip);
+    }
+    chip.style.transform = `translateY(${dist - 44}px)`;
+    chip.style.opacity = String(Math.min(1, dist / 50));
+    chip.classList.toggle('cb-ptr--ready', dist >= THRESHOLD);
+    list.style.transform = `translateY(${dist}px)`;
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  const end = async () => {
+    if (startY == null) return;
+    startY = null;
+    if (!active) return;
+    if (dist >= THRESHOLD) {
+      chip.classList.add('cb-ptr--busy');
+      // Fetch into the cache directly, so the current content stays on screen
+      // under the spinner instead of flashing a loading state.
+      const data = await window.api.getSchedule(cb.date).catch(() => null);
+      if (data) cb.scheduleCache[cb.date] = data;
+      await _loadMyBookings();
+      _renderBody();   // rebuilds the list; the chip and transform go with it
+    } else {
+      list.style.transition = 'transform .18s ease';
+      list.style.transform = '';
+      setTimeout(() => { list.style.transition = ''; chip.remove(); }, 200);
+    }
+  };
+  list.addEventListener('touchend', end);
+  list.addEventListener('touchcancel', end);
+}
+
 function _attachMobileListeners() {
+  _attachPullToRefresh();
   document.querySelectorAll('.cb-mchip').forEach(chip => {
     chip.addEventListener('click', () => {
       // Re-selecting a time clears any court selection - and an open booking
