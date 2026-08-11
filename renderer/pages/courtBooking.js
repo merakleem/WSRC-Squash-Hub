@@ -435,21 +435,25 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
       </div>`;
   }).join('');
 
+  // Time that has gone keeps its slot and its label, so the grid reads the same
+  // shape all day. It simply cannot be picked: no hover highlight, no plus, and
+  // it says why when you point at it.
   let openSlots = '';
-  if (!isPast) {
-    for (let m = DAY_START; m < DAY_END; m += SLOT_MIN) {
-      const covered = slots.some(s => m < s.startMin + s.durationMinutes && (m + SLOT_MIN) > s.startMin);
-      if (covered) continue;
-      // A slot that has been and gone is simply not drawn. The whole morning is
-      // veiled instead, rather than repeating "no longer available" down the
-      // column.
-      if (isToday && m < nm) continue;
-      const selected = cb.panel === 'book' && cb.courtId === courtId && cb.panelStartMin === m;
-      openSlots += `<div class="cb-slot cb-slot--open${selected ? ' cb-slot--sel' : ''}" data-start="${m}" data-court="${courtId}"
-        style="top:${topFor(m) + 1}px">
-        <span class="cb-slot-time">${fmtShort(m)}</span><span class="cb-slot-plus">+</span>
+  for (let m = DAY_START; m < DAY_END; m += SLOT_MIN) {
+    const covered = slots.some(s => m < s.startMin + s.durationMinutes && (m + SLOT_MIN) > s.startMin);
+    if (covered) continue;
+    const gone = isPast || (isToday && m < nm);
+    if (gone) {
+      openSlots += `<div class="cb-slot cb-slot--past" style="top:${topFor(m) + 1}px">
+        <span class="cb-slot-time">${fmtShort(m)}</span><span class="cb-slot-na">No longer available</span>
       </div>`;
+      continue;
     }
+    const selected = cb.panel === 'book' && cb.courtId === courtId && cb.panelStartMin === m;
+    openSlots += `<div class="cb-slot cb-slot--open${selected ? ' cb-slot--sel' : ''}" data-start="${m}" data-court="${courtId}"
+      style="top:${topFor(m) + 1}px">
+      <span class="cb-slot-time">${fmtShort(m)}</span><span class="cb-slot-plus">+</span>
+    </div>`;
   }
 
   const nowLine = isToday ? `<div class="cb-now" style="top:${topFor(nm)}px"></div>` : '';
@@ -472,18 +476,6 @@ function _buildGrid() {
   }
   const nowChip = isToday ? `<span class="cb-now-chip" style="top:${topFor(nm) + 1}px">Now</span>` : '';
 
-  // Time that has gone is greyed as one surface across the courts, labelled
-  // once. Left as bare white it read as a grid that had failed to load rather
-  // than a day that had mostly happened - by late evening that is seventeen
-  // empty hours.
-  const veilH = isPast ? GRID_H : (isToday ? topFor(Math.min(nm, DAY_END)) : 0);
-  // The label is anchored to the foot of the veil, right above the now line,
-  // which is both the boundary it describes and where the page opens scrolled.
-  const past = veilH > 0
-    ? `<div class="cb-past" style="height:${veilH}px">
-         ${veilH > 90 ? '<span class="cb-past-label">No longer available</span>' : ''}
-       </div>`
-    : '';
 
   return `
     ${isPast ? '<div class="cb-past-banner">Past date · view only</div>' : ''}
@@ -492,7 +484,6 @@ function _buildGrid() {
       ${cb.courts.map(c => `<div class="cb-court-header-cell">${esc(c.name)}</div>`).join('')}
     </div>
     <div class="cb-grid" style="height:${GRID_H}px">
-      ${past}
       <div class="cb-gutter">${hours.join('')}${nowChip}</div>
       ${cb.courts.map(c => `<div class="cb-col">${_buildCourtColumn(c.id, isToday, isPast, nm)}</div>`).join('')}
     </div>`;
