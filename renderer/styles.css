@@ -5988,6 +5988,8 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
     transform: translateY(100%);
   }
   .cb-panel--mobile.cb-panel--visible { transform: none; }
+  /* The same tabs as desktop, trimmed to sit beside the hamburger. */
+  .cb-tab { font-size: 15px; margin-right: 12px; }
   .cb-panel-head { padding: 18px 16px 14px; }
   .cb-panel-scroll { padding: 18px 16px; }
   .cb-panel-footer { padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); }
