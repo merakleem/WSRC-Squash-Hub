@@ -70,6 +70,15 @@ router.post('/player-bookings', requireAuth, wrap(async (req, res) => {
   res.json(booking);
 }));
 
+router.get('/my-bookings', requireAuth, wrap(async (req, res) => {
+  // Server clock, not the client's: the page uses this list to decide what is
+  // still upcoming, and a device with a wrong date should not change that.
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  res.json(bookingModel.getUpcomingBookingsForPlayer(req.session.playerId, date, time));
+}));
+
 router.delete('/player-bookings/:id', requireAuth, wrap(async (req, res) => {
   const db = getDB();
   const isMember = db.prepare('SELECT 1 FROM booking_players WHERE booking_id = ? AND player_id = ?')

@@ -345,6 +345,71 @@ function createRepeatBookings(baseData, repeatOptions) {
 
 // ===== SCHEDULE =====
 
+/**
+ * A player's own bookings that have not finished yet, across all dates.
+ *
+ * The schedule query is per-day, which is all the grid ever needed. The
+ * My Bookings list spans dates, so it gets its own read rather than the page
+ * fetching a day at a time and stitching the results together.
+ *
+ * "Not finished" is computed from the booking's end, not its start, so a court
+ * you are on right now stays in the list until you are actually off it.
+ */
+function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
+  const db = getDB();
+  const [nowH, nowM] = String(nowTime || '00:00').split(':').map(Number);
+  const nowMinutes = (nowH || 0) * 60 + (nowM || 0);
+
+  const rows = db.prepare(`
+    SELECT b.id, b.court_id, b.date, b.start_time, b.duration_minutes, b.name, b.info,
+           c.name AS court_name, c.sort_order
+    FROM bookings b
+    JOIN booking_players bp ON bp.booking_id = b.id
+    LEFT JOIN courts c ON c.id = b.court_id
+    WHERE bp.player_id = ?
+      AND (b.date > ?
+        OR (b.date = ?
+          -- Minute arithmetic rather than time(start, '+N minutes'): that wraps
+          -- at midnight, so a 23:00 booking lasting 90 minutes ended at "00:30"
+          -- and looked finished while it was still being played.
+          AND (CAST(substr(b.start_time, 1, 2) AS INTEGER) * 60
+             + CAST(substr(b.start_time, 4, 2) AS INTEGER)
+             + b.duration_minutes) > ?))
+    ORDER BY b.date ASC, b.start_time ASC, c.sort_order ASC
+  `).all(playerId, nowDate, nowDate, nowMinutes);
+
+  if (!rows.length) return [];
+
+  const ids = rows.map((r) => r.id);
+  const playerRows = db.prepare(
+    `SELECT bp.booking_id, bp.player_id, p.name AS player_name
+     FROM booking_players bp JOIN players p ON p.id = bp.player_id
+     WHERE bp.booking_id IN (${ids.map(() => '?').join(',')})
+     ORDER BY bp.id ASC`
+  ).all(...ids);
+
+  const playersByBookingId = new Map();
+  for (const row of playerRows) {
+    if (!playersByBookingId.has(row.booking_id)) playersByBookingId.set(row.booking_id, []);
+    playersByBookingId.get(row.booking_id).push({ id: row.player_id, name: row.player_name });
+  }
+
+  // Same field names the schedule returns, so the page can hand a row from
+  // either source to the same panel code.
+  return rows.map((b) => ({
+    id: b.id,
+    source: 'custom',
+    courtId: b.court_id,
+    courtName: b.court_name || 'Court',
+    date: b.date,
+    startTime: b.start_time,
+    durationMinutes: b.duration_minutes,
+    title: b.name || 'Court Booking',
+    info: b.info || '',
+    players: playersByBookingId.get(b.id) || [],
+  }));
+}
+
 function getScheduleForDate(date) {
   const db = getDB();
 
@@ -500,4 +565,5 @@ module.exports = {
   getAllBookingTypes, addBookingType, updateBookingType, deleteBookingType,
   addBooking, updateBooking, deleteBooking, deleteRepeatGroup, createRepeatBookings,
   getScheduleForDate,
+  getUpcomingBookingsForPlayer,
 };
