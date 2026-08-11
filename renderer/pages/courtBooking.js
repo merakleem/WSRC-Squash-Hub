@@ -179,6 +179,7 @@ export function renderCourtBooking() {
     tab: 'book',
     courtId: null,
     courts: [],
+    mTime: null,
     scheduleCache: {},
     myBookings: [],
     listConfirm: null,
@@ -490,56 +491,102 @@ function _buildGrid() {
 }
 
 // ── Mobile court cards ────────────────────────────────────────────────────────
-function _buildCourtCards() {
-  const isToday = cb.date === todayStr();
-  const isPast  = cb.date < todayStr();
-  const nm = nowMin();
+// ── Mobile: pick a start time, then a court ───────────────────────────────────
+// The Mobile Booking 2c handoff inverts the old layout: one rail of start
+// times across the top, then a list of courts answering "who is free at that
+// time, and for how long". Own bookings live in the My Bookings card below,
+// not in this list.
 
+// Start times on offer: today from the next 30-minute boundary (nothing
+// already gone is listed), any other date from opening.
+function _mTimes() {
+  const from = cb.date === todayStr() ? Math.ceil(nowMin() / SLOT_MIN) * SLOT_MIN : DAY_START;
+  const out = [];
+  for (let m = Math.max(DAY_START, from); m < DAY_END; m += SLOT_MIN) out.push(m);
+  return out;
+}
+
+// The chosen chip, falling back to the first listed time when none is chosen
+// yet - or when the chosen one has since gone past.
+function _mSelectedTime() {
+  const mins = _mTimes();
+  if (!mins.length) return null;
+  return mins.includes(cb.mTime) ? cb.mTime : mins[0];
+}
+
+function _mBookingAt(courtId, m) {
+  return getCourtSlots(cb.date, courtId)
+    .find(s => m < s.startMin + s.durationMinutes && m + SLOT_MIN > s.startMin) || null;
+}
+
+// Walk forward in 30-minute steps to the first booked one; that step's start
+// is where "free until" ends.
+function _mFreeUntil(courtId, m) {
+  let end = m;
+  while (end < DAY_END && !_mBookingAt(courtId, end)) end += SLOT_MIN;
+  return end;
+}
+
+function _buildMobileBooking() {
   if (cb.status === 'loading') return `<div class="cb-centered"><div class="cb-spinner"></div></div>`;
   if (cb.status === 'error')   return `<div class="cb-centered cb-error">Couldn't load the schedule. Please try again.</div>`;
   if (!cb.courts.length)       return `<div class="cb-centered">No courts available.</div>`;
 
-  // On today the rail starts at the next 30-minute boundary; nothing already
-  // gone is offered.
-  const from = isToday ? Math.ceil(nm / SLOT_MIN) * SLOT_MIN : DAY_START;
-
-  return cb.courts.map(c => {
-    const slots = getCourtSlots(cb.date, c.id);
-    const mine = isPast ? [] : slots.filter(s =>
-      isMine(s) && !_isMultiCourt(s) && s.startMin + s.durationMinutes > (isToday ? nm : 0));
-
-    const open = [];
-    if (!isPast) {
-      for (let m = Math.max(DAY_START, from); m < DAY_END; m += SLOT_MIN) {
-        const covered = slots.some(s => m < s.startMin + s.durationMinutes && (m + SLOT_MIN) > s.startMin);
-        if (!covered) open.push(m);
-      }
-    }
-
-    const minePills = mine.map(s => `
-      <button class="cb-pill-mine" data-bid="${s.id}" data-court="${c.id}">
-        <span class="cb-pill-mine-t">${fmtPill(s.startMin)}</span>
-        <span class="cb-pill-mine-l">Yours</span>
-      </button>`).join('');
-
-    const openPills = open.map(m => {
-      const sel = cb.panel === 'book' && cb.courtId === c.id && cb.panelStartMin === m;
-      return `<button class="cb-pill-open${sel ? ' cb-pill-open--sel' : ''}" data-start="${m}" data-court="${c.id}">${fmtPill(m)}</button>`;
-    }).join('');
-
-    const rail = (minePills || openPills)
-      ? `<div class="cb-rail">${minePills}${openPills}</div>`
-      : `<div class="cb-rail-empty">${isPast ? 'No openings on this date' : 'Fully booked today'}</div>`;
-
+  const time = _mSelectedTime();
+  if (time == null) {
+    // Late enough that no 30-minute start remains today.
     return `
-      <div class="cb-court-card">
-        <div class="cb-court-head">
-          <span class="cb-court-name">${esc(c.name)}</span>
-          <span class="cb-count-pill${open.length ? '' : ' cb-count-pill--none'}">${open.length ? `${open.length} open` : 'Full'}</span>
-        </div>
-        ${rail}
+      <div class="cb-mlist">
+        <span class="cb-mhead">No more start times today.</span>
+        ${_buildMyBookingsMobile()}
       </div>`;
+  }
+
+  const chips = _mTimes().map(m => {
+    const on = m === time;
+    const n = cb.courts.filter(c => !_mBookingAt(c.id, m)).length;
+    // A full time stays selectable: seeing all five courts booked is a
+    // legitimate thing to check.
+    return `<button class="cb-mchip${on ? ' cb-mchip--on' : ''}${n ? '' : ' cb-mchip--full'}" data-time="${m}">
+      <span class="cb-mchip-t">${fmtPill(m)}</span>
+      <span class="cb-mchip-n">${n ? `${n} free` : 'full'}</span>
+    </button>`;
   }).join('');
+
+  const rows = cb.courts.map(c => {
+    const bk = _mBookingAt(c.id, time);
+    const sel = !bk && cb.panel === 'book' && cb.courtId === c.id && cb.panelStartMin === time;
+    let sub;
+    if (bk) {
+      sub = `${esc(isMine(bk) ? 'You' : bk.title)} · until ${fmtShort(bk.startMin + bk.durationMinutes)}`;
+    } else {
+      const until = _mFreeUntil(c.id, time);
+      sub = until >= DAY_END ? 'Free for the rest of the day' : `Free until ${fmtPill(until)}`;
+    }
+    return `<div class="cb-mrow${bk ? ' cb-mrow--booked' : sel ? ' cb-mrow--sel' : ''}"${bk ? '' : ` data-court="${c.id}"`}>
+      <div class="cb-mrow-text">
+        <span class="cb-mrow-name">${esc(c.name)}</span>
+        <span class="cb-mrow-sub">${sub}</span>
+      </div>
+      <span class="cb-mrow-mark${bk ? ' cb-mrow-mark--booked' : sel ? ' cb-mrow-mark--sel' : ''}">${bk ? 'Booked' : sel ? 'Selected' : '+'}</span>
+    </div>`;
+  }).join('');
+
+  const freeNow = cb.courts.filter(c => !_mBookingAt(c.id, time)).length;
+  const headline = freeNow
+    ? `${freeNow} of ${cb.courts.length} courts free at ${fmtPill(time)}`
+    : `No courts free at ${fmtPill(time)}`;
+
+  return `
+    <div class="cb-mrail">
+      <span class="cb-mrail-label">Start time</span>
+      <div class="cb-mrail-scroll" id="cbRail">${chips}</div>
+    </div>
+    <div class="cb-mlist">
+      <span class="cb-mhead">${headline}</span>
+      ${rows}
+      ${_buildMyBookingsMobile()}
+    </div>`;
 }
 
 // ── My Bookings ───────────────────────────────────────────────────────────────
@@ -641,10 +688,7 @@ function _buildBody() {
   if (mobile) {
     return `
       ${_dateRowHTML()}
-      <div class="cb-cards">
-        ${_buildCourtCards()}
-        ${_buildMyBookingsMobile()}
-      </div>`;
+      ${_buildMobileBooking()}`;
   }
 
   return `
@@ -681,6 +725,8 @@ function _render() {
 // ── Listeners ─────────────────────────────────────────────────────────────────
 function _setDate(next, { closeCal = true } = {}) {
   cb.date = next;
+  // A start time chosen for one day means nothing on another.
+  cb.mTime = null;
   if (closeCal) cb.calOpen = false;
   if (cb.panel === 'book') _closePanel();
   _renderBody();
@@ -712,7 +758,38 @@ function _attachBodyListeners() {
   });
 
   _attachGridListeners();
+  _attachMobileListeners();
   _attachMineListeners();
+}
+
+function _attachMobileListeners() {
+  document.querySelectorAll('.cb-mchip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      // Re-selecting a time clears any court selection - and an open booking
+      // sheet is that selection, holding a slot at the old time.
+      if (cb.panel === 'book') _closePanel();
+      cb.mTime = Number(chip.dataset.time);
+      _renderBody();
+    });
+  });
+
+  document.querySelectorAll('.cb-mrow[data-court]').forEach(row => {
+    row.addEventListener('click', () => {
+      if (cb.date < todayStr()) return;
+      const time = _mSelectedTime();
+      if (time == null) return;
+      cb.courtId = Number(row.dataset.court);
+      _startReservation(time);
+    });
+  });
+
+  // Land with the selected chip in view; on load that is the next bookable
+  // time, which can be deep into the rail by evening.
+  const rail = document.getElementById('cbRail');
+  const on = rail?.querySelector('.cb-mchip--on');
+  if (rail && on && typeof on.offsetLeft === 'number' && on.offsetLeft > 0) {
+    rail.scrollLeft = Math.max(0, on.offsetLeft - 14);
+  }
 }
 
 function _shiftMonth(ym, delta) {
@@ -725,14 +802,14 @@ function _attachGridListeners() {
   const isPast = cb.date < todayStr();
   if (isPast) return;
 
-  document.querySelectorAll('.cb-slot--open, .cb-pill-open').forEach(slot => {
+  document.querySelectorAll('.cb-slot--open').forEach(slot => {
     slot.addEventListener('click', () => {
       if (slot.dataset.court) cb.courtId = Number(slot.dataset.court);
       _startReservation(Number(slot.dataset.start));
     });
   });
 
-  document.querySelectorAll('.cb-block--editable, .cb-pill-mine').forEach(block => {
+  document.querySelectorAll('.cb-block--editable').forEach(block => {
     block.addEventListener('click', () => {
       if (block.dataset.court) cb.courtId = Number(block.dataset.court);
       const slots   = getCourtSlots(cb.date, cb.courtId);
