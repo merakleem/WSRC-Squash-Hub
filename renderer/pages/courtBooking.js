@@ -294,7 +294,7 @@ function _buildTabs() {
 
 function _refreshTabs() {
   const host = document.getElementById('pageTitle');
-  if (!host || isMobile()) return;
+  if (!host) return;
   host.innerHTML = _buildTabs();
   _attachTabListeners();
 }
@@ -538,7 +538,6 @@ function _buildMobileBooking() {
     return `
       <div class="cb-mlist">
         <span class="cb-mhead">No more start times today.</span>
-        ${_buildMyBookingsMobile()}
       </div>`;
   }
 
@@ -585,7 +584,6 @@ function _buildMobileBooking() {
     <div class="cb-mlist">
       <span class="cb-mhead">${headline}</span>
       ${rows}
-      ${_buildMyBookingsMobile()}
     </div>`;
 }
 
@@ -686,6 +684,9 @@ function _buildBody() {
   if (!mobile && cb.tab === 'mine') return _buildMyBookingsDesktop();
 
   if (mobile) {
+    if (cb.tab === 'mine') {
+      return `<div class="cb-mlist">${_buildMyBookingsMobile()}</div>`;
+    }
     return `
       ${_dateRowHTML()}
       ${_buildMobileBooking()}`;
@@ -701,9 +702,16 @@ function _renderBody() {
   if (!body) return;
   const wrap = document.getElementById('cbGridWrap');
   const saved = wrap?.scrollTop || 0;
+  // The rail keeps its place across re-renders: tapping a chip must change the
+  // selection where it stands, not scroll it anywhere.
+  const rail = document.getElementById('cbRail');
+  const railSaved = rail ? rail.scrollLeft || 0 : null;
   body.innerHTML = _buildBody();
   const next = document.getElementById('cbGridWrap');
   if (next && saved) next.scrollTop = saved;
+  const nextRail = document.getElementById('cbRail');
+  if (nextRail) nextRail.scrollLeft = cb._railHome ? 0 : (railSaved || 0);
+  cb._railHome = false;
   _attachBodyListeners();
 }
 
@@ -712,21 +720,20 @@ function _render() {
   if (!page) return;
 
   const title = document.getElementById('pageTitle');
-  if (title) {
-    if (isMobile()) title.textContent = 'Court Booking';
-    else title.innerHTML = _buildTabs();
-  }
+  if (title) title.innerHTML = _buildTabs();
 
   page.innerHTML = `<div id="cbBody" class="cb-body">${_buildBody()}</div>`;
-  if (!isMobile()) _attachTabListeners();
+  _attachTabListeners();
   _attachBodyListeners();
 }
 
 // ── Listeners ─────────────────────────────────────────────────────────────────
 function _setDate(next, { closeCal = true } = {}) {
   cb.date = next;
-  // A start time chosen for one day means nothing on another.
+  // A start time chosen for one day means nothing on another, and the rail
+  // starts over from that day's first chip.
   cb.mTime = null;
+  cb._railHome = true;
   if (closeCal) cb.calOpen = false;
   if (cb.panel === 'book') _closePanel();
   _renderBody();
@@ -783,13 +790,6 @@ function _attachMobileListeners() {
     });
   });
 
-  // Land with the selected chip in view; on load that is the next bookable
-  // time, which can be deep into the rail by evening.
-  const rail = document.getElementById('cbRail');
-  const on = rail?.querySelector('.cb-mchip--on');
-  if (rail && on && typeof on.offsetLeft === 'number' && on.offsetLeft > 0) {
-    rail.scrollLeft = Math.max(0, on.offsetLeft - 14);
-  }
 }
 
 function _shiftMonth(ym, delta) {
