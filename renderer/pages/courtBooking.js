@@ -656,9 +656,9 @@ function _buildMyBookingsMobile() {
     const d = new Date(b.date + 'T12:00:00');
     return `
       <div class="cb-mmine-row" data-bid="${b.id}">
-        <div class="cb-mmine-date">
-          <span class="cb-mmine-wd">${WD_SHORT[d.getDay()].toUpperCase()}</span>
-          <span class="cb-mmine-n">${d.getDate()}</span>
+        <div class="cb-date-tile cb-date-tile--sm">
+          <span class="cb-date-tile-wd">${WD_SHORT[d.getDay()].toUpperCase()}</span>
+          <span class="cb-date-tile-n">${d.getDate()}</span>
         </div>
         <div class="cb-mmine-detail">
           <div class="cb-mmine-court">${esc(b.courtName)}</div>
