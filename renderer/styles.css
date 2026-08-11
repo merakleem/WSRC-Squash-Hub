@@ -4902,9 +4902,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-mmine-card .cb-court-head { padding: 0 13px 10px; }
 .cb-mmine-list { display: flex; flex-direction: column; }
 .cb-mmine-row { display: flex; align-items: center; gap: 12px; padding: 10px 13px; border-top: 1px solid #f2f5f9; }
-.cb-mmine-date { width: 46px; flex-shrink: 0; display: flex; flex-direction: column; }
-.cb-mmine-wd { font-family: 'Barlow', sans-serif; font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #93a2b5; }
-.cb-mmine-n { font-family: 'Barlow', sans-serif; font-size: 16px; font-weight: 700; line-height: 1.1; color: #1c2b3a; }
+/* The same boxed date tile as the desktop list, sized down for the row. */
+.cb-date-tile--sm { width: 46px; height: 46px; border-radius: 10px; }
+.cb-date-tile--sm .cb-date-tile-wd { font-size: 9.5px; }
+.cb-date-tile--sm .cb-date-tile-n { font-size: 17px; }
 .cb-mmine-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cb-mmine-court { font-family: 'Barlow', sans-serif; font-size: 13.5px; font-weight: 700; color: #1c2b3a; }
 .cb-mmine-when { font-size: 12px; color: #6b7e93; }
