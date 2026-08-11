@@ -95,6 +95,12 @@ router.put('/player-bookings/:id', requireAuth, wrap(async (req, res) => {
   const isMember = db.prepare('SELECT 1 FROM booking_players WHERE booking_id = ? AND player_id = ?')
     .get(Number(req.params.id), req.session.playerId);
   if (!isMember) return res.status(403).json({ error: 'You are not part of this booking.' });
+  // A booking spanning several courts is several rows sharing a group_id. This
+  // endpoint updates one row, which would leave the rest of the group on the
+  // old duration, so it is refused rather than silently desynchronising them.
+  if (booking.group_id) {
+    return res.status(409).json({ error: 'This booking covers more than one court. Ask an admin to change it.' });
+  }
   const { durationMinutes, playerIds } = req.body;
   if (durationMinutes) {
     db.prepare('UPDATE bookings SET duration_minutes = ? WHERE id = ?')

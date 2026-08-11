@@ -107,11 +107,23 @@ function isMine(slot) {
   return pid != null && Array.isArray(slot.players) && slot.players.some(p => p.id === pid);
 }
 
+// A booking spanning several courts arrives as one row carrying every court it
+// covers. Matching only its first court left the others looking free while the
+// server still refused to book them.
+function _coversCourt(slot, courtId) {
+  return slot.courtId === courtId
+    || (Array.isArray(slot.courtIds) && slot.courtIds.includes(courtId));
+}
+
+function _isMultiCourt(slot) {
+  return Array.isArray(slot?.courtIds) && slot.courtIds.length > 1;
+}
+
 function getCourtSlots(dateStr, courtId) {
   const data = cb.scheduleCache?.[dateStr];
   if (!data) return [];
   return (data.slots || [])
-    .filter(s => s.courtId === courtId)
+    .filter(s => _coversCourt(s, courtId))
     .map(s => ({ ...s, startMin: timeToMin(s.startTime) }))
     .sort((a, b) => a.startMin - b.startMin);
 }
@@ -404,7 +416,7 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
     const mine = isMine(s);
     const league = !mine && s.source && s.source !== 'custom';
     const kind = mine ? 'mine' : league ? 'league' : 'other';
-    const canEdit = mine && !isPast;
+    const canEdit = mine && !isPast && !_isMultiCourt(s);
     const editing = cb.panel === 'edit' && String(cb.panelBooking?.id) === String(s.id);
     return `
       <div class="cb-block cb-block--${kind}${canEdit ? ' cb-block--editable' : ''}${editing ? ' cb-block--editing' : ''}"
@@ -412,7 +424,7 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
         style="top:${topFor(s.startMin) + 1}px;height:${Math.max(h - 3, 16)}px">
         <span class="cb-block-title">${esc(mine ? 'You' : s.title)}</span>
         <span class="cb-block-time">${fmtRange(s.startMin, s.durationMinutes)}</span>
-        ${mine ? '<span class="cb-block-edit">Edit</span>' : ''}
+        ${canEdit ? '<span class="cb-block-edit">Edit</span>' : ''}
       </div>`;
   }).join('');
 
@@ -484,7 +496,8 @@ function _buildCourtCards() {
 
   return cb.courts.map(c => {
     const slots = getCourtSlots(cb.date, c.id);
-    const mine = isPast ? [] : slots.filter(s => isMine(s) && s.startMin + s.durationMinutes > (isToday ? nm : 0));
+    const mine = isPast ? [] : slots.filter(s =>
+      isMine(s) && !_isMultiCourt(s) && s.startMin + s.durationMinutes > (isToday ? nm : 0));
 
     const open = [];
     if (!isPast) {
@@ -557,7 +570,7 @@ function _buildMyBookingsDesktop() {
             <div class="cb-mine-with">${others.length ? `With ${esc(others.join(', '))}` : 'Just you'}</div>
           </div>
           <div class="cb-mine-actions">
-            <button class="cb-mine-edit" data-edit="${b.id}">Edit</button>
+            ${b.courtCount > 1 ? '' : `<button class="cb-mine-edit" data-edit="${b.id}">Edit</button>`}
             <button class="cb-mine-del" data-del="${b.id}" aria-label="Cancel booking">${ICON.trash}</button>
           </div>
         </div>
@@ -596,7 +609,7 @@ function _buildMyBookingsMobile() {
           <div class="cb-mmine-court">${esc(b.courtName)}</div>
           <div class="cb-mmine-when">${fmtRange(b.startMin, b.durationMinutes)}${b.date === todayStr() ? ' · Today' : ''}</div>
         </div>
-        <button class="cb-mine-edit" data-edit="${b.id}">Edit</button>
+        ${b.courtCount > 1 ? '' : `<button class="cb-mine-edit" data-edit="${b.id}">Edit</button>`}
       </div>`;
   }).join('');
 
