@@ -62,12 +62,11 @@ function _checkLeagueConflict(db, courtId, date, startTime, durationMinutes) {
   const startMin = h * 60 + m;
   const endMin = startMin + durationMinutes;
   const matches = db.prepare(`
-    SELECT m.match_time AS start_time, l.match_duration
+    SELECT m.scheduled_time AS start_time, l.match_duration
     FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w          ON tm.week_id = w.id
-    JOIN leagues l        ON w.league_id = l.id
-    WHERE m.court_id = ? AND w.date = ? AND m.match_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+    JOIN leagues l ON l.id = m.league_id
+    WHERE m.type = 'league' AND m.court_id = ? AND m.scheduled_date = ?
+      AND m.scheduled_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
   `).all(courtId, date);
   return matches.some((lm) => {
     const [bh, bm] = lm.start_time.split(':').map(Number);
@@ -435,38 +434,37 @@ function getScheduleForDate(date) {
   const courtOrderById = new Map(courts.map((c, i) => [c.id, i]));
 
   const tournamentMatches = db.prepare(`
-    SELECT tm.id, tm.match_time AS start_time, tm.court_id, tm.player1_id, tm.player2_id,
+    SELECT tm.id, tm.scheduled_time AS start_time, tm.court_id, tm.player1_id, tm.player2_id,
       t.match_duration_minutes, p1.name AS p1_name, p2.name AS p2_name,
       t.name AS tournament_name, tm.round
-    FROM tournament_matches tm
+    FROM matches tm
     JOIN tournaments t ON t.id = tm.tournament_id
     LEFT JOIN players p1 ON p1.id = tm.player1_id
     LEFT JOIN players p2 ON p2.id = tm.player2_id
-    WHERE tm.match_date = ? AND tm.court_id IS NOT NULL AND tm.match_time IS NOT NULL
+    WHERE tm.type = 'tournament' AND tm.scheduled_date = ?
+      AND tm.court_id IS NOT NULL AND tm.scheduled_time IS NOT NULL
   `).all(date);
 
   const leagueMatches = db.prepare(`
     SELECT
       m.id AS match_id,
-      m.match_time AS start_time,
+      m.scheduled_time AS start_time,
       m.court_id,
       l.match_duration,
       COALESCE(sp1.name, p1.name) AS eff_p1_name,
       COALESCE(sp2.name, p2.name) AS eff_p2_name,
       l.name AS league_name
     FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w          ON tm.week_id = w.id
-    JOIN leagues l        ON w.league_id = l.id
+    JOIN leagues l        ON l.id = m.league_id
     JOIN players p1       ON p1.id = m.player1_id
     JOIN players p2       ON p2.id = m.player2_id
     LEFT JOIN match_subs s1  ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
     LEFT JOIN match_subs s2  ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     LEFT JOIN players sp1    ON sp1.id = s1.sub_player_id
     LEFT JOIN players sp2    ON sp2.id = s2.sub_player_id
-    WHERE w.date = ?
+    WHERE m.type = 'league' AND m.scheduled_date = ?
       AND m.court_id IS NOT NULL
-      AND m.match_time IS NOT NULL
+      AND m.scheduled_time IS NOT NULL
       AND (m.skipped = 0 OR m.skipped IS NULL)
   `).all(date);
 

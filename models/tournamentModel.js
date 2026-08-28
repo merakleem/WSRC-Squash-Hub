@@ -31,12 +31,11 @@ function _hasLeagueConflict(db, courtId, date, startTime, durationMinutes) {
   const startMin = h * 60 + m;
   const endMin = startMin + durationMinutes;
   const matches = db.prepare(`
-    SELECT m.match_time AS start_time, l.match_duration
+    SELECT m.scheduled_time AS start_time, l.match_duration
     FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w ON tm.week_id = w.id
-    JOIN leagues l ON w.league_id = l.id
-    WHERE m.court_id = ? AND w.date = ? AND m.match_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+    JOIN leagues l ON l.id = m.league_id
+    WHERE m.type = 'league' AND m.court_id = ? AND m.scheduled_date = ?
+      AND m.scheduled_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
   `).all(courtId, date);
   return matches.some(lm => {
     const [bh, bm] = lm.start_time.split(':').map(Number);
@@ -124,11 +123,11 @@ function getTournament(id) {
 
   const matches = db.prepare(`
     SELECT tm.*, p1.name AS p1_name, p2.name AS p2_name, c.name AS court_name
-    FROM tournament_matches tm
+    FROM matches tm
     LEFT JOIN players p1 ON p1.id = tm.player1_id
     LEFT JOIN players p2 ON p2.id = tm.player2_id
     LEFT JOIN courts c ON c.id = tm.court_id
-    WHERE tm.tournament_id = ? ORDER BY tm.match_date, tm.match_time
+    WHERE tm.tournament_id = ? ORDER BY tm.scheduled_date, tm.scheduled_time
   `).all(Number(id));
 
   return { ...tournament, courts, groups, players, matches };
@@ -236,7 +235,8 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
       const scheduled = _scheduleMatches(dayMatches, courts, duration, buffer, groupDays[dayIdx], 17);
       for (const m of scheduled) {
         _deleteConflictingBookings(db, m.court_id, m.match_date, m.match_time, duration);
-        db.prepare('INSERT INTO tournament_matches (tournament_id, round, group_id, player1_id, player2_id, court_id, match_date, match_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(m.tournament_id, m.round, m.group_id, m.player1_id, m.player2_id, m.court_id, m.match_date, m.match_time);
+        db.prepare(`INSERT INTO matches (type, status, tournament_id, round, tournament_group_id, player1_id, player2_id, court_id, scheduled_date, scheduled_time)
+           VALUES ('tournament', 'scheduled', ?, ?, ?, ?, ?, ?, ?, ?)`).run(m.tournament_id, m.round, m.group_id, m.player1_id, m.player2_id, m.court_id, m.match_date, m.match_time);
       }
     }
 
@@ -244,7 +244,8 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
     const qfShells = ['QF1','QF2','QF3','QF4'].map(slot => ({ tournament_id: tournamentId, round: 'quarterfinal', bracket_slot: slot }));
     for (const m of _scheduleMatches(qfShells, courts, duration, buffer, satDate, 12, 1)) {
       _deleteConflictingBookings(db, m.court_id, m.match_date, m.match_time, duration);
-      db.prepare('INSERT INTO tournament_matches (tournament_id, round, bracket_slot, court_id, match_date, match_time) VALUES (?, ?, ?, ?, ?, ?)').run(m.tournament_id, m.round, m.bracket_slot, m.court_id, m.match_date, m.match_time);
+      db.prepare(`INSERT INTO matches (type, status, tournament_id, round, bracket_slot, court_id, scheduled_date, scheduled_time)
+         VALUES ('tournament', 'scheduled', ?, ?, ?, ?, ?, ?)`).run(m.tournament_id, m.round, m.bracket_slot, m.court_id, m.match_date, m.match_time);
     }
 
     // Semifinals + Final (players TBD)
@@ -255,7 +256,8 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
     ];
     for (const m of _scheduleMatches(koShells, courts, duration, buffer, championshipDate, 12, 1)) {
       _deleteConflictingBookings(db, m.court_id, m.match_date, m.match_time, duration);
-      db.prepare('INSERT INTO tournament_matches (tournament_id, round, bracket_slot, court_id, match_date, match_time) VALUES (?, ?, ?, ?, ?, ?)').run(m.tournament_id, m.round, m.bracket_slot, m.court_id, m.match_date, m.match_time);
+      db.prepare(`INSERT INTO matches (type, status, tournament_id, round, bracket_slot, court_id, scheduled_date, scheduled_time)
+         VALUES ('tournament', 'scheduled', ?, ?, ?, ?, ?, ?)`).run(m.tournament_id, m.round, m.bracket_slot, m.court_id, m.match_date, m.match_time);
     }
 
     return tournamentId;
@@ -291,7 +293,7 @@ function getGroupStandings(tournamentId) {
     LEFT JOIN ladder l ON l.player_id = tp.player_id
     WHERE tp.tournament_id = ?
   `).all(Number(tournamentId));
-  const matches = db.prepare('SELECT * FROM tournament_matches WHERE tournament_id = ? AND round = ?').all(Number(tournamentId), 'group');
+  const matches = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND tournament_id = ? AND round = ?`).all(Number(tournamentId), 'group');
 
   const standings = {};
   for (const g of groups) {
@@ -333,7 +335,7 @@ function advanceToKnockout(db, tournamentId) {
   };
   for (const [slot, [p1, p2]] of Object.entries(qfPairs)) {
     if (p1 && p2) {
-      db.prepare('UPDATE tournament_matches SET player1_id = ?, player2_id = ? WHERE tournament_id = ? AND bracket_slot = ?').run(p1.player_id, p2.player_id, tournamentId, slot);
+      db.prepare('UPDATE matches SET player1_id = ?, player2_id = ? WHERE tournament_id = ? AND bracket_slot = ?').run(p1.player_id, p2.player_id, tournamentId, slot);
     }
   }
   db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ?").run(tournamentId);
@@ -342,64 +344,64 @@ function advanceToKnockout(db, tournamentId) {
 // Record match score and auto-advance bracket.
 function updateTournamentMatchScore(matchId, scores, winnerId) {
   const db = getDB();
-  const match = db.prepare('SELECT * FROM tournament_matches WHERE id = ?').get(Number(matchId));
+  const match = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
   if (!match) throw new Error('Match not found');
 
-  db.prepare('UPDATE tournament_matches SET scores = ?, winner_id = ?, confirmed_at = datetime(\'now\') WHERE id = ?').run(JSON.stringify(scores), Number(winnerId), Number(matchId));
+  db.prepare('UPDATE matches SET scores = ?, winner_id = ?, confirmed_at = datetime(\'now\') WHERE id = ?').run(JSON.stringify(scores), Number(winnerId), Number(matchId));
 
   const tid = match.tournament_id;
 
   if (match.round === 'group') {
-    const allGroup = db.prepare("SELECT winner_id FROM tournament_matches WHERE tournament_id = ? AND round = 'group'").all(tid);
+    const allGroup = db.prepare(`SELECT winner_id FROM matches WHERE type = 'tournament' AND tournament_id = ? AND round = 'group'`).all(tid);
     if (allGroup.every(m => m.winner_id !== null)) advanceToKnockout(db, tid);
   } else if (match.round === 'quarterfinal') {
     // QF1→SF1 player1, QF2→SF2 player1, QF3→SF1 player2, QF4→SF2 player2
     const sfMap = { QF1: ['SF1', 'player1_id'], QF2: ['SF2', 'player1_id'], QF3: ['SF1', 'player2_id'], QF4: ['SF2', 'player2_id'] };
     const [sfSlot, col] = sfMap[match.bracket_slot] || [];
-    if (sfSlot) db.prepare(`UPDATE tournament_matches SET ${col} = ? WHERE tournament_id = ? AND bracket_slot = ?`).run(Number(winnerId), tid, sfSlot);
+    if (sfSlot) db.prepare(`UPDATE matches SET ${col} = ? WHERE tournament_id = ? AND bracket_slot = ?`).run(Number(winnerId), tid, sfSlot);
   } else if (match.round === 'semifinal') {
     const col = match.bracket_slot === 'SF1' ? 'player1_id' : 'player2_id';
-    db.prepare(`UPDATE tournament_matches SET ${col} = ? WHERE tournament_id = ? AND bracket_slot = 'F'`).run(Number(winnerId), tid);
+    db.prepare(`UPDATE matches SET ${col} = ? WHERE tournament_id = ? AND bracket_slot = 'F'`).run(Number(winnerId), tid);
   } else if (match.round === 'final') {
     db.prepare("UPDATE tournaments SET status = 'completed' WHERE id = ?").run(tid);
   }
 
-  return db.prepare('SELECT * FROM tournament_matches WHERE id = ?').get(Number(matchId));
+  return db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
 }
 
 // Clear a match score and undo any bracket advancement it caused.
 function clearTournamentMatchScore(matchId) {
   const db = getDB();
-  const match = db.prepare('SELECT * FROM tournament_matches WHERE id = ?').get(Number(matchId));
+  const match = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
   if (!match || !match.winner_id) return;
 
   const tid = match.tournament_id;
   const prevWinnerId = match.winner_id;
 
-  db.prepare('UPDATE tournament_matches SET scores = NULL, winner_id = NULL, confirmed_at = NULL WHERE id = ?').run(Number(matchId));
+  db.prepare(`UPDATE matches SET scores = NULL, winner_id = NULL, confirmed_at = NULL, played_at = NULL, status = CASE WHEN court_id IS NOT NULL AND scheduled_time IS NOT NULL THEN 'scheduled' ELSE 'unscheduled' END WHERE id = ?`).run(Number(matchId));
 
   if (match.round === 'group') {
     // Revert to group_stage status if it was knockout
     db.prepare("UPDATE tournaments SET status = 'group_stage' WHERE id = ? AND status = 'knockout'").run(tid);
     // Clear all QF player slots (group result is now uncertain)
-    db.prepare("UPDATE tournament_matches SET player1_id = NULL, player2_id = NULL WHERE tournament_id = ? AND round = 'quarterfinal'").run(tid);
+    db.prepare("UPDATE matches SET player1_id = NULL, player2_id = NULL WHERE tournament_id = ? AND round = 'quarterfinal'").run(tid);
   } else if (match.round === 'quarterfinal') {
     const sfMap = { QF1: ['SF1', 'player1_id'], QF2: ['SF2', 'player1_id'], QF3: ['SF1', 'player2_id'], QF4: ['SF2', 'player2_id'] };
     const [sfSlot, col] = sfMap[match.bracket_slot] || [];
     if (sfSlot) {
-      db.prepare(`UPDATE tournament_matches SET ${col} = NULL WHERE tournament_id = ? AND bracket_slot = ?`).run(tid, sfSlot);
+      db.prepare(`UPDATE matches SET ${col} = NULL WHERE tournament_id = ? AND bracket_slot = ?`).run(tid, sfSlot);
       // Also clear that SF's result and cascade to Final
-      const sfMatch = db.prepare('SELECT * FROM tournament_matches WHERE tournament_id = ? AND bracket_slot = ?').get(tid, sfSlot);
+      const sfMatch = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND tournament_id = ? AND bracket_slot = ?`).get(tid, sfSlot);
       if (sfMatch && sfMatch.winner_id) {
-        db.prepare('UPDATE tournament_matches SET scores = NULL, winner_id = NULL WHERE id = ?').run(sfMatch.id);
+        db.prepare(`UPDATE matches SET scores = NULL, winner_id = NULL, played_at = NULL, status = CASE WHEN court_id IS NOT NULL AND scheduled_time IS NOT NULL THEN 'scheduled' ELSE 'unscheduled' END WHERE id = ?`).run(sfMatch.id);
         const fCol = sfSlot === 'SF1' ? 'player1_id' : 'player2_id';
-        db.prepare(`UPDATE tournament_matches SET ${fCol} = NULL, scores = NULL, winner_id = NULL WHERE tournament_id = ? AND bracket_slot = 'F'`).run(tid);
+        db.prepare(`UPDATE matches SET ${fCol} = NULL, scores = NULL, winner_id = NULL, played_at = NULL WHERE tournament_id = ? AND bracket_slot = 'F'`).run(tid);
         db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ? AND status = 'completed'").run(tid);
       }
     }
   } else if (match.round === 'semifinal') {
     const fCol = match.bracket_slot === 'SF1' ? 'player1_id' : 'player2_id';
-    db.prepare(`UPDATE tournament_matches SET ${fCol} = NULL, scores = NULL, winner_id = NULL WHERE tournament_id = ? AND bracket_slot = 'F'`).run(tid);
+    db.prepare(`UPDATE matches SET ${fCol} = NULL, scores = NULL, winner_id = NULL, played_at = NULL WHERE tournament_id = ? AND bracket_slot = 'F'`).run(tid);
     db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ? AND status = 'completed'").run(tid);
   } else if (match.round === 'final') {
     db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ?").run(tid);
@@ -411,17 +413,17 @@ function getPlayerTournamentHistory(playerId) {
   const db = getDB();
   const rows = db.prepare(`
     SELECT tm.id, tm.player1_id, tm.player2_id, tm.winner_id, tm.scores,
-      COALESCE(tm.confirmed_at, tm.match_date) AS confirmed_at,
+      COALESCE(tm.confirmed_at, tm.scheduled_date) AS confirmed_at,
       tm.round, tm.bracket_slot,
       t.id AS tournament_id, t.name AS tournament_name,
       p1.name AS p1_name, p2.name AS p2_name
-    FROM tournament_matches tm
+    FROM matches tm
     JOIN tournaments t ON t.id = tm.tournament_id
     LEFT JOIN players p1 ON p1.id = tm.player1_id
     LEFT JOIN players p2 ON p2.id = tm.player2_id
     WHERE tm.winner_id IS NOT NULL
       AND (tm.player1_id = ? OR tm.player2_id = ?)
-    ORDER BY confirmed_at DESC, tm.match_time DESC
+    ORDER BY confirmed_at DESC, tm.scheduled_time DESC
   `).all(Number(playerId), Number(playerId));
 
   return rows.map(m => {
@@ -451,19 +453,19 @@ function getPlayerTournamentUpcoming(playerId) {
   const db = getDB();
   const today = new Date().toISOString().slice(0, 10);
   const rows = db.prepare(`
-    SELECT tm.id, tm.player1_id, tm.player2_id, tm.match_date, tm.match_time,
+    SELECT tm.id, tm.player1_id, tm.player2_id, tm.scheduled_date, tm.scheduled_time,
       tm.round, t.id AS tournament_id, t.name AS tournament_name,
       c.name AS court_name,
       p1.name AS p1_name, p2.name AS p2_name
-    FROM tournament_matches tm
+    FROM matches tm
     JOIN tournaments t ON t.id = tm.tournament_id
     LEFT JOIN courts c ON c.id = tm.court_id
     LEFT JOIN players p1 ON p1.id = tm.player1_id
     LEFT JOIN players p2 ON p2.id = tm.player2_id
     WHERE tm.winner_id IS NULL
       AND (tm.player1_id = ? OR tm.player2_id = ?)
-      AND tm.match_date >= ?
-    ORDER BY tm.match_date ASC, tm.match_time ASC
+      AND tm.scheduled_date >= ?
+    ORDER BY tm.scheduled_date ASC, tm.scheduled_time ASC
   `).all(Number(playerId), Number(playerId), today);
 
   return rows.map(m => {
@@ -472,11 +474,11 @@ function getPlayerTournamentUpcoming(playerId) {
     return {
       id: `t_${m.id}`,
       source: 'tournament',
-      week_date: m.match_date,
+      week_date: m.scheduled_date,
       league_name: m.tournament_name,
       opponent_name: isP1 ? (m.p2_name || 'TBD') : (m.p1_name || 'TBD'),
       opponent_id: isP1 ? m.player2_id : m.player1_id,
-      match_time: m.match_time,
+      match_time: m.scheduled_time,
       court_name: m.court_name,
       round_label: roundLabel,
       tournament_id: m.tournament_id,

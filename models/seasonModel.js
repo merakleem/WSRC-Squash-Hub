@@ -19,12 +19,7 @@ function getStartMonthDay(settings = null) {
 function getActivityBounds() {
   const row = getDB().prepare(`
     SELECT MIN(d) AS earliest, MAX(d) AS latest FROM (
-      SELECT substr(COALESCE(m.confirmed_at, w.date), 1, 10) AS d
-        FROM matches m
-        JOIN team_matchups tm ON m.matchup_id = tm.id
-        JOIN weeks w ON tm.week_id = w.id
-      UNION ALL SELECT substr(COALESCE(confirmed_at, match_date), 1, 10) FROM tournament_matches
-      UNION ALL SELECT substr(played_at, 1, 10) FROM pickup_matches
+      SELECT substr(COALESCE(played_at, scheduled_date), 1, 10) AS d FROM matches
       UNION ALL SELECT substr(start_date, 1, 10) FROM leagues
     ) WHERE d IS NOT NULL
   `).get();
@@ -34,12 +29,7 @@ function getActivityBounds() {
 function getEarliestActivityDate() {
   const row = getDB().prepare(`
     SELECT MIN(d) AS d FROM (
-      SELECT MIN(substr(COALESCE(m.confirmed_at, w.date), 1, 10)) AS d
-        FROM matches m
-        JOIN team_matchups tm ON m.matchup_id = tm.id
-        JOIN weeks w ON tm.week_id = w.id
-      UNION ALL SELECT MIN(substr(COALESCE(confirmed_at, match_date), 1, 10)) FROM tournament_matches
-      UNION ALL SELECT MIN(substr(played_at, 1, 10)) FROM pickup_matches
+      SELECT MIN(substr(COALESCE(played_at, scheduled_date), 1, 10)) AS d FROM matches
       UNION ALL SELECT MIN(start_date) FROM leagues
     ) WHERE d IS NOT NULL
   `).get();
@@ -119,18 +109,9 @@ function getSeasonUsage(key) {
     tournaments: count(`SELECT COUNT(*) AS count FROM tournaments
                         WHERE substr(championship_date, 1, 10) BETWEEN @start AND @end`),
     matches: count(`
-      SELECT (
-        (SELECT COUNT(*) FROM matches m
-           JOIN team_matchups tm ON m.matchup_id = tm.id
-           JOIN weeks w ON tm.week_id = w.id
-          WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-            AND substr(COALESCE(m.confirmed_at, w.date), 1, 10) BETWEEN @start AND @end)
-      + (SELECT COUNT(*) FROM tournament_matches
-          WHERE winner_id IS NOT NULL
-            AND substr(COALESCE(confirmed_at, match_date), 1, 10) BETWEEN @start AND @end)
-      + (SELECT COUNT(*) FROM pickup_matches
-          WHERE substr(played_at, 1, 10) BETWEEN @start AND @end)
-      ) AS count`),
+      SELECT COUNT(*) AS count FROM matches m
+       WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+         AND substr(m.played_at, 1, 10) BETWEEN @start AND @end`),
   };
 }
 

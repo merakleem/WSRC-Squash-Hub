@@ -81,7 +81,7 @@ router.put('/tournament-matches/:id/score', requireAdmin, wrap(async (req, res) 
     return res.status(400).json({ error: 'scores must be an object with p1 and p2 set counts.' });
   }
   if (!winnerId) return res.status(400).json({ error: 'winnerId is required.' });
-  const match = getDB().prepare('SELECT player1_id, player2_id FROM tournament_matches WHERE id = ?').get(Number(req.params.id));
+  const match = getDB().prepare(`SELECT player1_id, player2_id FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(req.params.id));
   if (!match || !match.player1_id || !match.player2_id) {
     return res.status(409).json({ error: 'Cannot score a match until both players are determined.' });
   }
@@ -96,7 +96,7 @@ router.put('/tournament-matches/:id/player-score', requireAuth, wrap(async (req,
   const theirScore = Number(req.body.theirScore);
 
   const db = getDB();
-  const match = db.prepare('SELECT id, player1_id, player2_id, winner_id FROM tournament_matches WHERE id = ?').get(matchId);
+  const match = db.prepare(`SELECT id, player1_id, player2_id, winner_id FROM matches WHERE type = 'tournament' AND id = ?`).get(matchId);
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (!match.player1_id || !match.player2_id) return res.status(409).json({ error: 'Cannot score a match until both players are determined.' });
   if (match.winner_id !== null) return res.status(409).json({ error: 'Score has already been reported for this match' });

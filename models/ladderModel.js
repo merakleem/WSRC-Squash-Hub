@@ -1,6 +1,7 @@
 const { getDB } = require('../database/db');
 const elo = require('../lib/elo');
 const seasonsLib = require('../lib/seasons');
+const matchModel = require('./matchModel');
 const seasonModel = require('./seasonModel');
 
 // ===== SHARED QUERIES =====
@@ -21,88 +22,8 @@ const PLAYER_SELECT = `
  * `seasonId` restricts to matches belonging to that season; omit it for the
  * all-time set the leapfrog ladder replays.
  */
-function getCompletedMatches(range = null) {
-  const db = getDB();
-  // Season membership is decided by when a match was played, so the filter is a
-  // date window rather than a stored link. `range` is { start, end } or null for
-  // everything ever.
-  const where = range ? 'AND substr(@dateExpr, 1, 10) BETWEEN @start AND @end' : '';
-  const params = range ? { start: range.start, end: range.end } : {};
-
-  const leagueMatches = db.prepare(`
-    SELECT
-      m.id AS match_id, 'league' AS source,
-      m.winner_id, m.player1_id, m.player2_id,
-      COALESCE(s1.sub_player_id, m.player1_id) AS eff_p1_id,
-      COALESCE(s2.sub_player_id, m.player2_id) AS eff_p2_id,
-      COALESCE(m.confirmed_at, w.date) AS sort_key
-    FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w ON tm.week_id = w.id
-    LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
-    LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
-    WHERE m.winner_id IS NOT NULL
-      AND (m.skipped = 0 OR m.skipped IS NULL)
-      ${where.replace('@dateExpr', 'COALESCE(m.confirmed_at, w.date)')}
-  `).all(params);
-
-  const tournamentMatches = db.prepare(`
-    SELECT
-      tm.id AS match_id, 'tournament' AS source,
-      tm.winner_id, tm.player1_id, tm.player2_id,
-      tm.player1_id AS eff_p1_id, tm.player2_id AS eff_p2_id,
-      COALESCE(tm.confirmed_at, tm.match_date) AS sort_key
-    FROM tournament_matches tm
-    WHERE tm.winner_id IS NOT NULL
-      AND tm.player1_id IS NOT NULL
-      AND tm.player2_id IS NOT NULL
-      ${where.replace('@dateExpr', 'COALESCE(tm.confirmed_at, tm.match_date)')}
-  `).all(params);
-
-  const pickupMatches = db.prepare(`
-    SELECT
-      pm.id AS match_id, 'pickup' AS source,
-      pm.winner_id, pm.player1_id, pm.player2_id,
-      pm.player1_id AS eff_p1_id, pm.player2_id AS eff_p2_id,
-      pm.played_at AS sort_key
-    FROM pickup_matches pm
-    WHERE 1 = 1 ${where.replace('@dateExpr', 'pm.played_at')}
-  `).all(params);
-
-  return [...leagueMatches, ...tournamentMatches, ...pickupMatches]
-    .sort((a, b) => (a.sort_key || '').localeCompare(b.sort_key || '') || 0);
-}
 
 /** Most recent match date per player, across every match type and season. */
-function getLastMatchDates() {
-  const db = getDB();
-  const rows = db.prepare(`
-    SELECT player_id, MAX(d) AS last_date FROM (
-      SELECT m.player1_id AS player_id, COALESCE(m.confirmed_at, w.date) AS d
-        FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-      UNION ALL
-      SELECT m.player2_id, COALESCE(m.confirmed_at, w.date)
-        FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-      UNION ALL
-      SELECT s.sub_player_id, COALESCE(m.confirmed_at, w.date)
-        FROM match_subs s JOIN matches m ON m.id = s.match_id
-        JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-      UNION ALL
-      SELECT tm.player1_id, COALESCE(tm.confirmed_at, tm.match_date) FROM tournament_matches tm WHERE tm.winner_id IS NOT NULL
-      UNION ALL
-      SELECT tm.player2_id, COALESCE(tm.confirmed_at, tm.match_date) FROM tournament_matches tm WHERE tm.winner_id IS NOT NULL
-      UNION ALL
-      SELECT pm.player1_id, pm.played_at FROM pickup_matches pm
-      UNION ALL
-      SELECT pm.player2_id, pm.played_at FROM pickup_matches pm
-    ) WHERE player_id IS NOT NULL AND d IS NOT NULL
-    GROUP BY player_id
-  `).all();
-  return Object.fromEntries(rows.map((r) => [r.player_id, String(r.last_date).slice(0, 10)]));
-}
 
 /**
  * Each player's first recorded match day.
@@ -115,26 +36,11 @@ function getFirstMatchDates() {
   const db = getDB();
   const rows = db.prepare(`
     SELECT player_id, MIN(d) AS first_date FROM (
-      SELECT m.player1_id AS player_id, COALESCE(m.confirmed_at, w.date) AS d
-        FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+      SELECT ${matchModel.EFF_P1} AS player_id, m.played_at AS d
+        FROM matches m ${matchModel.EFF_JOIN} WHERE ${matchModel.COUNTS}
       UNION ALL
-      SELECT m.player2_id, COALESCE(m.confirmed_at, w.date)
-        FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-      UNION ALL
-      SELECT s.sub_player_id, COALESCE(m.confirmed_at, w.date)
-        FROM match_subs s JOIN matches m ON m.id = s.match_id
-        JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id
-        WHERE m.winner_id IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-      UNION ALL
-      SELECT tm.player1_id, COALESCE(tm.confirmed_at, tm.match_date) FROM tournament_matches tm WHERE tm.winner_id IS NOT NULL
-      UNION ALL
-      SELECT tm.player2_id, COALESCE(tm.confirmed_at, tm.match_date) FROM tournament_matches tm WHERE tm.winner_id IS NOT NULL
-      UNION ALL
-      SELECT pm.player1_id, pm.played_at FROM pickup_matches pm
-      UNION ALL
-      SELECT pm.player2_id, pm.played_at FROM pickup_matches pm
+      SELECT ${matchModel.EFF_P2}, m.played_at
+        FROM matches m ${matchModel.EFF_JOIN} WHERE ${matchModel.COUNTS}
     ) WHERE player_id IS NOT NULL AND d IS NOT NULL
     GROUP BY player_id
   `).all();
@@ -242,54 +148,12 @@ function getLadder(asOfDate = null) {
       name ASC
   `).all();
 
-  const leagueMatches = db.prepare(`
-    SELECT
-      m.winner_id,
-      m.player1_id,
-      m.player2_id,
-      COALESCE(s1.sub_player_id, m.player1_id) AS eff_p1_id,
-      COALESCE(s2.sub_player_id, m.player2_id) AS eff_p2_id,
-      COALESCE(m.confirmed_at, w.date) AS sort_key
-    FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w ON tm.week_id = w.id
-    LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
-    LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
-    WHERE m.winner_id IS NOT NULL
-      AND (m.skipped = 0 OR m.skipped IS NULL)
-  `).all();
-
-  const tournamentMatches = db.prepare(`
-    SELECT
-      winner_id,
-      player1_id,
-      player2_id,
-      player1_id AS eff_p1_id,
-      player2_id AS eff_p2_id,
-      COALESCE(confirmed_at, match_date) AS sort_key
-    FROM tournament_matches
-    WHERE winner_id IS NOT NULL
-      AND player1_id IS NOT NULL
-      AND player2_id IS NOT NULL
-  `).all();
-
-  const pickupMatches = db.prepare(`
-    SELECT
-      winner_id,
-      player1_id,
-      player2_id,
-      player1_id AS eff_p1_id,
-      player2_id AS eff_p2_id,
-      played_at AS sort_key
-    FROM pickup_matches
-  `).all();
-
-  const matches = [...leagueMatches, ...tournamentMatches, ...pickupMatches]
+  // Every completed match, in the order the ladder replays them.
+  const matches = matchModel.getCompletedMatches()
     // A cutoff reconstructs the ladder as it stood on a given date. Used when
     // freezing a season, so matches belonging to the following season can't
     // leak into a snapshot of the one that just ended.
-    .filter((m) => !asOfDate || String(m.sort_key || '').slice(0, 10) <= asOfDate)
-    .sort((a, b) => (a.sort_key || '').localeCompare(b.sort_key || '') || 0);
+    .filter((m) => !asOfDate || String(m.sort_key || '').slice(0, 10) <= asOfDate);
 
   const playerIds = new Set(players.map((p) => p.id));
   const playerMap = Object.fromEntries(players.map((p) => [p.id, p]));
@@ -320,8 +184,8 @@ function getLadder(asOfDate = null) {
     }
 
     const match = event.match;
-    const effWinnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
-    const effLoserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+    const effWinnerId = match.eff_winner_id;
+    const effLoserId  = match.eff_loser_id;
 
     if (!playerIds.has(effWinnerId) || !playerIds.has(effLoserId)) continue;
 
@@ -358,8 +222,8 @@ function getLadder(asOfDate = null) {
       continue;
     }
     const match = event.match;
-    const effWinnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
-    const effLoserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+    const effWinnerId = match.eff_winner_id;
+    const effLoserId  = match.eff_loser_id;
     if (!playerIds.has(effWinnerId) || !playerIds.has(effLoserId)) continue;
     const wi = replayRanking.indexOf(effWinnerId);
     const li = replayRanking.indexOf(effLoserId);
@@ -375,6 +239,9 @@ function getLadder(asOfDate = null) {
     return { ...playerMap[id], position: i + 1, rank_change: rankChange, best_position: bestPosition[id] };
   });
 }
+
+const getCompletedMatches = matchModel.getCompletedMatches;
+const getLastMatchDates    = matchModel.getLastMatchDates;
 
 // ===== ELO LADDER =====
 
@@ -448,8 +315,8 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
     if (isTarget) { played = {}; wins = {}; losses = {}; }
 
     for (const match of matches) {
-      const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
-      const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+      const winnerId = match.eff_winner_id;
+      const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
       const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
@@ -615,8 +482,8 @@ function getSeasonRecords(seasonKey) {
   };
 
   for (const m of getCompletedMatches(range)) {
-    const winnerId = m.winner_id === m.player1_id ? m.eff_p1_id : m.eff_p2_id;
-    const loserId  = m.winner_id === m.player1_id ? m.eff_p2_id : m.eff_p1_id;
+    const winnerId = m.eff_winner_id;
+    const loserId  = m.eff_loser_id;
     bump(winnerId, true);
     bump(loserId, false);
   }
@@ -673,8 +540,8 @@ function getPlayerLadderHistory(playerId) {
     }
 
     const match = event.match;
-    const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
-    const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+    const winnerId = match.eff_winner_id;
+    const loserId = match.eff_loser_id;
     if (!playerIds.has(winnerId) || !playerIds.has(loserId)) continue;
 
     const wi = ranking.indexOf(winnerId);
@@ -759,8 +626,8 @@ function getPlayerMatchRatingDeltas(playerId) {
       ? String(year)
       : `${year}/${String((year + 1) % 100).padStart(2, '0')}`;
     for (const match of getCompletedMatches(seasonsLib.seasonRange(key, monthDay))) {
-      const winnerId = match.winner_id === match.player1_id ? match.eff_p1_id : match.eff_p2_id;
-      const loserId  = match.winner_id === match.player1_id ? match.eff_p2_id : match.eff_p1_id;
+      const winnerId = match.eff_winner_id;
+      const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
       const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);

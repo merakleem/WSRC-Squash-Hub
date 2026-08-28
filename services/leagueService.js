@@ -96,17 +96,27 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
     }
     for (let i = 0; i < weekMatches.length; i++) {
       const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
-      if (useNewCourts) {
+        // Creating a league is creating scheduled matches. Each row carries its
+        // own league, week, date, court and time, so every later view finds it
+        // by filtering matches rather than walking back up through the matchup.
         run(
-          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_id, match_time) VALUES (?, ?, ?, ?, ?, ?)',
-          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtIds[i % effectiveCourts], time]
+          `INSERT INTO matches
+             (type, status, league_id, week_id, matchup_id, division_id,
+              player1_id, player2_id, scheduled_date, scheduled_time, court_id, court_number)
+           VALUES ('league', 'scheduled', @leagueId, @weekId, @matchupId, @divisionId,
+                   @p1Id, @p2Id, @date, @time, @courtId, @courtNumber)`,
+          {
+            leagueId, weekId,
+            matchupId:  weekMatches[i].matchupId,
+            divisionId: weekMatches[i].divId,
+            p1Id:       weekMatches[i].p1Id,
+            p2Id:       weekMatches[i].p2Id,
+            date: weekDate,
+            time,
+            courtId:     useNewCourts ? courtIds[i % effectiveCourts] : null,
+            courtNumber: useNewCourts ? null : (i % effectiveCourts) + 1,
+          }
         );
-      } else {
-        run(
-          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
-          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, (i % effectiveCourts) + 1, time]
-        );
-      }
     }
   }
 
@@ -240,17 +250,27 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
       const slotIdx  = Math.floor(i / effectiveCourts);
       const time = addMinutes(matchStartTime, slotIdx * slotMinutes);
 
-      if (useNewCourts) {
+        // Creating a league is creating scheduled matches. Each row carries its
+        // own league, week, date, court and time, so every later view finds it
+        // by filtering matches rather than walking back up through the matchup.
         run(
-          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_id, match_time) VALUES (?, ?, ?, ?, ?, ?)',
-          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtIds[courtIdx], time]
+          `INSERT INTO matches
+             (type, status, league_id, week_id, matchup_id, division_id,
+              player1_id, player2_id, scheduled_date, scheduled_time, court_id, court_number)
+           VALUES ('league', 'scheduled', @leagueId, @weekId, @matchupId, @divisionId,
+                   @p1Id, @p2Id, @date, @time, @courtId, @courtNumber)`,
+          {
+            leagueId, weekId,
+            matchupId:  weekMatches[i].matchupId,
+            divisionId: weekMatches[i].divId,
+            p1Id:       weekMatches[i].p1Id,
+            p2Id:       weekMatches[i].p2Id,
+            date: weekDate,
+            time,
+            courtId:     useNewCourts ? courtIds[courtIdx] : null,
+            courtNumber: useNewCourts ? null : courtIdx + 1,
+          }
         );
-      } else {
-        run(
-          'INSERT INTO matches (matchup_id, division_id, player1_id, player2_id, court_number, match_time) VALUES (?, ?, ?, ?, ?, ?)',
-          [weekMatches[i].matchupId, weekMatches[i].divId, weekMatches[i].p1Id, weekMatches[i].p2Id, courtIdx + 1, time]
-        );
-      }
     }
   }
 

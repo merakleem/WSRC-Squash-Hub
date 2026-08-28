@@ -103,7 +103,10 @@ function getMatches(matchupId) {
             s1.sub_player_id AS sub1_id,
             sp1.name         AS sub1_name,
             s2.sub_player_id AS sub2_id,
-            sp2.name         AS sub2_name
+            sp2.name         AS sub2_name,
+            -- The column is scheduled_time now; match_time is what every view of a
+            -- league match already calls it.
+            m.scheduled_time AS match_time
      FROM matches m
      JOIN players p1   ON m.player1_id = p1.id
      JOIN players p2   ON m.player2_id = p2.id
@@ -122,7 +125,15 @@ function updateMatchScore({ matchId, player1Score, player2Score, winnerId, submi
   const clearing = player1Score == null && player2Score == null;
   return run(
     `UPDATE matches SET player1_score = ?, player2_score = ?, winner_id = ?,
-     confirmed_at = ${clearing ? 'NULL' : "datetime('now')"}, submitted_by_player_id = ? WHERE id = ?`,
+     confirmed_at = ${clearing ? 'NULL' : "datetime('now')"},
+     -- The status follows the score. Clearing one sends the match back to
+     -- whichever state it was in before: on the schedule if it has a court and
+     -- a time, otherwise merely open.
+     status = ${clearing
+       ? `CASE WHEN court_id IS NOT NULL AND scheduled_time IS NOT NULL THEN 'scheduled' ELSE 'unscheduled' END`
+       : `'played'`},
+     played_at = ${clearing ? 'NULL' : "COALESCE(played_at, datetime('now'))"},
+     submitted_by_player_id = ? WHERE id = ?`,
     [player1Score ?? null, player2Score ?? null, winnerId ?? null, submittedByPlayerId ?? null, matchId]
   );
 }
@@ -164,7 +175,11 @@ function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
 
 function updateMatchTiming(matchId, matchTime, courtNumber, courtId = null) {
   return run(
-    'UPDATE matches SET match_time = ?, court_number = ?, court_id = ? WHERE id = ?',
+    `UPDATE matches SET scheduled_time = ?, court_number = ?, court_id = ?,
+       status = CASE WHEN status = 'played' THEN 'played'
+                     WHEN ? IS NOT NULL AND ? IS NOT NULL THEN 'scheduled'
+                     ELSE 'unscheduled' END
+     WHERE id = ?`,
     [matchTime || null, courtNumber || null, courtId || null, matchId]
   );
 }
@@ -201,7 +216,7 @@ function replacePlayerInLeague(leagueId, oldPlayerId, newPlayerId) {
     db.prepare(`UPDATE matches SET winner_id = ? WHERE winner_id = ? AND ${matchSubquery}`)
       .run(newPlayerId, oldPlayerId, leagueId);
     const subMatchSubquery = `match_id IN (
-      SELECT m.id FROM matches m JOIN team_matchups tm ON m.matchup_id = tm.id JOIN weeks w ON tm.week_id = w.id WHERE w.league_id = ?
+      SELECT m.id FROM matches m WHERE m.type = 'league' AND m.league_id = ?
     )`;
     db.prepare(`UPDATE match_subs SET original_player_id = ? WHERE original_player_id = ? AND ${subMatchSubquery}`)
       .run(newPlayerId, oldPlayerId, leagueId);

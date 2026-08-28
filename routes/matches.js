@@ -29,8 +29,7 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
     if (courtId) {
       const conflict = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        JOIN team_matchups tm ON m.matchup_id = tm.id
-        WHERE tm.week_id = ? AND m.court_id = ? AND m.match_time = ? AND m.id != ?
+        WHERE m.week_id = ? AND m.court_id = ? AND m.scheduled_time = ? AND m.id != ?
       `).get(ctx.week_id, courtId, matchTime, matchId);
       if (conflict.cnt > 0) {
         const courtName = db.prepare('SELECT name FROM courts WHERE id = ?').get(courtId)?.name || `Court ${courtId}`;
@@ -39,8 +38,7 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
     } else if (ctx.schedule_courts && courtNumber) {
       const conflict = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        JOIN team_matchups tm ON m.matchup_id = tm.id
-        WHERE tm.week_id = ? AND m.court_number = ? AND m.match_time = ? AND m.id != ?
+        WHERE m.week_id = ? AND m.court_number = ? AND m.scheduled_time = ? AND m.id != ?
       `).get(ctx.week_id, courtNumber, matchTime, matchId);
       if (conflict.cnt > 0) {
         return res.status(409).json({ error: `Court ${courtNumber} is already booked at ${matchTime} this week.` });
@@ -50,8 +48,7 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
     if (!courtId && ctx.num_courts > 0) {
       const atSameTime = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        JOIN team_matchups tm ON m.matchup_id = tm.id
-        WHERE tm.week_id = ? AND m.match_time = ? AND m.id != ?
+        WHERE m.week_id = ? AND m.scheduled_time = ? AND m.id != ?
       `).get(ctx.week_id, matchTime, matchId);
       if (atSameTime.cnt >= ctx.num_courts) {
         warning = `All ${ctx.num_courts} court${ctx.num_courts !== 1 ? 's' : ''} are already booked at ${matchTime} this week.`;
@@ -141,7 +138,7 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
   if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 games (e.g. 3-1, 2-3).' });
 
   // When the match was played, as opposed to when it was reported. Everything
-  // downstream already reads pickup_matches.played_at: which season the match
+  // downstream already reads matches.played_at: which season the match
   // belongs to, where it sits in the rating replay, the ladder history chart
   // and the activity feed. So a date here lands correctly without further
   // wiring, and omitting it keeps today's behaviour of stamping now.
@@ -168,15 +165,15 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
 
   const winnerId = player1Score > player2Score ? player1Id : player2Id;
   db.prepare(
-    `INSERT INTO pickup_matches (player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id, played_at)
-     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`
+    `INSERT INTO matches (type, status, player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id, played_at, confirmed_at)
+     VALUES ('ladder', 'played', ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`
   ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId, playedAt);
 
   res.json({ ok: true });
 }));
 
 router.delete('/matches/pickup/:id', requireAdmin, wrap(async (req, res) => {
-  getDB().prepare('DELETE FROM pickup_matches WHERE id = ?').run(Number(req.params.id));
+  getDB().prepare(`DELETE FROM matches WHERE id = ? AND type = 'ladder'`).run(Number(req.params.id));
   res.json({ ok: true });
 }));
 

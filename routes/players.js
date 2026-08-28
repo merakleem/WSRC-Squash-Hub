@@ -90,7 +90,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
     WHERE t.id IN (
       SELECT tournament_id FROM tournament_players WHERE player_id = ?
       UNION
-      SELECT tournament_id FROM tournament_matches WHERE player1_id = ? OR player2_id = ?
+      SELECT tournament_id FROM matches WHERE type = 'tournament' AND (player1_id = ? OR player2_id = ?)
     )
     ORDER BY t.championship_date DESC
   `).all(id, id, id);
