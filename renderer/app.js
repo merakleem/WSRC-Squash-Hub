@@ -4,6 +4,8 @@ import { modal } from './utils.js';
 import { renderSchedule } from './schedule.js';
 
 import { renderClubActivity, renderClubSettings, renderDashboard } from './pages/dashboard.js';
+import { openMatchCard } from './matchCard.js';
+import { renderReportScore } from './pages/reportScore.js';
 import { renderPlayers, renderPlayerProfile, openPlayerProfile, openPickupGameModal, openReportScoreModal } from './pages/players.js';
 import { renderLadder, resetLadderSeason } from './pages/ladder.js';
 import { renderLeagues } from './pages/leagues.js';
@@ -23,6 +25,8 @@ function navigate(page, params = {}, { pushHistory = true } = {}) {
   if (params.league) state.currentLeague = params.league;
   if (params.player) state.currentPlayer = params.player;
   if (params.tournamentId != null) state.currentTournamentId = params.tournamentId;
+  // Which match the Report Score page should open on arrival, if any.
+  state.reportMatchId = params.matchId ?? null;
 
   // Sidebar active state
   const isOwnProfile = page === 'playerProfile' && state.currentPlayer?.id === state.currentUser?.playerId;
@@ -101,6 +105,7 @@ function renderPage() {
     case 'leagueDetail':     renderLeagueDetail(); break;
     case 'createLeague':     renderCreateLeague(); break;
     case 'playerProfile':    renderPlayerProfile(); break;
+    case 'reportScore':      renderReportScore(); break;
     case 'tournaments':      renderTournaments(); break;
     case 'tournamentDetail': renderTournamentDetail(); break;
     case 'createTournament': renderCreateTournament(); break;
@@ -139,6 +144,20 @@ window.navigate = navigate;
 window.openPlayerProfile = openPlayerProfile;
 window.openReportScoreModal = openReportScoreModal;
 window.openPickupGameModal = openPickupGameModal;
+window.openMatchCard = openMatchCard;
+
+// Any element carrying data-match opens that match's card. Delegated once here
+// rather than bound per page, so a new surface only has to render the
+// attribute. A click on a player link, a button or a link inside the row keeps
+// its own meaning.
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.nav-player-link, button, a, input, select')) return;
+  const el = e.target.closest('[data-match], [data-match-id]');
+  const id = el?.dataset.match || el?.dataset.matchId;
+  if (!id) return;
+  openMatchCard(id);
+});
+window.renderReportScore = renderReportScore;
 // Needed by pages/players.js after recording games/scores
 window.renderLadder = renderLadder;
 window.renderDashboard = renderDashboard;

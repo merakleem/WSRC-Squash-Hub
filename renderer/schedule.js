@@ -653,6 +653,19 @@ export async function renderSchedule() {
           el.classList.toggle('sch-booking--selected', selectedIds.has(Number(el.dataset.bookingId))));
       }
 
+      // A league or tournament block opens its match card. Bound here rather than
+      // through the app-wide delegate because this grid drags: a drag that ends
+      // over a block still fires a click, and `moved` is the only thing that
+      // tells the two apart.
+      courtsRow.addEventListener('click', (e) => {
+        if (e.target.closest('.sch-booking-edit-btn')) return;
+        const block = e.target.closest('[data-booking-id]');
+        const raw = block?.dataset.bookingId;
+        if (!raw || !/^[mt]_/.test(String(raw))) return;
+        if (window.__schDragMoved) return;
+        window.openMatchCard(raw);
+      }, { signal });
+      
       // Edit icon click → open edit modal
       courtsRow.addEventListener('click', (e) => {
         const editBtn = e.target.closest('.sch-booking-edit-btn');
@@ -761,6 +774,8 @@ export async function renderSchedule() {
             minIdx: si, maxIdx: si, minTime: t, maxTime: t + 60 };
 
         } else if (bookingEl) {
+          // A fresh gesture: until the pointer moves, this is a click.
+          window.__schDragMoved = false;
           const rawBid = bookingEl.dataset.bookingId;
           const isLeagueSlot = rawBid.startsWith('m_');
           const isTournamentSlot = rawBid.startsWith('t_');
@@ -839,7 +854,7 @@ export async function renderSchedule() {
         if (pasteMode) { updatePasteGhosts(e.clientX, e.clientY); return; }
         if (!drag) return;
         const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
-        if (!drag.moved && Math.sqrt(dx * dx + dy * dy) > 6) drag.moved = true;
+        if (!drag.moved && Math.sqrt(dx * dx + dy * dy) > 6) { drag.moved = true; window.__schDragMoved = true; }
         if (!drag.moved) return;
         const ci = clampCourtIdx(e.clientX);
 

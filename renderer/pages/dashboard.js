@@ -84,7 +84,7 @@ export async function renderClubActivity(days = 7) {
     const deleteBtn   = (admin && m.source === 'pickup')
       ? `<button class="ca-delete-btn" data-id="${m.id}">Delete</button>` : '';
     return `
-      <div class="ca-item">
+      <div class="ca-item" data-match="${m.id}">
         <div class="ca-item-main">
           <span class="ca-winner">${esc(winnerLabel)}${esc(winnerName)}</span>
           <span class="ca-verb"> beat </span>
@@ -696,7 +696,7 @@ export async function renderDashboard() {
           ${nextMatch ? `
             <div class="dh-hero-left">
               <div class="dh-match-label">${esc(leagueLabel)}</div>
-              <div class="dh-matchup">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}</div>
+              <div class="dh-matchup" data-match="${nextMatch.id}">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}</div>
               <div class="dh-pills">${pills}</div>
             </div>
             ${countdownInnerHTML ? `
@@ -796,13 +796,9 @@ export async function renderDashboard() {
           <svg class="db-quick-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" fill="#5b7cf9"><g transform="translate(-180,-2159)"><g transform="translate(56,160)"><path d="M134,2008.99998 C131.783496,2008.99998 129.980955,2007.20598 129.980955,2004.99998 C129.980955,2002.79398 131.783496,2000.99998 134,2000.99998 C136.216504,2000.99998 138.019045,2002.79398 138.019045,2004.99998 C138.019045,2007.20598 136.216504,2008.99998 134,2008.99998 M137.775893,2009.67298 C139.370449,2008.39598 140.299854,2006.33098 139.958235,2004.06998 C139.561354,2001.44698 137.368965,1999.34798 134.722423,1999.04198 C131.070116,1998.61898 127.971432,2001.44898 127.971432,2004.99998 C127.971432,2006.88998 128.851603,2008.57398 130.224107,2009.67298 C126.852128,2010.93398 124.390463,2013.89498 124.004634,2017.89098 C123.948368,2018.48198 124.411563,2018.99998 125.008391,2018.99998 C125.519814,2018.99998 125.955881,2018.61598 126.001095,2018.10898 C126.404004,2013.64598 129.837274,2010.99998 134,2010.99998 C138.162726,2010.99998 141.595996,2013.64598 141.998905,2018.10898 C142.044119,2018.61598 142.480186,2018.99998 142.991609,2018.99998 C143.588437,2018.99998 144.051632,2018.48198 143.995366,2017.89098 C143.609537,2013.89498 141.147872,2010.93398 137.775893,2009.67298"/></g></g></svg>
           My Profile
         </button>
-        <button class="db-quick-item" onclick="openReportScoreModal()">
+        <button class="db-quick-item" onclick="navigate('reportScore')">
           <svg class="db-quick-icon" viewBox="0 0 98.374 98.374" xmlns="http://www.w3.org/2000/svg" fill="#2ec610"><path d="M97.789,23.118l-7.24-7.24c-0.781-0.781-2.047-0.781-2.828,0L50.464,53.133l-13.291-13.29c-0.781-0.781-2.047-0.781-2.828,0l-7.24,7.24c-0.375,0.375-0.586,0.884-0.586,1.414c0,0.53,0.211,1.039,0.586,1.414L49.05,71.854c0.391,0.391,0.902,0.586,1.414,0.586c0.513,0,1.022-0.195,1.414-0.586l45.91-45.908c0.375-0.375,0.586-0.884,0.586-1.414C98.374,24.002,98.164,23.493,97.789,23.118z"/><path d="M73.583,80.979H10V17.395h65.098l8.485-8c0-1.104-0.896-2-2-2H2c-1.104,0-2,0.896-2,2v79.584c0,1.104,0.896,2,2,2h79.584c1.105,0,2-0.896,2-2v-37.88l-10,10.5L73.583,80.979L73.583,80.979z"/></svg>
-          Report League Match Score
-        </button>
-        <button class="db-quick-item" onclick="openPickupGameModal()">
-          <svg class="db-quick-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="#ff7300"><path d="M23.5 13.187h-7.5v-12.187l-7.5 17.813h7.5v12.187l7.5-17.813z"/></svg>
-          Report Ladder Match Score
+          Report score
         </button>
       </div>
     </div>`;

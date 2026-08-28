@@ -429,7 +429,7 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
     const editing = cb.panel === 'edit' && String(cb.panelBooking?.id) === String(s.id);
     return `
       <div class="cb-block cb-block--${kind}${canEdit ? ' cb-block--editable' : ''}${editing ? ' cb-block--editing' : ''}"
-        data-bid="${s.id}" data-court="${courtId}"
+        data-bid="${s.id}" data-court="${courtId}"${s.source && s.source !== 'custom' ? ` data-match="${s.id}"` : ''}
         style="top:${topFor(s.startMin) + 1}px;height:${Math.max(h - 3, 16)}px">
         <span class="cb-block-title">${esc(mine ? 'You' : s.title)}</span>
         <span class="cb-block-time">${fmtRange(s.startMin, s.durationMinutes)}</span>

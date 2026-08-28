@@ -837,7 +837,7 @@ export function renderPlayerProfile() {
     const deltaHTML = delta === undefined || delta === null ? '' : `
       <span class="pp-row-delta ${delta >= 0 ? 'pp-delta-up' : 'pp-delta-down'}">${delta >= 0 ? '+' : ''}${delta}</span>`;
     return `
-      <div class="pp-row">
+      <div class="pp-row" data-match="${m.id}">
         <span class="pp-chip ${won ? 'pp-chip-w' : 'pp-chip-l'}">${won ? 'W' : 'L'}</span>
         <div class="pp-row-main">
           <span class="pp-row-title">${opponent}</span>
@@ -919,7 +919,7 @@ export function renderPlayerProfile() {
           ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
           : esc(m.opponent_name || 'TBD');
         return `
-          <div class="pp-row pp-row-lg${i === 0 ? ' pp-row-next' : ''}">
+          <div class="pp-row pp-row-lg${i === 0 ? ' pp-row-next' : ''}" data-match="${m.id}">
             <div class="pp-date-block">
               <span class="pp-date-main">${formatShortDate(m.week_date)}</span>
               ${timing ? `<span class="pp-date-sub">${esc(timing)}</span>` : ''}

@@ -125,8 +125,192 @@ function getParticipation() {
   `).all();
 }
 
+
+
+// ladderModel already requires this module, so it is required back lazily -
+// at load time it would hand us a half-built one.
+function ladderStatsFor(ids) {
+  const { getLadderForSeason } = require('./ladderModel');
+  const { rows } = getLadderForSeason();
+  const byId = Object.fromEntries(rows.map((r) => [r.id, { position: r.position, rating: r.rating ?? null }]));
+  return Object.fromEntries(ids.filter(Boolean).map((id) => [id, byId[id] || null]));
+}
+
+// The rating map is keyed on the outward source name, not the type.
+function _ratingKey(type, id) {
+  return `${type === 'ladder' ? 'pickup' : type}:${id}`;
+}
+
+/**
+ * Head to head between two players, across every kind of match.
+ *
+ * Compares the effective players, so a match someone played as a substitute
+ * counts for them and not for the player they stood in for, and reads the
+ * winner from the score - the same rules the ladder and the records use, so a
+ * card can never disagree with the profile behind it.
+ */
+function getHeadToHead(playerA, playerB, { limit = 5 } = {}) {
+  const rows = getDB().prepare(`
+    SELECT m.id, m.type, m.played_at, m.player1_score, m.player2_score, m.scores,
+           ${EFF_P1} AS eff_p1_id,
+           ${EFF_P2} AS eff_p2_id,
+           ${WON_SIDE} AS won_side
+    FROM matches m ${EFF_JOIN}
+    WHERE ${COUNTS}
+      AND ((${EFF_P1} = @a AND ${EFF_P2} = @b) OR (${EFF_P1} = @b AND ${EFF_P2} = @a))
+    ORDER BY m.played_at DESC
+  `).all({ a: Number(playerA), b: Number(playerB) });
+
+  let aWins = 0, bWins = 0;
+  const meetings = rows.map((r) => {
+    const winnerId = r.won_side === 1 ? r.eff_p1_id : r.eff_p2_id;
+    if (winnerId === Number(playerA)) aWins++; else bWins++;
+    // Games won by each side, oriented winner-first, which is how a squash
+    // score is read aloud.
+    let hi = r.player1_score, lo = r.player2_score;
+    if (hi == null || lo == null) { hi = null; lo = null; }
+    else if (r.won_side === 2) { [hi, lo] = [lo, hi]; }
+    return {
+      id: r.id,
+      type: r.type,
+      played_at: r.played_at,
+      winner_id: winnerId,
+      score: hi == null ? null : `${hi}\u2013${lo}`,
+    };
+  });
+
+  return { aWins, bWins, total: rows.length, meetings: meetings.slice(0, limit) };
+}
+
+/**
+ * Everything the match card shows, for one match.
+ *
+ * `viewerId` decides only two things: which player gets the "you" ring, and
+ * whether a score can be submitted from the card. Anyone signed in may look at
+ * any match.
+ */
+function getMatchCard(matchId, viewerId = null) {
+  const db = getDB();
+  const m = db.prepare(`
+    SELECT m.*,
+           ${EFF_P1} AS eff_p1_id,
+           ${EFF_P2} AS eff_p2_id,
+           ${WON_SIDE} AS won_side,
+           p1.name AS p1_name, p1.photo_path AS p1_photo,
+           p2.name AS p2_name, p2.photo_path AS p2_photo,
+           c.name  AS court_name,
+           l.name  AS league_name,
+           d.name  AS division_name,
+           w.week_number,
+           t.name  AS tournament_name
+    FROM matches m ${EFF_JOIN}
+    LEFT JOIN players p1 ON p1.id = ${EFF_P1}
+    LEFT JOIN players p2 ON p2.id = ${EFF_P2}
+    LEFT JOIN courts c      ON c.id = m.court_id
+    LEFT JOIN leagues l     ON l.id = m.league_id
+    LEFT JOIN divisions d   ON d.id = m.division_id
+    LEFT JOIN weeks w       ON w.id = m.week_id
+    LEFT JOIN tournaments t ON t.id = m.tournament_id
+    WHERE m.id = ?
+  `).get(Number(matchId));
+  if (!m) return null;
+
+  const viewer = viewerId == null ? null : Number(viewerId);
+  const isPlayed = m.status === 'played';
+
+  // Games won, oriented to each player.
+  const scoreFor = (side) => (side === 1 ? m.player1_score : m.player2_score);
+
+  const players = [1, 2].map((side) => {
+    const id = side === 1 ? m.eff_p1_id : m.eff_p2_id;
+    return {
+      id,
+      name: side === 1 ? m.p1_name : m.p2_name,
+      photo_path: side === 1 ? m.p1_photo : m.p2_photo,
+      games: scoreFor(side),
+      won: isPlayed && m.won_side === side,
+      is_viewer: viewer != null && id === viewer,
+    };
+  });
+
+  // A player may take part without being on the ladder, so a missing position
+  // is expected rather than an error.
+  const ladder = ladderStatsFor(players.map((p) => p.id));
+  players.forEach((p) => { p.position = ladder[p.id]?.position ?? null; p.rating = ladder[p.id]?.rating ?? null; });
+
+  // A rating only moves in a rated season, so a played match may legitimately
+  // have no delta. It is symmetric: what one player gains the other loses.
+  if (isPlayed) {
+    const { getPlayerMatchRatingDeltas } = require('./ladderModel');
+    const delta = getPlayerMatchRatingDeltas(players[0].id)[_ratingKey(m.type, m.id)];
+    if (delta !== undefined) {
+      players[0].rating_change = delta;
+      players[1].rating_change = -delta;
+    }
+  }
+
+  const h2h = (players[0].id && players[1].id)
+    ? getHeadToHead(players[0].id, players[1].id)
+    : { aWins: 0, bWins: 0, total: 0, meetings: [] };
+
+  return {
+    id: m.id,
+    type: m.type,
+    status: m.status,
+    players,
+    score: isPlayed && m.player1_score != null
+      ? `${Math.max(m.player1_score, m.player2_score)}\u2013${Math.min(m.player1_score, m.player2_score)}`
+      : null,
+    scheduled_date: m.scheduled_date,
+    scheduled_time: m.scheduled_time,
+    court_name: m.court_name,
+    played_at: m.played_at,
+    league_name: m.league_name,
+    division_name: m.division_name,
+    week_number: m.week_number,
+    tournament_name: m.tournament_name,
+    round: m.round,
+    head_to_head: h2h,
+    // Tournament scores are entered by the club through the bracket, so a
+    // participant is never offered the button for one.
+    // A skipped match is one the club decided would not be played, so there is
+    // nothing to report on it.
+    can_submit_score: viewer != null && !isPlayed && m.type !== 'tournament' && !m.skipped
+      && players.some((p) => p.id === viewer),
+    skipped: !!m.skipped,
+  };
+}
+
+/**
+ * The signed-in player's matches that still need a score: everything of theirs
+ * that is not played, soonest first, with undated ones last.
+ */
+function getReportableMatches(playerId) {
+  return getDB().prepare(`
+    SELECT m.id, m.type, m.status, m.scheduled_date, m.scheduled_time,
+           c.name AS court_name,
+           l.name AS league_name, d.name AS division_name, w.week_number,
+           CASE WHEN ${EFF_P1} = @id THEN ${EFF_P2} ELSE ${EFF_P1} END AS opponent_id,
+           CASE WHEN ${EFF_P1} = @id THEN p2.name ELSE p1.name END AS opponent_name,
+           CASE WHEN ${EFF_P1} = @id THEN p2.photo_path ELSE p1.photo_path END AS opponent_photo
+    FROM matches m ${EFF_JOIN}
+    LEFT JOIN players p1 ON p1.id = ${EFF_P1}
+    LEFT JOIN players p2 ON p2.id = ${EFF_P2}
+    LEFT JOIN courts c    ON c.id = m.court_id
+    LEFT JOIN leagues l   ON l.id = m.league_id
+    LEFT JOIN divisions d ON d.id = m.division_id
+    LEFT JOIN weeks w     ON w.id = m.week_id
+    WHERE m.status != 'played'
+      AND m.type != 'tournament'
+      AND (m.skipped = 0 OR m.skipped IS NULL)
+      AND (${EFF_P1} = @id OR ${EFF_P2} = @id)
+    ORDER BY m.scheduled_date IS NULL, m.scheduled_date, m.scheduled_time
+  `).all({ id: Number(playerId) });
+}
+
 module.exports = {
   TYPES, STATUSES,
   SOURCE_OF_TYPE, EFF_JOIN, EFF_P1, EFF_P2, COUNTS, WON_SIDE,
   getCompletedMatches, getLastMatchDates, getParticipation,
+  getHeadToHead, getMatchCard, getReportableMatches,
 };

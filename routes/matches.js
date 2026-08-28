@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
+const matchModel = require('../models/matchModel');
 const seasonModel = require('../models/seasonModel');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
 const { sendEmail, isConfigured: emailConfigured } = require('../lib/email');
@@ -72,20 +73,23 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   const theirScore = Number(req.body.theirScore);
 
   const db = getDB();
+  // Works for a league match or a ladder one. The match carries its own league,
+  // so there is no chain to walk, and a ladder match simply has none.
   const match = db.prepare(`
-    SELECT m.id, m.player1_id, m.player2_id, m.player1_score,
+    SELECT m.id, m.type, m.status, m.skipped, m.player1_id, m.player2_id, m.player1_score,
            s1.sub_player_id AS p1_sub, s2.sub_player_id AS p2_sub,
            l.status AS league_status
     FROM matches m
     LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
-    JOIN team_matchups tm ON tm.id = m.matchup_id
-    JOIN weeks w ON w.id = tm.week_id
-    JOIN leagues l ON l.id = w.league_id
+    LEFT JOIN leagues l ON l.id = m.league_id
     WHERE m.id = ?
   `).get(matchId);
 
   if (!match) return res.status(404).json({ error: 'Match not found' });
+  // Tournament results are entered by the club through the bracket.
+  if (match.type === 'tournament') return res.status(403).json({ error: 'Tournament scores are entered by the club.' });
+  if (match.skipped) return res.status(409).json({ error: 'This match was skipped.' });
   if (match.league_status === 'completed') return res.status(403).json({ error: 'This league has ended — scores can no longer be reported.' });
   if (match.player1_score !== null) return res.status(409).json({ error: 'Score has already been reported for this match' });
 
@@ -105,12 +109,30 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
 
   if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 games (e.g. 3–1, 3–2)' });
 
-  const winnerId = p1Score > p2Score ? match.player1_id : match.player2_id;
+  // The winner is recorded as whoever actually played, so nothing downstream
+  // has to guess which of the two conventions this row followed.
+  const winnerId = p1Score > p2Score ? effP1 : effP2;
   await leagueModel.updateMatchScore({ matchId, player1Score: p1Score, player2Score: p2Score, winnerId, submittedByPlayerId: playerId });
   res.json({ ok: true });
 }));
 
 // /matches/pickup must come before /matches/:id/* to avoid "pickup" matching as :id
+// A match card can be opened from anywhere a match appears - the dashboard, a
+// profile, a league page, the schedule, the activity feed. Any signed-in member
+// may look at any match; the viewer only decides who gets the "you" ring and
+// whether a score can be submitted.
+router.get('/matches/:id/card', requireAuth, wrap(async (req, res) => {
+  const card = matchModel.getMatchCard(req.params.id, req.session.playerId || null);
+  if (!card) return res.status(404).json({ error: 'Match not found.' });
+  res.json(card);
+}));
+
+// The signed-in player's matches still waiting on a score.
+router.get('/my-matches/reportable', requireAuth, wrap(async (req, res) => {
+  if (!req.session.playerId) return res.json([]);
+  res.json(matchModel.getReportableMatches(req.session.playerId));
+}));
+
 router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
   const db = getDB();
   const submitterId = req.session.playerId;
