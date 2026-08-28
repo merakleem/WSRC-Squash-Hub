@@ -113,6 +113,9 @@ function _cardHTML(c) {
     <div class="mc-card">
       <div class="mc-band">
         <span class="mc-kicker">${esc(_kicker(c))}</span>
+        <button class="mc-close" id="mcClose" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
       </div>
 
       <div class="mc-players">
@@ -169,7 +172,8 @@ export async function openMatchCard(matchId) {
   if (!card) { modal.close(); return; }
 
   document.getElementById('modalBody').innerHTML = _cardHTML(card);
-  document.getElementById('modal')?.classList.add('modal-matchcard');
+
+  document.getElementById('mcClose')?.addEventListener('click', () => modal.close());
 
   document.querySelectorAll('#modalBody .mc-name').forEach((el) => {
     el.addEventListener('click', () => {

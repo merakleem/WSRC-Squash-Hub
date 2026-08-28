@@ -133,6 +133,9 @@ ok('the bar is proportioned to the record', $('.mc-bar-fill')?.getAttribute('sty
 ok('past meetings are listed', $$('.mc-meeting').length === 2);
 ok('a meeting names its winner', $('.mc-meeting-who')?.textContent === 'Sofia Duarte');
 ok('no submit button on a played match', !$('#mcSubmit'));
+ok('the band carries a close button', !!$('#mcClose'));
+click($('#mcClose'));
+ok('and closing it hides the overlay', !document.getElementById('modalOverlay').classList.contains('open'));
 
 console.log('\nMATCH CARD — scheduled, and mine');
 await card.openMatchCard(101); await settle();

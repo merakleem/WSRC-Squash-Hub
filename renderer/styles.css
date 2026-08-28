@@ -6873,12 +6873,28 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .em-footer-btns .btn { width: 100%; }
 }
 
+/* A match is clickable wherever it is drawn, so it says so. */
+[data-match], .match-row[data-match-id] { cursor: pointer; }
+.ca-item[data-match]:hover,
+.db-upcoming-row[data-match]:hover,
+.pp-row[data-match]:hover { background: var(--surface-2); }
+.db-result-card[data-match]:hover { filter: brightness(.97); }
+.match-row[data-match-id]:hover { background: var(--surface-2); }
+
 /* ===== MATCH CARD (mc-) =====
    One modal, opened wherever a match is drawn. The photo band replaces the
    usual modal title bar, so the shell's header is hidden for this one. */
-.modal.modal-matchcard { width: 480px; }
-.modal.modal-matchcard .modal-header { display: none; }
-.modal.modal-matchcard .modal-body { padding: 0; }
+/* Scoped with :has() rather than a class on the shell, so it unsets itself when
+   any other modal opens - modal.close() clears only its own classes. */
+.modal:has(.mc-card) {
+  width: 480px;
+  /* The photo band runs to the edges; without this its square corners sit
+     outside the modal's rounded ones, which reads as the top being cut off. */
+  overflow: hidden;
+}
+/* The band carries the title and the close button, so the shell's header goes. */
+.modal:has(.mc-card) .modal-header { display: none; }
+.modal:has(.mc-card) .modal-body { padding: 0; }
 
 .mc-card { display: flex; flex-direction: column; }
 
@@ -6897,6 +6913,23 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   background-size: cover;
   background-position: center 72%;
 }
+.mc-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .85);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.mc-close svg { width: 14px; height: 14px; }
+.mc-close:hover { background: #fff; }
 .mc-kicker {
   flex: 1;
   font-family: 'Barlow', sans-serif;
@@ -7210,7 +7243,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .rs-btn--primary:disabled { background: #e2e6ee; color: #93a2b5; cursor: default; }
 
 @media (max-width: 768px) {
-  .modal.modal-matchcard { width: 100%; }
+  .modal:has(.mc-card) { width: 100%; }
   .mc-band { height: 118px; padding: 0 18px 8px; }
   .mc-players { padding: 18px 16px 14px; }
   .mc-avatar { width: 48px; height: 48px; font-size: 16px; }
