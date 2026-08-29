@@ -7296,7 +7296,11 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .viewas-btn:hover { background: rgba(255, 255, 255, .26); }
 /* The whole app moves down so the bar never covers the sidebar or top bar. */
-body.is-viewing-as .app-container { height: calc(100vh - 38px); height: calc(100dvh - 38px); margin-top: 38px; }
+/* Padding on a border-box body rather than a margin on the container: body is
+   a fixed 100dvh, so a margin pushed 38px of layout past the bottom of it and
+   left a strip of page showing under the app. */
+body.is-viewing-as { box-sizing: border-box; padding-top: 38px; }
+body.is-viewing-as .app-container { height: 100%; }
 
 @media (max-width: 768px) {
   .viewas-bar { font-size: 12px; gap: 10px; }
