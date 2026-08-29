@@ -4669,14 +4669,13 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .sch-time-label {
   position: absolute;
-  right: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text);
+  right: 10px;
   font-family: 'Barlow', sans-serif;
-  white-space: nowrap;
-  pointer-events: none;
-  line-height: 1;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #9aa4b8;
 }
 .sch-courts-row {
   display: flex;
@@ -4815,55 +4814,48 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   pointer-events: none;
   z-index: 5;
 }
-.sch-grid-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: rgba(0,0,0,0.04);
-  pointer-events: none;
-}
-.sch-grid-line.major {
-  background: rgba(0,0,0,0.08);
-}
+/* A muted card with the type colour as a left bar. The admin's chosen colour is
+   an accent, never the fill - a wall of saturated blocks was the hardest thing
+   to read on the old grid. */
 .sch-booking {
   position: absolute;
   left: 6px;
-  right: 6px;
+  right: 7px;
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 5px 10px;
   overflow: hidden;
   box-sizing: border-box;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  background: #f4f6fa;
+  border-left: 3px solid var(--type-color, #3550c8);
   cursor: default;
 }
+.sch-booking:hover { background: #eef2fa; }
 .sch-booking-time {
   font-size: 10px;
-  color: rgba(255,255,255,0.82);
+  font-weight: 600;
+  color: #93a2b5;
   line-height: 1.2;
-  margin-bottom: 1px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .sch-booking-title {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text);
   line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  letter-spacing: 0.1px;
 }
 .sch-booking-info {
   font-size: 11px;
-  color: rgba(255,255,255,0.75);
+  color: #8793ab;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 .sch-booking-edit-btn {
   position: absolute;
@@ -4887,7 +4879,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .sch-booking:hover .sch-booking-edit-btn { opacity: 1; }
 .sch-booking-edit-btn:hover { background: rgba(0,0,0,0.4) !important; opacity: 1 !important; }
-.sch-booking:not(.sch-booking-league):hover { opacity: 0.85; }
 
 /* ===== FORM ROW (two-column) ===== */
 .form-row {
@@ -5019,8 +5010,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .tr-bc-footer { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
 
 /* ===== SCHEDULE: tournament block ===== */
-.sch-booking-tournament { opacity: 0.95; }
-.sch-booking-tournament:hover { opacity: 0.95 !important; }
 
 /* Score modal */
 .tr-score-modal { display: flex; flex-direction: column; gap: 16px; }
@@ -7306,3 +7295,77 @@ body.is-viewing-as .app-container { height: 100%; }
   .viewas-bar { font-size: 12px; gap: 10px; }
   .viewas-btn { padding: 5px 10px; font-size: 12px; }
 }
+
+/* ===== ADMIN SCHEDULE — chrome and grid, matched to the player page =====
+   The date bar, week strip and calendar are the player page's own classes
+   (cb-date-bar, cb-week, cb-cal); only what is genuinely admin-only lives
+   here. */
+.sch-topbar-help { font-size: 12.5px; color: #93a2b5; margin-right: 4px; }
+.sch-new-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sch-new-btn:hover { background: var(--primary-hover); }
+.sch-new-btn svg { width: 14px; height: 14px; }
+
+.sch-date-bar { padding: 20px 26px 16px; }
+
+/* Two-hour bands, as on the player grid: no rule every thirty minutes. */
+.sch-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 152px;      /* four 38px steps */
+  background: #f7f9fc;
+  pointer-events: none;
+}
+
+/* The legend maps colour to type for the day on screen, and is hidden when
+   the day is empty rather than showing an empty rail. */
+.sch-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 26px;
+  border-bottom: 1px solid var(--divider);
+  flex-shrink: 0;
+}
+.sch-legend-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #aab4c5;
+}
+.sch-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+.sch-legend-dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.sch-legend-count { margin-left: auto; font-size: 11.5px; color: #aab4c5; }
+
+.sch-slot {
+  position: absolute;
+  left: 6px;
+  right: 7px;
+  height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  pointer-events: none;
+  transition: background .12s, border-color .12s;
+}
+.sch-slot-time { font-size: 11.5px; font-weight: 500; color: #c3ccd9; }
+.sch-slot-plus { font-size: 14px; font-weight: 700; color: #3550c8; opacity: 0; }
+.sch-court-col:hover .sch-slot:hover { background: #f2f5ff; border-color: #b7c5fb; }

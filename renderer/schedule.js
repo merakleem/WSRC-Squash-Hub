@@ -82,7 +82,15 @@ export async function renderSchedule() {
   const savedScrollTop = content.querySelector('.sch-grid-scroll')?.scrollTop ?? 0;
 
   const actionsEl = document.getElementById('topbarActions');
-  actionsEl.innerHTML = isAdmin() ? `<button class="btn btn-primary" id="btnNewBooking">+ New Booking</button>` : '';
+  // The helper line and the button live in the app's own top bar, as on every
+  // other page, rather than the page growing a second bar of its own.
+  actionsEl.innerHTML = isAdmin()
+    ? `<span class="sch-topbar-help">Drag on the grid to create a booking</span>
+       <button class="sch-new-btn" id="btnNewBooking">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+         New booking
+       </button>`
+    : '';
 
   content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
 
@@ -117,34 +125,67 @@ export async function renderSchedule() {
   const isToday = state.scheduleDate === today;
 
   // 7-day strip centred on selected date
-  const stripStart = _addDaysLocal(state.scheduleDate, -3);
+  // Seven days centred on the day being viewed - admins navigate to arbitrary
+  // dates, so a strip anchored to today would often not contain it. Drawn with
+  // the player page's cells so the two pages cannot drift apart.
+  const monthDayLabel = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  const WD1 = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const dayStripHTML = Array.from({ length: 7 }, (_, i) => {
-    const d = _addDaysLocal(stripStart, i);
-    const [, , dd] = d.split('-').map(Number);
-    const dObj = new Date(d.split('-').map(Number)[0], d.split('-').map(Number)[1] - 1, dd);
-    const dayName = dObj.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-    const isActive = d === state.scheduleDate;
+    const d = _addDaysLocal(_addDaysLocal(state.scheduleDate, -3), i);
+    const dObj = new Date(d + 'T12:00:00');
+    const sel = d === state.scheduleDate;
     const isDayToday = d === today;
-    return `<button class="sch-day-btn${isActive ? ' active' : ''}${isDayToday ? ' today' : ''}" data-date="${d}">
-      <span class="sch-day-name">${dayName}</span>
-      <span class="sch-day-num">${dd}</span>
+    return `<button class="cb-day${sel ? ' cb-day--sel' : ''}" data-date="${d}">
+      <span class="cb-day-wd">${WD1[dObj.getDay()]}</span>
+      <span class="cb-day-n">${dObj.getDate()}</span>
+      <span class="cb-day-dot${!sel && isDayToday ? ' cb-day-dot--on' : ''}"></span>
     </button>`;
   }).join('');
+  
+  // The calendar popover, same markup and behaviour as the player page.
+  const schCalOpen = !!state.scheduleCalOpen;
+  const schCalMonth = state.scheduleCalMonth || state.scheduleDate.slice(0, 7);
+  const schCalendarHTML = (() => {
+    if (!schCalOpen) return '';
+    const [cy, cm] = schCalMonth.split('-').map(Number);
+    const lead = new Date(cy, cm - 1, 1).getDay();
+    const days = new Date(cy, cm, 0).getDate();
+    const MOx = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push('<span class="cb-cal-cell cb-cal-cell--blank"></span>');
+    for (let d = 1; d <= days; d++) {
+      const iso = `${cy}-${String(cm).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const sel = iso === state.scheduleDate;
+      const isDayToday = iso === today;
+      // Admins may look at, and book, any date - including past ones.
+      cells.push(`<button class="cb-cal-cell${sel ? ' cb-cal-cell--sel' : ''}${!sel && isDayToday ? ' cb-cal-cell--today' : ''}" data-caldate="${iso}">${d}</button>`);
+    }
+    return `<div class="cb-cal" id="schCal">
+      <div class="cb-cal-head">
+        <span class="cb-cal-month">${MOx[cm - 1]} ${cy}</span>
+        <div class="cb-cal-navs">
+          <button class="cb-cal-nav" id="schCalPrev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <button class="cb-cal-nav" id="schCalNext" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+      </div>
+      <div class="cb-cal-wd">${['S','M','T','W','T','F','S'].map((w) => `<span>${w}</span>`).join('')}</div>
+      <div class="cb-cal-grid">${cells.join('')}</div>
+    </div>`;
+  })();
 
   // Time axis
   const DAY_START = 6 * 60;
   const DAY_END   = 23 * 60;
-  const SLOT_H      = 44;
+  // Fixed density, matching the player grid. Zoom is gone: it existed to make a
+  // 44px row readable, and 38px with hour bands reads without it.
+  const SLOT_H      = 38;
   const SLOT_MIN    = 30;
   const totalSlots  = (DAY_END - DAY_START) / SLOT_MIN;
   const BASE_GRID_H = totalSlots * SLOT_H;
 
+  // "6 AM", matching the player grid's gutter.
   function fmtHour(h) {
-    if (h === 0 || h === 24) return '12am';
-    if (h === 12) return '12pm';
-    const ampm = h >= 12 ? 'pm' : 'am';
-    const hh = h % 12 === 0 ? 12 : h % 12;
-    return `${hh}${ampm}`;
+    return `${h % 12 === 0 ? 12 : h % 12} ${h < 12 || h === 24 ? 'AM' : 'PM'}`;
   }
 
   const timeAxisHTML = [];
@@ -152,7 +193,7 @@ export async function renderSchedule() {
     const h = Math.floor(m / 60);
     const top = ((m - DAY_START) / SLOT_MIN) * SLOT_H;
     const transform = top === 0 ? ';transform:none' : ';transform:translateY(-50%)';
-    timeAxisHTML.push(`<div class="sch-time-label" style="top:calc(${top}px * var(--zh))${transform}">${fmtHour(h)}</div>`);
+    timeAxisHTML.push(`<div class="sch-time-label" style="top:${top}px${transform}">${fmtHour(h)}</div>`);
   }
 
   // "Now" indicator — only on today, within operating hours
@@ -161,14 +202,13 @@ export async function renderSchedule() {
   const showNow = isToday && nowMins >= DAY_START && nowMins < DAY_END;
   const nowTop = ((nowMins - DAY_START) / SLOT_MIN) * SLOT_H;
   if (showNow) {
-    timeAxisHTML.push(`<div class="sch-now-label" style="top:calc(${nowTop}px * var(--zh));transform:translateY(-50%)">Now</div>`);
+    timeAxisHTML.push(`<div class="sch-now-label" style="top:${nowTop}px;transform:translateY(-50%)">Now</div>`);
   }
 
-  // Grid lines
-  const gridLinesHTML = Array.from({ length: totalSlots + 1 }, (_, i) => {
-    const top = i * SLOT_H;
-    return `<div class="sch-grid-line${i % 2 === 0 ? ' major' : ''}" style="top:calc(${top}px * var(--zh))"></div>`;
-  }).join('');
+  // Every other hour is filled rather than ruled, so the eye tracks rows
+  // without a line every thirty minutes.
+  const gridLinesHTML = Array.from({ length: Math.ceil(totalSlots / 4) }, (_, i) =>
+    `<div class="sch-band" style="top:${i * SLOT_H * 4}px"></div>`).join('');
 
   function timeToMinutes(t) {
     if (!t) return null;
@@ -178,6 +218,37 @@ export async function renderSchedule() {
 
   const courtIdxById = new Map(courts.map((c, i) => [c.id, i]));
 
+  // The faint start times behind the grid, as on the player page. They carry no
+  // pointer events: drag-to-create owns this column, and a child that swallowed
+  // the mousedown would break it.
+  // Colour to type, for the types actually on this day. An empty day gets no
+  // legend rather than an empty rail.
+  const legendHTML = (() => {
+    const custom = slots.filter((s) => s.source === 'custom');
+    if (!custom.length) return '';
+    const seen = new Map();
+    for (const s of custom) {
+      const name = s.bookingTypeId
+        ? (bookingTypes.find((b) => b.id === s.bookingTypeId)?.name || 'Booking')
+        : 'Standard';
+      if (!seen.has(name)) seen.set(name, s.color || '#3550c8');
+    }
+    const items = [...seen].map(([name, color]) =>
+      `<span class="sch-legend-item"><span class="sch-legend-dot" style="background:${esc(color)}"></span>${esc(name)}</span>`).join('');
+    const n = custom.length;
+    return `<div class="sch-legend">
+      <span class="sch-legend-label">On this day</span>
+      ${items}
+      <span class="sch-legend-count">${n} booking${n === 1 ? '' : 's'}</span>
+    </div>`;
+  })();
+  
+  const slotHintsHTML = Array.from({ length: totalSlots }, (_, i) => {
+    const m = DAY_START + i * SLOT_MIN;
+    const label = `${(Math.floor(m / 60) % 12) || 12}:${String(m % 60).padStart(2, '0')}`;
+    return `<div class="sch-slot" style="top:${i * SLOT_H + 1}px"><span class="sch-slot-time">${label}</span><span class="sch-slot-plus">+</span></div>`;
+  }).join('');
+  
   // Court columns (body only, no header inside)
   const courtColumnsHTML = courts.map((court) => {
     // Multi-court group slots are rendered as overlays on .sch-courts-row after innerHTML; skip here
@@ -202,57 +273,43 @@ export async function renderSchedule() {
       const editBtn = isAdmin() && !isLeague && !isTournament
         ? `<button class="sch-booking-edit-btn" data-edit-booking-id="${s.id}" title="Edit booking"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
         : '';
-      return `<div class="sch-booking${isLeague ? ' sch-booking-league' : ''}${isTournament ? ' sch-booking-tournament' : ''}"${editAttr} style="background:${esc(s.color)};top:calc(${top}px * var(--zh));height:calc(${safeH}px * var(--zh) - 3px)${cursorStyle}">
+      return `<div class="sch-booking${isLeague ? ' sch-booking-league' : ''}${isTournament ? ' sch-booking-tournament' : ''}"${editAttr} style="--type-color:${esc(s.color)};top:${top}px;height:${safeH - 3}px${cursorStyle}">
         ${editBtn}
         <div class="sch-booking-time">${timeRange}</div>
         <div class="sch-booking-title">${esc(s.title)}</div>
         ${subLine ? `<div class="sch-booking-info">${esc(subLine)}</div>` : ''}
       </div>`;
     }).join('');
-    return `<div class="sch-court-col" style="height:calc(${BASE_GRID_H}px * var(--zh))" data-court-id="${court.id}">
-      ${gridLinesHTML}${blocksHTML}
+    return `<div class="sch-court-col" style="height:${BASE_GRID_H}px" data-court-id="${court.id}">
+      ${gridLinesHTML}${slotHintsHTML}${blocksHTML}
     </div>`;
   }).join('');
 
   content.innerHTML = `
     <div class="sch-page">
-      <div class="sch-daybar">
-        <div class="sch-daybar-left">
-          <button class="sch-nav-btn" id="schPrev">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+
+      <div class="cb-date-bar sch-date-bar">
+        <div class="cb-date-row cb-date-row--desktop">
+          <button class="cb-icon-btn" id="schPrev" aria-label="Previous day">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
           </button>
-          <div class="sch-daybar-date">
-            <div class="sch-daybar-weekday">${weekdayName}</div>
-            <div class="sch-daybar-subdate">${dateLong}${isToday ? ' · Today' : ''}</div>
+          <div class="cb-date-block">
+            <div class="cb-date-wd">${weekdayName.toUpperCase()}${isToday ? '<span class="cb-today-pill">Today</span>' : ''}</div>
+            <div class="cb-date-md">${monthDayLabel}</div>
           </div>
-          <button class="sch-nav-btn" id="schNext">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          <button class="cb-icon-btn" id="schNext" aria-label="Next day">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
           </button>
-          <div class="sch-jump-wrap">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>
-            <span>Jump to date</span>
-            <input type="date" id="schDatePicker" class="sch-jump-input" value="${state.scheduleDate}">
+          <div class="cb-week">${dayStripHTML}</div>
+          <div class="cb-cal-anchor">
+            <button class="cb-icon-btn${schCalOpen ? ' cb-icon-btn--on' : ''}" id="schCalBtn" aria-label="Choose a date">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 3v3M16 3v3"/></svg>
+            </button>
+            ${schCalendarHTML}
           </div>
         </div>
-        <div class="sch-day-strip">${dayStripHTML}</div>
       </div>
 
-      ${isAdmin() && courts.length > 0 ? `<div class="sch-toolbar">
-        <div class="sch-type-pills">
-          <button class="sch-type-pill${state.scheduleBookingTypeId === null ? ' active' : ''}" data-type-id="" style="--pill-color:var(--accent)">Standard</button>
-          ${bookingTypes.map((bt) => `<button class="sch-type-pill${state.scheduleBookingTypeId === bt.id ? ' active' : ''}" data-type-id="${bt.id}" style="--pill-color:${esc(bt.color)}"><span class="sch-type-pill-dot" style="background:${esc(bt.color)}"></span>${esc(bt.name)}</button>`).join('')}
-        </div>
-        <div class="sch-toolbar-spacer"></div>
-        <div class="sch-zoom-group">
-          <button class="sch-zoom-btn" id="schZoomOut" title="Zoom out"${state.scheduleZoom <= 0.5 ? ' disabled' : ''}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </button>
-          <span class="sch-zoom-pct">${Math.round(state.scheduleZoom * 100)}%</span>
-          <button class="sch-zoom-btn" id="schZoomIn" title="Zoom in"${state.scheduleZoom >= 2.0 ? ' disabled' : ''}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </button>
-        </div>
-      </div>` : ''}
 
       ${courts.length === 0
         ? `<div class="sch-no-courts">No courts configured.${isAdmin() ? ` <a href="#" id="schGoSettings">Add courts in Club Settings.</a>` : ''}</div>`
@@ -263,8 +320,9 @@ export async function renderSchedule() {
                   <div class="sch-time-spacer" style="width:${TIME_COL_W}px"></div>
                   ${courts.map((c) => `<div class="sch-court-hd" style="min-width:${COURT_COL_W}px">${esc(c.name)}</div>`).join('')}
                 </div>
-                <div class="sch-grid-body" style="--zh:${state.scheduleZoom}">
-                  <div class="sch-time-col" style="width:${TIME_COL_W}px;height:calc(${BASE_GRID_H}px * var(--zh))">${timeAxisHTML.join('')}</div>
+                ${legendHTML}
+                <div class="sch-grid-body">
+                  <div class="sch-time-col" style="width:${TIME_COL_W}px;height:${BASE_GRID_H}px">${timeAxisHTML.join('')}</div>
                   <div class="sch-courts-row" style="--court-w:${COURT_COL_W}px">${courtColumnsHTML}</div>
                 </div>
               </div>
@@ -279,7 +337,7 @@ export async function renderSchedule() {
     if (courtsRowEl) {
       const nowLineEl = document.createElement('div');
       nowLineEl.className = 'sch-now-line';
-      nowLineEl.style.top = `calc(${nowTop}px * var(--zh))`;
+      nowLineEl.style.top = `${nowTop}px`;
       courtsRowEl.appendChild(nowLineEl);
     }
   }
@@ -313,7 +371,7 @@ export async function renderSchedule() {
         const widthPx = rightRect.right - leftRect.left - 12;
         const el = document.createElement('div');
         el.className = 'sch-booking';
-        el.style.cssText = `background:${s.color};position:absolute;left:${leftPx}px;width:${widthPx}px;top:calc(${top}px * var(--zh));height:calc(${safeH}px * var(--zh) - 3px);z-index:2${isAdmin() ? ';cursor:pointer' : ''}`;
+        el.style.cssText = `background:${s.color};position:absolute;left:${leftPx}px;width:${widthPx}px;top:${top}px;height:${safeH - 3}px;z-index:2${isAdmin() ? ';cursor:pointer' : ''}`;
         if (isAdmin()) el.dataset.bookingId = String(s.id);
         const _playerText = s.players && s.players.length > 0
           ? s.players.map((p) => { const pts = (p.name || '').trim().split(/\s+/); return pts.length > 1 ? `${pts[0][0]}. ${pts[pts.length - 1]}` : pts[0]; }).join(' · ')
@@ -327,79 +385,37 @@ export async function renderSchedule() {
     }
   }
 
-  content.querySelectorAll('.sch-day-btn').forEach((btn) => {
-    btn.addEventListener('click', () => { state.scheduleDate = btn.dataset.date; renderSchedule(); });
+  // Date controls. Changing the day closes the calendar, as on the player page.
+  const goToDate = (d) => { state.scheduleDate = d; state.scheduleCalOpen = false; renderSchedule(); };
+  content.querySelectorAll('.cb-day').forEach((btn) => {
+    btn.addEventListener('click', () => goToDate(btn.dataset.date));
   });
-  document.getElementById('schPrev')?.addEventListener('click', () => {
-    state.scheduleDate = _addDaysLocal(state.scheduleDate, -1); renderSchedule();
+  document.getElementById('schPrev')?.addEventListener('click', () => goToDate(_addDaysLocal(state.scheduleDate, -1)));
+  document.getElementById('schNext')?.addEventListener('click', () => goToDate(_addDaysLocal(state.scheduleDate, 1)));
+  
+  document.getElementById('schCalBtn')?.addEventListener('click', () => {
+    state.scheduleCalOpen = !state.scheduleCalOpen;
+    if (state.scheduleCalOpen) state.scheduleCalMonth = state.scheduleDate.slice(0, 7);
+    renderSchedule();
   });
-  document.getElementById('schNext')?.addEventListener('click', () => {
-    state.scheduleDate = _addDaysLocal(state.scheduleDate, 1); renderSchedule();
-  });
-  document.getElementById('schDatePicker')?.addEventListener('change', (e) => {
-    if (e.target.value) { state.scheduleDate = e.target.value; renderSchedule(); }
+  const shiftMonth = (delta) => {
+    const [y, m] = (state.scheduleCalMonth || state.scheduleDate.slice(0, 7)).split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    state.scheduleCalMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    renderSchedule();
+  };
+  document.getElementById('schCalPrev')?.addEventListener('click', () => shiftMonth(-1));
+  document.getElementById('schCalNext')?.addEventListener('click', () => shiftMonth(1));
+  content.querySelectorAll('[data-caldate]').forEach((el) => {
+    el.addEventListener('click', () => goToDate(el.dataset.caldate));
   });
   document.getElementById('schGoSettings')?.addEventListener('click', (e) => {
     e.preventDefault(); window.navigate('clubSettings');
   });
-  function applyZoom(newRatio, anchorClientY) {
-    const scrollEl = content.querySelector('.sch-grid-scroll');
-    const oldZoom = state.scheduleZoom;
-    const clamped = Math.max(0.5, Math.min(2.0, newRatio));
 
-    // Record unscaled grid position under the anchor point before zoom
-    let unscaledPos = null;
-    let cursorOffset = null;
-    if (scrollEl && anchorClientY !== undefined) {
-      const rect = scrollEl.getBoundingClientRect();
-      cursorOffset = anchorClientY - rect.top;
-      unscaledPos = (scrollEl.scrollTop + cursorOffset) / oldZoom;
-    }
-
-    state.scheduleZoom = clamped;
-    const gridBody = content.querySelector('.sch-grid-body');
-    if (gridBody) gridBody.style.setProperty('--zh', clamped);
-    const pctEl = content.querySelector('.sch-zoom-pct');
-    if (pctEl) pctEl.textContent = `${Math.round(clamped * 100)}%`;
-    const btnOut = document.getElementById('schZoomOut');
-    const btnIn  = document.getElementById('schZoomIn');
-    if (btnOut) btnOut.disabled = clamped <= 0.5;
-    if (btnIn)  btnIn.disabled  = clamped >= 2.0;
-
-    // Restore scroll so the anchor time stays under the same screen position
-    if (scrollEl && unscaledPos !== null) {
-      scrollEl.scrollTop = unscaledPos * clamped - cursorOffset;
-    }
-
-  }
-
-  document.getElementById('schZoomOut')?.addEventListener('click', () => {
-    const scrollEl = content.querySelector('.sch-grid-scroll');
-    const centerY = scrollEl ? scrollEl.getBoundingClientRect().top + scrollEl.clientHeight / 2 : undefined;
-    applyZoom(state.scheduleZoom / 1.25, centerY);
-  });
-  document.getElementById('schZoomIn')?.addEventListener('click', () => {
-    const scrollEl = content.querySelector('.sch-grid-scroll');
-    const centerY = scrollEl ? scrollEl.getBoundingClientRect().top + scrollEl.clientHeight / 2 : undefined;
-    applyZoom(state.scheduleZoom * 1.25, centerY);
-  });
   document.getElementById('btnNewBooking')?.addEventListener('click', () => openNewBookingModal(courts, slots));
 
-  // Booking type pill selection
-  content.querySelectorAll('.sch-type-pill').forEach((pill) => {
-    pill.addEventListener('click', () => {
-      const rawId = pill.dataset.typeId;
-      state.scheduleBookingTypeId = rawId ? Number(rawId) : null;
-      content.querySelectorAll('.sch-type-pill').forEach((p) => p.classList.toggle('active', p === pill));
-    });
-  });
 
-  // Ctrl+scroll (or trackpad pinch) on the grid = smooth zoom
-  content.querySelector('.sch-grid-scroll')?.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey) return;
-    e.preventDefault();
-    applyZoom(state.scheduleZoom * (e.deltaY < 0 ? 1.05 : 1 / 1.05), e.clientY);
-  }, { passive: false });
 
   // Admin toolbar + all grid interaction
   if (isAdmin()) {
@@ -415,8 +431,8 @@ export async function renderSchedule() {
         return cols.findIndex((col) => { const r = col.getBoundingClientRect(); return clientX >= r.left && clientX < r.right; });
       }
       function getTimeAtY(clientY) {
-        const effectiveSlotH = SLOT_H * state.scheduleZoom;
-        const y = Math.max(0, Math.min(clientY - courtsRow.getBoundingClientRect().top, BASE_GRID_H * state.scheduleZoom - 1));
+        const effectiveSlotH = SLOT_H;
+        const y = Math.max(0, Math.min(clientY - courtsRow.getBoundingClientRect().top, BASE_GRID_H - 1));
         return Math.round((DAY_START + (y / effectiveSlotH) * SLOT_MIN) / 15) * 15;
       }
       function getColRect(idx) {
@@ -426,7 +442,7 @@ export async function renderSchedule() {
         const rowRect = courtsRow.getBoundingClientRect();
         const s = getColRect(minIdx), e2 = getColRect(maxIdx);
         if (!s || !e2) return;
-        const effectiveSlotH = SLOT_H * state.scheduleZoom;
+        const effectiveSlotH = SLOT_H;
         const top = ((minTime - DAY_START) / SLOT_MIN) * effectiveSlotH;
         const height = Math.max((maxTime - minTime) / SLOT_MIN, 15 / SLOT_MIN) * effectiveSlotH;
         el.style.cssText = `top:${top}px;height:${height}px;left:${s.left - rowRect.left}px;width:${e2.right - s.left}px`;
@@ -453,7 +469,7 @@ export async function renderSchedule() {
         const rowRect = courtsRow.getBoundingClientRect();
         const cr = getColRect(courtIdx);
         if (!cr) return;
-        const effectiveSlotH = SLOT_H * state.scheduleZoom;
+        const effectiveSlotH = SLOT_H;
         const top = ((startMin - DAY_START) / SLOT_MIN) * effectiveSlotH;
         const height = (durMin / SLOT_MIN) * effectiveSlotH;
         let left, width;
@@ -551,7 +567,7 @@ export async function renderSchedule() {
           const numCourts = item.slot.courtIds?.length || 1;
           const cr = getColRect(newCI);
           if (!cr || newCI < 0 || newCI + numCourts - 1 >= courts.length) { ghost.style.display = 'none'; return; }
-          const effectiveSlotH = SLOT_H * state.scheduleZoom;
+          const effectiveSlotH = SLOT_H;
           const top = ((newTime - DAY_START) / SLOT_MIN) * effectiveSlotH;
           const height = (item.slot.durationMinutes / SLOT_MIN) * effectiveSlotH;
           const endCr = numCourts > 1 ? getColRect(newCI + numCourts - 1) : null;
@@ -600,7 +616,7 @@ export async function renderSchedule() {
         if (!cr) { hoverLine.style.display = 'none'; return; }
         const rowRect = courtsRow.getBoundingClientRect();
         const snappedTime = getTimeAtY(e.clientY);
-        const top = ((snappedTime - DAY_START) / SLOT_MIN) * SLOT_H * state.scheduleZoom;
+        const top = ((snappedTime - DAY_START) / SLOT_MIN) * SLOT_H;
         hoverLine.style.top = `${top}px`;
         hoverLine.style.left = `${cr.left - rowRect.left}px`;
         hoverLine.style.width = `${cr.width}px`;
