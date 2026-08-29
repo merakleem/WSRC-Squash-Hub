@@ -597,12 +597,16 @@ function _otherNames(b) {
 function _buildMyBookingsDesktop() {
   const n = cb.myBookings.length;
   if (!n) {
+    // The empty state lives inside the list, which is what carries the page's
+    // horizontal padding - outside it, the text sat flush against the sidebar.
     return `
       <div class="cb-mine-wrap">
         <div class="cb-mine-head"><h2 class="cb-mine-title">My Bookings</h2></div>
-        <div class="cb-mine-empty">
-          <p>You have no upcoming bookings.</p>
-          <button class="cb-mine-empty-btn" id="cbGoBook">Book a court</button>
+        <div class="cb-mine-list">
+          <div class="cb-mine-empty">
+            <p>You have no upcoming bookings.</p>
+            <button class="cb-mine-empty-btn" id="cbGoBook">Book a court</button>
+          </div>
         </div>
       </div>`;
   }
