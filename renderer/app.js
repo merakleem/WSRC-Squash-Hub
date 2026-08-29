@@ -1,6 +1,6 @@
 import './api.js';
 import { state, _setConflictCursor } from './state.js';
-import { modal } from './utils.js';
+import { modal, toast } from './utils.js';
 import { renderSchedule } from './schedule.js';
 
 import { renderClubActivity, renderClubSettings, renderDashboard } from './pages/dashboard.js';
@@ -171,6 +171,24 @@ window.addEventListener('DOMContentLoaded', async () => {
   try {
     state.currentUser = await fetch('/api/me').then((r) => r.json());
   } catch (_) {}
+
+  // An admin looking through a member's eyes gets a bar they cannot miss and a
+  // one-click way back. Everything else on the page behaves exactly as it does
+  // for that member, which is the point.
+  if (state.currentUser?.viewing_as) {
+    const bar = document.getElementById('viewAsBar');
+    document.getElementById('viewAsName').textContent = state.currentUser.viewing_as;
+    bar.hidden = false;
+    document.body.classList.add('is-viewing-as');
+    document.getElementById('viewAsExit').addEventListener('click', async () => {
+      try {
+        await window.api.returnToAdmin();
+        location.href = '/';
+      } catch (e) {
+        toast(e.message || 'Could not switch back.', 'error');
+      }
+    });
+  }
 
   // Show "My Profile" nav item for players
   if (state.currentUser?.role === 'player' && state.currentUser?.playerId) {

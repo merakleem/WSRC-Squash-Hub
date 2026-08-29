@@ -40,6 +40,8 @@ if (typeof window !== 'undefined' && !window.api) {
     deleteLeague:     (id)=> _apiFetch('DELETE', `/api/leagues/${id}`),
     endLeague:        (id)=> _apiFetch('PUT',    `/api/leagues/${id}/end`),
 
+    viewAsPlayer:     (id)=> _apiFetch('POST',   `/api/players/${id}/view-as`),
+    returnToAdmin:    ()  => _apiFetch('POST',   '/api/return-to-admin'),
     getMatchCard:     (id)=> _apiFetch('GET',    `/api/matches/${id}/card`),
     reportMatchScore: (id, d) => _apiFetch('PUT', `/api/matches/${id}/player-score`, d),
     getReportable:    ()  => _apiFetch('GET',    '/api/my-matches/reportable'),

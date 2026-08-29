@@ -607,6 +607,7 @@ export function renderPlayerProfile() {
       <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
       <div class="options-dropdown" id="optionsDropdown">
         <button class="options-item" data-action="edit-player" data-id="${p.id}">Edit Information</button>
+        <button class="options-item" data-action="view-as" data-id="${p.id}">View as this player</button>
         ${hasEmail && acctStatus !== 'verified' ? `<button class="options-item" data-action="send-invite">Send Invite</button>` : ''}
         ${hasEmail && acctStatus === 'verified' ? `<button class="options-item" data-action="send-reset">Send Password Reset</button>` : ''}
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
@@ -622,6 +623,17 @@ export function renderPlayerProfile() {
     document.getElementById('optionsDropdown').addEventListener('click', async (e) => {
       const action = e.target.dataset.action;
       document.getElementById('optionsDropdown').classList.remove('open');
+      if (action === 'view-as') {
+        // Swaps the session for this player's. The server records that an admin
+        // did it, which is what makes the way back possible.
+        try {
+          await window.api.viewAsPlayer(p.id);
+          location.href = '/';
+        } catch (err) {
+          toast(err.message || 'Could not view as that player.', 'error');
+        }
+        return;
+      }
       if (action === 'edit-player') {
         const player = state.players.find((pl) => pl.id === Number(e.target.dataset.id))
           || state.currentPlayer;

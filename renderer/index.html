@@ -20,7 +20,12 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-container">
+    <!-- Shown only while an admin is viewing the app as a member. -->
+  <div class="viewas-bar" id="viewAsBar" hidden>
+    <span class="viewas-text">Viewing as <strong id="viewAsName"></strong></span>
+    <button class="viewas-btn" id="viewAsExit">Return to admin</button>
+  </div>
+  <div class="app-container">
       <!-- Sidebar -->
     <button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
       <span class="bar"></span>
