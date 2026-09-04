@@ -98,6 +98,40 @@ ok('repeat carries the chosen player', rep && rep[1].playerIds.length===1);
 ok('repeat carries days + weeks', rep && rep[1].repeat.daysOfWeek.length===1 && rep[1].repeat.weeks===4);
 ok('panel closed after submit', !panel.isBookingPanelOpen());
 
+// ---- a plain single booking, end to end ----
+// The path that matters most, and the one a repeat-only test misses: it is the
+// only branch that used to read panel state after closing the panel.
+let doneFired = 0;
+const errs = () => $$('#toastContainer .toast.error').length;
+const errsBefore = errs();
+await panel.openBookingPanel({ mode:'new', host:$('.sch-page'), courts:payload.courts,
+  slots:payload.slots, types:payload.types, players:PLAYERS, courtIds:[4], start:11*60, dur:60,
+  onDone:()=>{doneFired++;} });
+await tick();
+click($('#schPanelPrimary')); await new Promise(r=>setTimeout(r,150));
+const add = calls.find(c=>c[0]==='addBooking');
+ok('a plain booking posts to addBooking', !!add);
+ok('a plain booking sends one court', add && add[1].courtId===4 && add[1].courtIds===null);
+ok('a plain booking closes the panel', !panel.isBookingPanelOpen());
+ok('a plain booking tells the grid to refresh', doneFired===1, doneFired);
+ok('a plain booking raises no error', errs()===errsBefore, errs()-errsBefore);
+
+// ---- an edit, end to end ----
+let editDone = 0;
+const errsBefore2 = errs();
+await panel.openBookingPanel({ mode:'edit', host:$('.sch-page'), courts:payload.courts,
+  slots:payload.slots, types:payload.types, players:PLAYERS,
+  slot:payload.slots.find(s=>s.id===7), onDone:()=>{editDone++;} });
+await tick();
+click($$('[data-act="dur+"]')[0]); await tick();
+click($('#schPanelPrimary')); await new Promise(r=>setTimeout(r,150));
+const upd = calls.find(c=>c[0]==='updateBooking');
+ok('an edit posts to updateBooking', !!upd);
+ok('an edit sends the edited id', upd && upd[1]===7, upd&&upd[1]);
+ok('an edit sends the new duration', upd && upd[2].durationMinutes===105, upd&&upd[2].durationMinutes);
+ok('an edit tells the grid to refresh', editDone===1, editDone);
+ok('an edit raises no error', errs()===errsBefore2, errs()-errsBefore2);
+
 // ---- panel: edit ----
 const editSlot = payload.slots.find(s=>s.id===3);   // a repeating one
 await panel.openBookingPanel({ mode:'edit', host:$('.sch-page'), courts:payload.courts,

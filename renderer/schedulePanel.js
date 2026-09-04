@@ -562,32 +562,40 @@ function bookingData() {
 
 async function submit() {
   if (!p || p.busy || blocked()) return;
-  if (p.mode === 'new' && p.step === 2 && !p.dows.length) {
+
+  // Everything this needs is read before the first await. closeBookingPanel()
+  // drops the panel state, so anything read after it would be reading null -
+  // and the throw would land in the catch below, leaving the caller thinking
+  // the write failed when it had already succeeded.
+  const mode = p.mode;
+  const repeating = mode === 'new' && p.step === 2;
+  if (repeating && !p.dows.length) {
     toast('Pick at least one day to repeat on', 'error');
     return;
   }
 
-  p.busy = true;
-  repaintFoot();
   const data = bookingData();
+  const courtCount = p.courtIds.length;
+  const editId = p.editSlot?.id;
+  const repeat = {
+    startDate: state.scheduleDate,
+    daysOfWeek: [...p.dows],
+    weeks: p.indefinite ? 52 : p.weeks,
+    conflictMode: p.conflict,
+  };
   const onDone = p.onDone;
   const pushUndo = p.pushUndo;
 
+  p.busy = true;
+  repaintFoot();
+
   try {
-    if (p.mode === 'edit') {
-      await window.api.updateBooking(p.editSlot.id, data);
+    if (mode === 'edit') {
+      await window.api.updateBooking(editId, data);
       closeBookingPanel();
       toast('Booking updated');
-    } else if (p.step === 2) {
-      const result = await window.api.addRepeatBookings({
-        ...data,
-        repeat: {
-          startDate: state.scheduleDate,
-          daysOfWeek: [...p.dows],
-          weeks: p.indefinite ? 52 : p.weeks,
-          conflictMode: p.conflict,
-        },
-      });
+    } else if (repeating) {
+      const result = await window.api.addRepeatBookings({ ...data, repeat });
       closeBookingPanel();
       let msg = `${result.created} booking${result.created === 1 ? '' : 's'} created`;
       if (result.skipped > 0) msg += `, ${result.skipped} skipped`;
@@ -599,7 +607,7 @@ async function submit() {
       const created = await window.api.addBooking(data);
       if (created?.id) pushUndo({ type: 'delete-ids', ids: [created.id] });
       closeBookingPanel();
-      toast(p.courtIds.length > 1 ? `${data.courtIds.length} courts booked` : 'Booking added');
+      toast(courtCount > 1 ? `${courtCount} courts booked` : 'Booking added');
     }
     onDone?.();
   } catch (err) {
