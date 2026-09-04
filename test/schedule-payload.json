@@ -1,0 +1,283 @@
+{
+ "courts": [
+  {
+   "id": 1,
+   "name": "Court 1",
+   "sort_order": 1,
+   "active": 1
+  },
+  {
+   "id": 2,
+   "name": "Court 2",
+   "sort_order": 2,
+   "active": 1
+  },
+  {
+   "id": 3,
+   "name": "Court 3",
+   "sort_order": 3,
+   "active": 1
+  },
+  {
+   "id": 4,
+   "name": "Court 4",
+   "sort_order": 4,
+   "active": 1
+  },
+  {
+   "id": 5,
+   "name": "Doubles Court",
+   "sort_order": 5,
+   "active": 1
+  }
+ ],
+ "slots": [
+  {
+   "id": 1,
+   "source": "custom",
+   "courtId": 1,
+   "date": "2026-08-12",
+   "startTime": "07:00",
+   "durationMinutes": 60,
+   "bookingTypeId": null,
+   "name": "Marcus Lang",
+   "title": "Marcus Lang",
+   "info": "Sofia Duarte",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 2,
+   "source": "custom",
+   "courtId": 1,
+   "date": "2026-08-12",
+   "startTime": "10:00",
+   "durationMinutes": 90,
+   "bookingTypeId": 3,
+   "name": "Junior training",
+   "title": "Junior training",
+   "info": "Coach Reid",
+   "color": "#0f7b3f",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 3,
+   "source": "custom",
+   "courtId": 1,
+   "date": "2026-08-12",
+   "startTime": "18:00",
+   "durationMinutes": 90,
+   "bookingTypeId": 1,
+   "name": "League · Div 2",
+   "title": "League · Div 2",
+   "info": "4 players",
+   "color": "#8a6d1f",
+   "repeatGroupId": 903,
+   "players": []
+  },
+  {
+   "id": 4,
+   "source": "custom",
+   "courtId": 2,
+   "date": "2026-08-12",
+   "startTime": "07:30",
+   "durationMinutes": 60,
+   "bookingTypeId": null,
+   "name": "Sofia Duarte",
+   "title": "Sofia Duarte",
+   "info": "Tom Beckett",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 5,
+   "source": "custom",
+   "courtId": 2,
+   "date": "2026-08-12",
+   "startTime": "17:00",
+   "durationMinutes": 60,
+   "bookingTypeId": null,
+   "name": "James Whitfield",
+   "title": "James Whitfield",
+   "info": "Marcus Lang",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 6,
+   "source": "custom",
+   "courtId": 2,
+   "date": "2026-08-12",
+   "startTime": "19:00",
+   "durationMinutes": 120,
+   "bookingTypeId": 1,
+   "name": "Club night",
+   "title": "Club night",
+   "info": "Open entry",
+   "color": "#8a6d1f",
+   "repeatGroupId": 906,
+   "players": []
+  },
+  {
+   "id": 7,
+   "source": "custom",
+   "courtId": 3,
+   "date": "2026-08-12",
+   "startTime": "08:00",
+   "durationMinutes": 90,
+   "bookingTypeId": null,
+   "name": "Priya Raman",
+   "title": "Priya Raman",
+   "info": "Elena Sorokin",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 8,
+   "source": "custom",
+   "courtId": 3,
+   "date": "2026-08-12",
+   "startTime": "13:00",
+   "durationMinutes": 45,
+   "bookingTypeId": 4,
+   "name": "Floor resurfacing",
+   "title": "Floor resurfacing",
+   "info": "Closed to members",
+   "color": "#8793ab",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 15,
+   "source": "custom",
+   "courtId": 2,
+   "date": "2026-08-12",
+   "startTime": "18:00",
+   "durationMinutes": 15,
+   "bookingTypeId": 4,
+   "name": "Court check",
+   "title": "Court check",
+   "info": "",
+   "color": "#8793ab",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 9,
+   "source": "custom",
+   "courtId": 3,
+   "date": "2026-08-12",
+   "startTime": "18:30",
+   "durationMinutes": 60,
+   "bookingTypeId": null,
+   "name": "Elena Sorokin",
+   "title": "Elena Sorokin",
+   "info": "Dev Patel",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 10,
+   "source": "custom",
+   "courtId": 4,
+   "date": "2026-08-12",
+   "startTime": "06:30",
+   "durationMinutes": 60,
+   "bookingTypeId": null,
+   "name": "Dev Patel",
+   "title": "Dev Patel",
+   "info": "Ruth Okonjo",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 11,
+   "source": "custom",
+   "courtId": 4,
+   "date": "2026-08-12",
+   "startTime": "16:00",
+   "durationMinutes": 120,
+   "bookingTypeId": 2,
+   "name": "Club Championship",
+   "title": "Club Championship",
+   "info": "Round of 16",
+   "color": "#6b4f9e",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 12,
+   "source": "custom",
+   "courtId": 5,
+   "date": "2026-08-12",
+   "startTime": "08:30",
+   "durationMinutes": 60,
+   "bookingTypeId": null,
+   "name": "Ruth Okonjo",
+   "title": "Ruth Okonjo",
+   "info": "Callum Reid",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  },
+  {
+   "id": 13,
+   "source": "custom",
+   "courtId": 5,
+   "date": "2026-08-12",
+   "startTime": "17:30",
+   "durationMinutes": 90,
+   "bookingTypeId": 1,
+   "name": "League · Div 1",
+   "title": "League · Div 1",
+   "info": "4 players",
+   "color": "#8a6d1f",
+   "repeatGroupId": 913,
+   "players": []
+  },
+  {
+   "id": 14,
+   "source": "custom",
+   "courtId": 5,
+   "date": "2026-08-12",
+   "startTime": "21:00",
+   "durationMinutes": 60,
+   "bookingTypeId": null,
+   "name": "Sofia Duarte",
+   "title": "Sofia Duarte",
+   "info": "Priya Raman",
+   "color": "#3550c8",
+   "repeatGroupId": null,
+   "players": []
+  }
+ ],
+ "types": [
+  {
+   "id": 1,
+   "name": "League",
+   "color": "#8a6d1f"
+  },
+  {
+   "id": 2,
+   "name": "Tournament",
+   "color": "#6b4f9e"
+  },
+  {
+   "id": 3,
+   "name": "Training",
+   "color": "#0f7b3f"
+  },
+  {
+   "id": 4,
+   "name": "Maintenance",
+   "color": "#8793ab"
+  }
+ ]
+}

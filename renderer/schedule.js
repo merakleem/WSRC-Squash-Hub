@@ -1,5 +1,6 @@
 import { state, isAdmin, _setConflictCursor } from './state.js';
-import { esc, toast, modal } from './utils.js';
+import { esc, toast } from './utils.js';
+import { openBookingPanel, closeBookingPanel, isBookingPanelOpen } from './schedulePanel.js';
 
 // AbortController for document-level drag/click listeners — aborted and recreated on each renderSchedule() call
 let _scheduleListenerAC = null;
@@ -31,11 +32,17 @@ function _tToMin(t) {
 function _overlaps(aStart, aDur, bStart, bDur) {
   return aStart < bStart + bDur && bStart < aStart + aDur;
 }
-function _fmtTime(timeStr) {
-  const [h, m] = timeStr.split(':').map(Number);
-  const suffix = h >= 12 ? 'pm' : 'am';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, '0')}${suffix}`;
+// "2:15" - no meridiem, for the left half of a range that ends with one.
+function _fmtNoAp(m) {
+  const h = Math.floor(m / 60), mm = m % 60;
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(mm).padStart(2, '0')}`;
+}
+function _fmt12(m) {
+  return `${_fmtNoAp(m)} ${Math.floor(m / 60) < 12 ? 'AM' : 'PM'}`;
+}
+function _durLabel(d) {
+  const h = Math.floor(d / 60), m = d % 60;
+  return (h ? `${h}h` : '') + (h && m ? ' ' : '') + (m ? `${m}m` : '');
 }
 
 // ===== UNDO =====
@@ -76,6 +83,10 @@ export async function renderSchedule() {
   const content = document.getElementById('mainContent');
   content.classList.add('content--schedule');
 
+  // Any re-render replaces the grid the panel is anchored to, so it closes
+  // first rather than being orphaned in the DOM.
+  closeBookingPanel();
+
   if (!state.scheduleDate) state.scheduleDate = _isoDate(new Date());
   const today = _isoDate(new Date());
 
@@ -85,7 +96,7 @@ export async function renderSchedule() {
   // The helper line and the button live in the app's own top bar, as on every
   // other page, rather than the page growing a second bar of its own.
   actionsEl.innerHTML = isAdmin()
-    ? `<span class="sch-topbar-help">Drag on the grid to create a booking</span>
+    ? `<span class="sch-topbar-help">Drag on the grid to book · snaps to 15 minutes</span>
        <button class="sch-new-btn" id="btnNewBooking">
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
          New booking
@@ -218,9 +229,6 @@ export async function renderSchedule() {
 
   const courtIdxById = new Map(courts.map((c, i) => [c.id, i]));
 
-  // The faint start times behind the grid, as on the player page. They carry no
-  // pointer events: drag-to-create owns this column, and a child that swallowed
-  // the mousedown would break it.
   // Colour to type, for the types actually on this day. An empty day gets no
   // legend rather than an empty rail.
   const legendHTML = (() => {
@@ -235,19 +243,11 @@ export async function renderSchedule() {
     }
     const items = [...seen].map(([name, color]) =>
       `<span class="sch-legend-item"><span class="sch-legend-dot" style="background:${esc(color)}"></span>${esc(name)}</span>`).join('');
-    const n = custom.length;
     return `<div class="sch-legend">
       <span class="sch-legend-label">On this day</span>
       ${items}
-      <span class="sch-legend-count">${n} booking${n === 1 ? '' : 's'}</span>
     </div>`;
   })();
-  
-  const slotHintsHTML = Array.from({ length: totalSlots }, (_, i) => {
-    const m = DAY_START + i * SLOT_MIN;
-    const label = `${(Math.floor(m / 60) % 12) || 12}:${String(m % 60).padStart(2, '0')}`;
-    return `<div class="sch-slot" style="top:${i * SLOT_H + 1}px"><span class="sch-slot-time">${label}</span><span class="sch-slot-plus">+</span></div>`;
-  }).join('');
   
   // Court columns (body only, no header inside)
   const courtColumnsHTML = courts.map((court) => {
@@ -264,24 +264,31 @@ export async function renderSchedule() {
       const editAttr = isAdmin() ? ` data-booking-id="${s.id}"` : '';
       const cursorStyle = isAdmin() ? (isLeague ? ';cursor:grab' : isTournament ? ';cursor:default' : ';cursor:pointer') : '';
       const endMin2 = startMin + s.durationMinutes;
-      const endStr = `${String(Math.floor(endMin2 / 60)).padStart(2, '0')}:${String(endMin2 % 60).padStart(2, '0')}`;
-      const timeRange = `${_fmtTime(s.startTime)} – ${_fmtTime(endStr)}`;
+      const timeRange = `${_fmtNoAp(startMin)}–${_fmt12(endMin2)}`;
       const playerText = s.players && s.players.length > 0
         ? s.players.map((p) => { const parts = (p.name || '').trim().split(/\s+/); return parts.length > 1 ? `${parts[0][0]}. ${parts[parts.length - 1]}` : parts[0]; }).join(' · ')
         : null;
       const subLine = playerText || s.info || null;
       const editBtn = isAdmin() && !isLeague && !isTournament
-        ? `<button class="sch-booking-edit-btn" data-edit-booking-id="${s.id}" title="Edit booking"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
+        ? `<button class="sch-booking-edit-btn" data-edit-booking-id="${s.id}" title="Edit booking">Edit</button>`
         : '';
-      return `<div class="sch-booking${isLeague ? ' sch-booking-league' : ''}${isTournament ? ' sch-booking-tournament' : ''}"${editAttr} style="--type-color:${esc(s.color)};top:${top}px;height:${safeH - 3}px${cursorStyle}">
+      // A quarter-hour block has no room for two stacked lines, so it lays its
+      // title and time side by side instead; the sub-line needs a tall block.
+      const blockH = safeH - 3;
+      const short = blockH < 34;
+      const repeatGlyph = s.repeatGroupId
+        ? `<span class="sch-booking-repeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></span>`
+        : '';
+      return `<div class="sch-booking${short ? ' sch-booking--short' : ''}${isLeague ? ' sch-booking-league' : ''}${isTournament ? ' sch-booking-tournament' : ''}"${editAttr} style="--type-color:${esc(s.color)};top:${top}px;height:${blockH}px${cursorStyle}">
         ${editBtn}
+        ${repeatGlyph}
         <div class="sch-booking-time">${timeRange}</div>
         <div class="sch-booking-title">${esc(s.title)}</div>
-        ${subLine ? `<div class="sch-booking-info">${esc(subLine)}</div>` : ''}
+        ${subLine && blockH > 52 ? `<div class="sch-booking-info">${esc(subLine)}</div>` : ''}
       </div>`;
     }).join('');
     return `<div class="sch-court-col" style="height:${BASE_GRID_H}px" data-court-id="${court.id}">
-      ${gridLinesHTML}${slotHintsHTML}${blocksHTML}
+      ${gridLinesHTML}${blocksHTML}
     </div>`;
   }).join('');
 
@@ -316,11 +323,13 @@ export async function renderSchedule() {
         : `<div class="sch-grid-area">
             <div class="sch-grid-card">
               <div class="sch-grid-scroll">
-                <div class="sch-grid-header">
-                  <div class="sch-time-spacer" style="width:${TIME_COL_W}px"></div>
-                  ${courts.map((c) => `<div class="sch-court-hd" style="min-width:${COURT_COL_W}px">${esc(c.name)}</div>`).join('')}
+                <div class="sch-grid-sticky">
+                  <div class="sch-grid-header">
+                    <div class="sch-time-spacer" style="width:${TIME_COL_W}px"></div>
+                    ${courts.map((c) => `<div class="sch-court-hd" style="min-width:${COURT_COL_W}px">${esc(c.name)}</div>`).join('')}
+                  </div>
+                  ${legendHTML}
                 </div>
-                ${legendHTML}
                 <div class="sch-grid-body">
                   <div class="sch-time-col" style="width:${TIME_COL_W}px;height:${BASE_GRID_H}px">${timeAxisHTML.join('')}</div>
                   <div class="sch-courts-row" style="--court-w:${COURT_COL_W}px">${courtColumnsHTML}</div>
@@ -365,21 +374,22 @@ export async function renderSchedule() {
         if (top < 0 || top >= BASE_GRID_H) return;
         const safeH = Math.min(h, BASE_GRID_H - top);
         const endMin2 = startMin + s.durationMinutes;
-        const endStr = `${String(Math.floor(endMin2 / 60)).padStart(2, '0')}:${String(endMin2 % 60).padStart(2, '0')}`;
-        const timeRange = `${_fmtTime(s.startTime)} – ${_fmtTime(endStr)}`;
+        const timeRange = `${_fmtNoAp(startMin)}–${_fmt12(endMin2)}`;
         const leftPx = leftRect.left - rowRect.left + 6;
         const widthPx = rightRect.right - leftRect.left - 12;
         const el = document.createElement('div');
-        el.className = 'sch-booking';
-        el.style.cssText = `background:${s.color};position:absolute;left:${leftPx}px;width:${widthPx}px;top:${top}px;height:${safeH - 3}px;z-index:2${isAdmin() ? ';cursor:pointer' : ''}`;
+        const blockH = safeH - 3;
+        el.className = `sch-booking${blockH < 34 ? ' sch-booking--short' : ''}`;
+        el.style.cssText = `--type-color:${s.color};position:absolute;left:${leftPx}px;width:${widthPx}px;top:${top}px;height:${blockH}px;z-index:2${isAdmin() ? ';cursor:pointer' : ''}`;
         if (isAdmin()) el.dataset.bookingId = String(s.id);
         const _playerText = s.players && s.players.length > 0
           ? s.players.map((p) => { const pts = (p.name || '').trim().split(/\s+/); return pts.length > 1 ? `${pts[0][0]}. ${pts[pts.length - 1]}` : pts[0]; }).join(' · ')
           : null;
-        el.innerHTML = `<button class="sch-booking-edit-btn" data-edit-booking-id="${s.id}" title="Edit booking"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        el.innerHTML = `<button class="sch-booking-edit-btn" data-edit-booking-id="${s.id}" title="Edit booking">Edit</button>
+          ${s.repeatGroupId ? `<span class="sch-booking-repeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></span>` : ''}
           <div class="sch-booking-time">${timeRange}</div>
           <div class="sch-booking-title">${esc(s.title)}</div>
-          ${(_playerText || s.info) ? `<div class="sch-booking-info">${esc(_playerText || s.info)}</div>` : ''}`;
+          ${(_playerText || s.info) && blockH > 52 ? `<div class="sch-booking-info">${esc(_playerText || s.info)}</div>` : ''}`;
         courtsRowEl.appendChild(el);
       });
     }
@@ -413,7 +423,7 @@ export async function renderSchedule() {
     e.preventDefault(); window.navigate('clubSettings');
   });
 
-  document.getElementById('btnNewBooking')?.addEventListener('click', () => openNewBookingModal(courts, slots));
+
 
 
 
@@ -506,11 +516,87 @@ export async function renderSchedule() {
       let drag = null;
       let pasteMode = null; // { ghosts, anchorTimeMin, anchorCourtIdx, hasConflict }
 
-      // Grey tracking line — follows cursor while hovering
+      // The snap line is the only hover affordance on the grid. It draws in the
+      // hovered column at the quarter hour under the cursor, and its pill names
+      // that time, so a click lands exactly where the eye already is.
       const hoverLine = document.createElement('div');
       hoverLine.className = 'sch-hover-line';
+      hoverLine.innerHTML = '<span class="sch-hover-pill"></span>';
       hoverLine.style.display = 'none';
       courtsRow.appendChild(hoverLine);
+      const hoverPill = hoverLine.firstElementChild;
+
+      // Floor rather than round: the cursor should land in the quarter hour it
+      // is pointing at, never the one above it.
+      function snapFloor(clientY) {
+        const y = Math.max(0, Math.min(clientY - courtsRow.getBoundingClientRect().top, BASE_GRID_H - 1));
+        const m = Math.floor((DAY_START + (y / SLOT_H) * SLOT_MIN) / 15) * 15;
+        return Math.max(DAY_START, Math.min(DAY_END - 15, m));
+      }
+
+      // The ghost of the booking about to be made: one rounded rect per court,
+      // geometrically identical to a real block so a drag reads as "this is
+      // what you will get". The same ghosts show the panel's pending range.
+      let ghostEls = [];
+      function clearGhosts() {
+        ghostEls.forEach((g) => g.remove());
+        ghostEls = [];
+      }
+      function drawGhosts(idxs, minTime, maxTime) {
+        const n = idxs.length;
+        while (ghostEls.length > n) ghostEls.pop().remove();
+        while (ghostEls.length < n) {
+          const g = document.createElement('div');
+          g.className = 'sch-ghost';
+          g.innerHTML = '<span class="sch-ghost-label"></span>';
+          courtsRow.appendChild(g);
+          ghostEls.push(g);
+        }
+        if (!n) return;
+        const rowRect = courtsRow.getBoundingClientRect();
+        const top = ((minTime - DAY_START) / SLOT_MIN) * SLOT_H;
+        const height = Math.max(((maxTime - minTime) / SLOT_MIN) * SLOT_H - 3, 9);
+        // The label is written once, in the leftmost column of the sweep.
+        const label = `${_fmtNoAp(minTime)}–${_fmt12(maxTime)} · ${_durLabel(maxTime - minTime)}`;
+        const leftmost = Math.min(...idxs);
+        idxs.forEach((ci, i) => {
+          const g = ghostEls[i];
+          const cr = getColRect(ci);
+          if (!cr) { g.style.display = 'none'; return; }
+          g.style.display = '';
+          g.style.top = `${top + 1}px`;
+          g.style.height = `${height}px`;
+          g.style.left = `${cr.left - rowRect.left + 6}px`;
+          g.style.width = `${Math.max(cr.width - 13, 0)}px`;
+          g.firstElementChild.textContent = ci === leftmost ? label : '';
+        });
+      }
+
+      // Every booking surface is this one panel; the grid only decides which
+      // mode it opens in and what it opens pre-filled with.
+      let _playersCache = null;
+      async function openPanel(mode, extra) {
+        if (!_playersCache) {
+          try { _playersCache = await window.api.getPlayers(); }
+          catch (err) { toast(err.message, 'error'); return; }
+        }
+        clearSelection();
+        openBookingPanel({
+          mode,
+          host: content.querySelector('.sch-page'),
+          courts, slots, types: bookingTypes, players: _playersCache,
+          ...extra,
+          onRange: (courtIds, start, dur) => {
+            const idxs = courtIds.map((id) => courtIdxById.get(id))
+              .filter((x) => x !== undefined).sort((a, b) => a - b);
+            if (!idxs.length) { clearGhosts(); return; }
+            drawGhosts(idxs, start, start + dur);
+          },
+          onDone: () => { state.scheduleSelectedIds = []; renderSchedule(); },
+          onClose: () => { clearGhosts(); hoverLine.style.display = 'none'; },
+          pushUndo: _pushUndo,
+        });
+      }
 
       function enterPasteMode() {
         if (!state.scheduleClipboard?.items?.length) return;
@@ -609,17 +695,20 @@ export async function renderSchedule() {
       }
 
       function updateHoverLine(e) {
-        if (drag || pasteMode || e.target.closest('.sch-booking')) { hoverLine.style.display = 'none'; return; }
+        if (drag || pasteMode || isBookingPanelOpen() || e.target.closest('.sch-booking')) {
+          hoverLine.style.display = 'none';
+          return;
+        }
         const courtIdx = getCourtIdxAtX(e.clientX);
         if (courtIdx === -1) { hoverLine.style.display = 'none'; return; }
         const cr = getColRect(courtIdx);
         if (!cr) { hoverLine.style.display = 'none'; return; }
         const rowRect = courtsRow.getBoundingClientRect();
-        const snappedTime = getTimeAtY(e.clientY);
-        const top = ((snappedTime - DAY_START) / SLOT_MIN) * SLOT_H;
-        hoverLine.style.top = `${top}px`;
-        hoverLine.style.left = `${cr.left - rowRect.left}px`;
-        hoverLine.style.width = `${cr.width}px`;
+        const snappedTime = snapFloor(e.clientY);
+        hoverLine.style.top = `${((snappedTime - DAY_START) / SLOT_MIN) * SLOT_H}px`;
+        hoverLine.style.left = `${cr.left - rowRect.left + 6}px`;
+        hoverLine.style.width = `${Math.max(cr.width - 13, 0)}px`;
+        hoverPill.textContent = _fmt12(snappedTime);
         hoverLine.style.display = 'block';
       }
       courtsRow.addEventListener('mousemove', (e) => updateHoverLine(e), { signal });
@@ -663,6 +752,20 @@ export async function renderSchedule() {
         content.querySelectorAll('[data-booking-id]').forEach((el) =>
           el.classList.toggle('sch-booking--selected', selectedIds.has(Number(el.dataset.bookingId))));
       }
+      // Open on the first free half hour from now, scanning courts in order, so
+      // the panel never opens already in conflict.
+      document.getElementById('btnNewBooking')?.addEventListener('click', () => {
+        const from = isToday ? Math.ceil(Math.max(nowMins, DAY_START) / SLOT_MIN) * SLOT_MIN : DAY_START;
+        for (let m = from; m + SLOT_MIN <= DAY_END; m += SLOT_MIN) {
+          const free = courts.find((c) => !slots.some((sl) => {
+            const ids = sl.courtIds?.length ? sl.courtIds : [sl.courtId];
+            return ids.includes(c.id) && _overlaps(m, SLOT_MIN, _tToMin(sl.startTime), sl.durationMinutes);
+          }));
+          if (free) { openPanel('new', { courtIds: [free.id], start: m, dur: 60 }); return; }
+        }
+        openPanel('new', { courtIds: [courts[0].id], start: Math.min(from, DAY_END - 60), dur: 60 });
+      }, { signal });
+
       // Restore visual selection from previous render
       if (selectedIds.size) {
         content.querySelectorAll('[data-booking-id]').forEach((el) =>
@@ -689,7 +792,7 @@ export async function renderSchedule() {
         e.stopPropagation();
         const id = Number(editBtn.dataset.editBookingId);
         const slot = slots.find((s) => s.id === id);
-        if (slot) openEditBookingModal(slot, courts, slots);
+        if (slot) openPanel('edit', { slot });
       }, { signal });
 
       // Right-click context menu on selected bookings
@@ -782,11 +885,8 @@ export async function renderSchedule() {
           clearSelection();
           const si = getCourtIdxAtX(e.clientX);
           if (si === -1) return;
-          const overlay = document.createElement('div');
-          overlay.className = 'sch-drag-overlay';
-          courtsRow.appendChild(overlay);
-          const t = getTimeAtY(e.clientY);
-          drag = { mode: 'add', startX: e.clientX, startY: e.clientY, startIdx: si, startTime: t, overlay, moved: false,
+          const t = snapFloor(e.clientY);
+          drag = { mode: 'add', startX: e.clientX, startY: e.clientY, startIdx: si, startTime: t, moved: false,
             minIdx: si, maxIdx: si, minTime: t, maxTime: t + 60 };
 
         } else if (bookingEl) {
@@ -854,7 +954,7 @@ export async function renderSchedule() {
               const si = getCourtIdxAtX(e.clientX);
               if (si === -1) return;
               const overlay = document.createElement('div');
-              overlay.className = 'sch-drag-overlay sch-drag-overlay--select';
+              overlay.className = 'sch-drag-overlay';
               courtsRow.appendChild(overlay);
               const t = getTimeAtY(e.clientY);
               drag = { mode: 'move-area', startX: e.clientX, startY: e.clientY, startIdx: si, startTime: t, overlay, moved: false,
@@ -877,18 +977,16 @@ export async function renderSchedule() {
         if (drag.mode === 'add' || drag.mode === 'move-area') {
           drag.minIdx = Math.min(drag.startIdx, ci);
           drag.maxIdx = Math.max(drag.startIdx, ci);
-          const t = getTimeAtY(e.clientY);
+          const t = snapFloor(e.clientY);
           drag.minTime = Math.min(drag.startTime, t);
           drag.maxTime = Math.max(drag.startTime, t);
           if (drag.maxTime === drag.minTime) drag.maxTime = drag.minTime + 15;
-          positionOverlay(drag.overlay, drag.minTime, drag.maxTime, drag.minIdx, drag.maxIdx);
           if (drag.mode === 'add') {
-            const affectedIds = new Set(courts.slice(drag.minIdx, drag.maxIdx + 1).map((c) => c.id));
-            drag.hasBookingsInRect = slots.some((s) => {
-              const sCourts = s.courtIds || [s.courtId];
-              return sCourts.some((id) => affectedIds.has(id)) && _overlaps(drag.minTime, drag.maxTime - drag.minTime, _tToMin(s.startTime), s.durationMinutes);
-            });
-            drag.overlay.classList.toggle('sch-drag-overlay--select', drag.hasBookingsInRect);
+            const idxs = [];
+            for (let i = drag.minIdx; i <= drag.maxIdx; i++) idxs.push(i);
+            drawGhosts(idxs, drag.minTime, drag.maxTime);
+          } else {
+            positionOverlay(drag.overlay, drag.minTime, drag.maxTime, drag.minIdx, drag.maxIdx);
           }
 
         } else if (drag.mode === 'move-single') {
@@ -978,17 +1076,21 @@ export async function renderSchedule() {
 
         _setConflictCursor(false);
         if (d.mode === 'add') {
-          d.overlay.remove();
-          if (d.moved && d.hasBookingsInRect) {
-            // Dragged over bookings — select them
-            const ids = getBookingsInRect(d.minTime, d.maxTime, d.minIdx, d.maxIdx);
-            if (ids.length) setSelection(ids);
-          } else if (!d.moved) {
-            clearSelection();
+          clearGhosts();
+          if (!d.moved) {
+            // A plain click books the hour beginning at the snap line.
+            const start = Math.min(d.startTime, DAY_END - 15);
+            openPanel('new', {
+              courtIds: [courts[d.startIdx].id],
+              start,
+              dur: Math.min(60, DAY_END - start),
+            });
           } else {
-            const selCourts = courts.slice(d.minIdx, d.maxIdx + 1);
-            const dur = d.maxTime - d.minTime;
-            openGridBookingModal(courts, slots, { courtId: selCourts[0]?.id, courtIds: selCourts.length > 1 ? selCourts.map((c) => c.id) : null, startTime: minutesToTimeStr(d.minTime), durationMinutes: dur }, bookingTypes);
+            openPanel('new', {
+              courtIds: courts.slice(d.minIdx, d.maxIdx + 1).map((c) => c.id),
+              start: d.minTime,
+              dur: d.maxTime - d.minTime,
+            });
           }
 
         } else if (d.mode === 'move-single') {
@@ -1173,694 +1275,3 @@ export async function renderSchedule() {
   }
 }
 
-// ===== GRID BOOKING MODAL (players only — type/time/court from grid) =====
-async function openGridBookingModal(courts, slots, prefill, bookingTypes) {
-  const allPlayers = await window.api.getPlayers();
-  const activeType = bookingTypes.find((bt) => bt.id === state.scheduleBookingTypeId) || null;
-  const typeLabel = activeType ? activeType.name : 'Standard';
-  const dotHtml = activeType ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${esc(activeType.color)};margin-right:5px;vertical-align:middle"></span>` : '';
-
-  modal.open('New Booking', `
-    <div class="grid-bk-meta">${dotHtml}<strong>${typeLabel}</strong></div>
-    <form id="gridBookingForm">
-      <div class="form-group">
-        <label class="form-label">Players <span class="form-hint">(optional, up to 4)</span></label>
-        <div class="bk-player-wrap">
-          <input type="text" class="form-control" id="fGridPlayerSearch" placeholder="Search players…" autocomplete="off">
-          <ul id="fGridPlayerSuggestions" class="bk-player-drop" style="display:none"></ul>
-          <div id="fGridPlayerChips" class="bk-player-chips"></div>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Book</button>
-      </div>
-    </form>
-  `);
-
-  let selectedPlayers = [];
-
-  function renderChips() {
-    const container = document.getElementById('fGridPlayerChips');
-    if (!container) return;
-    container.innerHTML = selectedPlayers.map((p) =>
-      `<div class="bk-chip">${esc(p.name)}<button type="button" class="bk-chip-remove" data-pid="${p.id}" aria-label="Remove">×</button></div>`
-    ).join('');
-    container.querySelectorAll('.bk-chip-remove').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selectedPlayers = selectedPlayers.filter((p) => p.id !== Number(btn.dataset.pid));
-        renderChips();
-        const searchEl = document.getElementById('fGridPlayerSearch');
-        if (searchEl) searchEl.disabled = false;
-      });
-    });
-    const searchEl = document.getElementById('fGridPlayerSearch');
-    if (searchEl) searchEl.disabled = selectedPlayers.length >= 4;
-  }
-
-  function showSuggestions(query) {
-    const suggestEl = document.getElementById('fGridPlayerSuggestions');
-    if (!suggestEl) return;
-    if (!query.trim() || selectedPlayers.length >= 4) { suggestEl.style.display = 'none'; return; }
-    const q = query.toLowerCase();
-    const matches = allPlayers.filter((p) =>
-      p.name.toLowerCase().includes(q) && !selectedPlayers.some((sp) => sp.id === p.id)
-    ).slice(0, 8);
-    if (!matches.length) { suggestEl.style.display = 'none'; return; }
-    suggestEl.innerHTML = matches.map((p) =>
-      `<li class="bk-player-opt" data-pid="${p.id}" data-pname="${esc(p.name)}">${esc(p.name)}</li>`
-    ).join('');
-    suggestEl.style.display = 'block';
-    suggestEl.querySelectorAll('.bk-player-opt').forEach((li) => {
-      li.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        if (selectedPlayers.length < 4 && !selectedPlayers.some((sp) => sp.id === Number(li.dataset.pid))) {
-          selectedPlayers.push({ id: Number(li.dataset.pid), name: li.dataset.pname });
-          renderChips();
-        }
-        const searchEl = document.getElementById('fGridPlayerSearch');
-        if (searchEl) { searchEl.value = ''; }
-        suggestEl.style.display = 'none';
-      });
-    });
-  }
-
-  const searchEl = document.getElementById('fGridPlayerSearch');
-  searchEl?.addEventListener('input', (e) => showSuggestions(e.target.value));
-  searchEl?.addEventListener('focus', (e) => showSuggestions(e.target.value));
-  searchEl?.addEventListener('blur', () => setTimeout(() => {
-    const suggestEl = document.getElementById('fGridPlayerSuggestions');
-    if (suggestEl) suggestEl.style.display = 'none';
-  }, 150));
-
-  document.getElementById('gridBookingForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const { courtId, courtIds, startTime, durationMinutes } = prefill;
-    try {
-      const newBooking = await window.api.addBooking({
-        courtId: courtId || null,
-        courtIds: courtIds || null,
-        date: state.scheduleDate,
-        startTime,
-        durationMinutes,
-        bookingTypeId: state.scheduleBookingTypeId,
-        name: null,
-        info: null,
-        playerIds: selectedPlayers.map((p) => p.id),
-      });
-      if (newBooking?.id) _pushUndo({ type: 'delete-ids', ids: [newBooking.id] });
-      modal.close();
-      renderSchedule();
-    } catch (err) { toast(err.message, 'error'); }
-  });
-}
-
-function durationOptions(selected = 60, startTimeStr = '19:00') {
-  const parts = (startTimeStr || '19:00').split(':').map(Number);
-  const startMin = (parts[0] || 0) * 60 + (parts[1] || 0);
-  const maxDuration = Math.max(15, 1440 - startMin);
-  const opts = [];
-  for (let v = 15; v <= maxDuration; v += 15) opts.push(v);
-  const snapped = Math.max(15, Math.min(Math.round(selected / 15) * 15, maxDuration));
-  return opts.map((v) => {
-    const h = Math.floor(v / 60), m = v % 60;
-    const label = h > 0 && m > 0 ? `${h}h ${m}m` : h > 0 ? `${h}h` : `${m}m`;
-    return `<option value="${v}"${v === snapped ? ' selected' : ''}>${label}</option>`;
-  }).join('');
-}
-
-// ===== NEW BOOKING MODAL =====
-async function openNewBookingModal(courts, slots, prefill = {}) {
-  const { courtId: prefillCourtId, startTime: prefillTime, durationMinutes: prefillDuration, selectedCourts } = prefill;
-  const isMulti = Array.isArray(selectedCourts) && selectedCourts.length > 1;
-
-  const [bookingTypes, allPlayers] = await Promise.all([
-    window.api.getBookingTypes(),
-    window.api.getPlayers(),
-  ]);
-
-  const startTimeVal = prefillTime || '19:00';
-  const durationVal = prefillDuration || 60;
-  const defaultDate = state.scheduleDate || _isoDate(new Date());
-  const defaultDow = new Date(defaultDate + 'T12:00:00').getDay();
-
-  const courtField = isMulti
-    ? `<div class="form-group">
-        <label class="form-label">Courts</label>
-        <div class="sch-court-checks">
-          ${courts.map((c) => `<label class="check-label"><input type="checkbox" class="fBookingCourtChk" value="${c.id}"${selectedCourts.some((sc) => sc.id === c.id) ? ' checked' : ''}> ${esc(c.name)}</label>`).join('')}
-        </div>
-      </div>`
-    : `<div class="form-group">
-        <label class="form-label">Court</label>
-        <select class="form-control" id="fBookingCourt" required>
-          <option value="">— Select court —</option>
-          ${courts.map((c) => `<option value="${c.id}"${c.id === prefillCourtId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
-        </select>
-      </div>`;
-
-  const dowLabels = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-
-  modal.open('New Booking', `
-    <form id="bookingForm">
-      ${courtField}
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Date</label>
-          <input type="date" class="form-control" id="fBookingDate" value="${defaultDate}" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Start Time</label>
-          <input type="time" class="form-control" id="fBookingTime" value="${startTimeVal}" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Duration</label>
-          <select class="form-control" id="fBookingDuration">${durationOptions(durationVal, startTimeVal)}</select>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Name</label>
-        <input type="text" class="form-control" id="fBookingName" placeholder="e.g. Training, Open Play…" maxlength="80">
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Booking Type</label>
-        <select class="form-control" id="fBookingType">
-          <option value="">— None —</option>
-          ${bookingTypes.map((bt) => `<option value="${bt.id}">${esc(bt.name)}</option>`).join('')}
-          <option value="__custom__">+ Create custom type…</option>
-        </select>
-      </div>
-
-      <div id="customTypeSection" style="display:none">
-        <div class="form-row">
-          <div class="form-group" style="flex:3">
-            <label class="form-label">Type Name</label>
-            <input type="text" class="form-control" id="fCustomTypeName" placeholder="e.g. Members Training" maxlength="40">
-          </div>
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Colour</label>
-            <input type="color" class="form-control bk-color-input" id="fCustomTypeColor" value="#4f87f0">
-          </div>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Players <span class="form-hint">(up to 4)</span></label>
-        <div class="bk-player-wrap">
-          <input type="text" class="form-control" id="fPlayerSearch" placeholder="Search players…" autocomplete="off">
-          <ul id="fPlayerSuggestions" class="bk-player-drop" style="display:none"></ul>
-          <div id="fPlayerChips" class="bk-player-chips"></div>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <div class="bk-toggle-group">
-          <button type="button" class="bk-toggle bk-toggle--on" id="btnNoRepeat">No Repeat</button>
-          <button type="button" class="bk-toggle" id="btnRepeat">Repeated Event</button>
-        </div>
-      </div>
-
-      <div id="repeatSection" style="display:none">
-        <div class="form-group">
-          <label class="form-label">Repeat on</label>
-          <div class="bk-dow-row">
-            ${dowLabels.map((lbl, i) => `<label class="bk-dow-pill"><input type="checkbox" class="fDowChk" value="${i}"${i === defaultDow ? ' checked' : ''}><span>${lbl}</span></label>`).join('')}
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Conflicts</label>
-          <div class="bk-toggle-group">
-            <button type="button" class="bk-toggle bk-toggle--on" id="btnSkipConflicts">Skip conflicts</button>
-            <button type="button" class="bk-toggle" id="btnOverwriteConflicts">Overwrite conflicts</button>
-          </div>
-        </div>
-        <div class="form-row" style="align-items:flex-end">
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Repeat for</label>
-            <div style="display:flex;align-items:center;gap:8px">
-              <input type="number" class="form-control" id="fRepeatWeeks" min="1" max="52" value="4" style="width:80px;flex-shrink:0">
-              <span style="color:var(--text-muted);font-size:13px;white-space:nowrap">weeks</span>
-            </div>
-          </div>
-          <div class="form-group" style="flex:1;padding-bottom:18px">
-            <label class="check-label">
-              <input type="checkbox" id="fIndefinitely">
-              Indefinitely <span class="form-hint">(max 1 year)</span>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div class="form-actions">
-        <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
-        <button type="submit" class="btn btn-primary">${isMulti ? 'Add Bookings' : 'Add Booking'}</button>
-      </div>
-    </form>
-  `, { medium: true });
-
-  // ---- Player search state ----
-  let selectedPlayers = [];
-  let isRepeat = false;
-  let conflictMode = 'skip';
-
-  function renderChips() {
-    const container = document.getElementById('fPlayerChips');
-    if (!container) return;
-    container.innerHTML = selectedPlayers.map((p) =>
-      `<div class="bk-chip">${esc(p.name)}<button type="button" class="bk-chip-remove" data-pid="${p.id}" aria-label="Remove">×</button></div>`
-    ).join('');
-    container.querySelectorAll('.bk-chip-remove').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selectedPlayers = selectedPlayers.filter((p) => p.id !== Number(btn.dataset.pid));
-        renderChips();
-        const searchEl = document.getElementById('fPlayerSearch');
-        if (searchEl) searchEl.disabled = false;
-      });
-    });
-    const searchEl = document.getElementById('fPlayerSearch');
-    if (searchEl) searchEl.disabled = selectedPlayers.length >= 4;
-  }
-
-  function showSuggestions(query) {
-    const suggestEl = document.getElementById('fPlayerSuggestions');
-    if (!suggestEl) return;
-    if (!query.trim() || selectedPlayers.length >= 4) { suggestEl.style.display = 'none'; return; }
-    const q = query.toLowerCase();
-    const matches = allPlayers.filter((p) =>
-      p.name.toLowerCase().includes(q) && !selectedPlayers.some((sp) => sp.id === p.id)
-    ).slice(0, 8);
-    if (!matches.length) { suggestEl.style.display = 'none'; return; }
-    suggestEl.innerHTML = matches.map((p) =>
-      `<li class="bk-player-opt" data-pid="${p.id}" data-pname="${esc(p.name)}">${esc(p.name)}</li>`
-    ).join('');
-    suggestEl.style.display = 'block';
-    suggestEl.querySelectorAll('.bk-player-opt').forEach((li) => {
-      li.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        if (selectedPlayers.length < 4 && !selectedPlayers.some((sp) => sp.id === Number(li.dataset.pid))) {
-          selectedPlayers.push({ id: Number(li.dataset.pid), name: li.dataset.pname });
-          renderChips();
-        }
-        const searchEl = document.getElementById('fPlayerSearch');
-        if (searchEl) { searchEl.value = ''; }
-        suggestEl.style.display = 'none';
-      });
-    });
-  }
-
-  const searchEl = document.getElementById('fPlayerSearch');
-  searchEl?.addEventListener('input', (e) => showSuggestions(e.target.value));
-  searchEl?.addEventListener('focus', (e) => showSuggestions(e.target.value));
-  searchEl?.addEventListener('blur', () => setTimeout(() => {
-    const suggestEl = document.getElementById('fPlayerSuggestions');
-    if (suggestEl) suggestEl.style.display = 'none';
-  }, 150));
-
-  // ---- Booking type toggle ----
-  document.getElementById('fBookingType')?.addEventListener('change', (e) => {
-    const sec = document.getElementById('customTypeSection');
-    if (sec) sec.style.display = e.target.value === '__custom__' ? 'block' : 'none';
-  });
-
-  // ---- Repeat toggle ----
-  document.getElementById('btnNoRepeat')?.addEventListener('click', () => {
-    isRepeat = false;
-    document.getElementById('btnNoRepeat').classList.add('bk-toggle--on');
-    document.getElementById('btnRepeat').classList.remove('bk-toggle--on');
-    document.getElementById('repeatSection').style.display = 'none';
-  });
-  document.getElementById('btnRepeat')?.addEventListener('click', () => {
-    isRepeat = true;
-    document.getElementById('btnRepeat').classList.add('bk-toggle--on');
-    document.getElementById('btnNoRepeat').classList.remove('bk-toggle--on');
-    document.getElementById('repeatSection').style.display = 'block';
-  });
-
-  // ---- Conflict mode toggle ----
-  document.getElementById('btnSkipConflicts')?.addEventListener('click', () => {
-    conflictMode = 'skip';
-    document.getElementById('btnSkipConflicts').classList.add('bk-toggle--on');
-    document.getElementById('btnOverwriteConflicts').classList.remove('bk-toggle--on');
-  });
-  document.getElementById('btnOverwriteConflicts')?.addEventListener('click', () => {
-    conflictMode = 'overwrite';
-    document.getElementById('btnOverwriteConflicts').classList.add('bk-toggle--on');
-    document.getElementById('btnSkipConflicts').classList.remove('bk-toggle--on');
-  });
-
-  // ---- Indefinitely checkbox ----
-  document.getElementById('fIndefinitely')?.addEventListener('change', (e) => {
-    const weeksEl = document.getElementById('fRepeatWeeks');
-    if (weeksEl) weeksEl.disabled = e.target.checked;
-  });
-
-  // ---- Duration / court conflict helpers (same as before) ----
-  function refreshNewDurations() {
-    const durEl = document.getElementById('fBookingDuration');
-    const timeStr = document.getElementById('fBookingTime')?.value || '19:00';
-    const dateVal = document.getElementById('fBookingDate')?.value;
-    durEl.innerHTML = durationOptions(Number(durEl.value), timeStr);
-    if (dateVal === state.scheduleDate && slots) {
-      const startMin = _tToMin(timeStr);
-      if (isMulti) {
-        const checkedIds = new Set([...document.querySelectorAll('.fBookingCourtChk:checked')].map((el) => Number(el.value)));
-        if (checkedIds.size) {
-          Array.from(durEl.options).forEach((opt) => {
-            opt.disabled = slots.some((s) => {
-              const sCourts = s.courtIds || [s.courtId];
-              return sCourts.some((id) => checkedIds.has(id)) && _overlaps(startMin, Number(opt.value), _tToMin(s.startTime), s.durationMinutes);
-            });
-          });
-        }
-      } else {
-        const courtId = Number(document.getElementById('fBookingCourt')?.value) || null;
-        if (courtId) {
-          Array.from(durEl.options).forEach((opt) => {
-            opt.disabled = slots.some((s) => {
-              const sCourts = s.courtIds || [s.courtId];
-              return sCourts.includes(courtId) && _overlaps(startMin, Number(opt.value), _tToMin(s.startTime), s.durationMinutes);
-            });
-          });
-        }
-      }
-    }
-  }
-
-  function refreshNewCourtAvailability() {
-    if (!isMulti) return;
-    const timeStr = document.getElementById('fBookingTime')?.value;
-    const dateVal = document.getElementById('fBookingDate')?.value;
-    const durVal = Number(document.getElementById('fBookingDuration')?.value) || 60;
-    const startMin = _tToMin(timeStr);
-    const checkedIds = new Set([...document.querySelectorAll('.fBookingCourtChk:checked')].map((el) => Number(el.value)));
-    const checkedIdxs = courts.reduce((acc, c, i) => { if (checkedIds.has(c.id)) acc.push(i); return acc; }, []);
-    const minIdx = checkedIdxs.length ? checkedIdxs[0] : -1;
-    const maxIdx = checkedIdxs.length ? checkedIdxs[checkedIdxs.length - 1] : -1;
-    courts.forEach((court, idx) => {
-      const chk = document.querySelector(`.fBookingCourtChk[value="${court.id}"]`);
-      if (!chk) return;
-      const label = chk.closest('label') || chk.parentElement;
-      const hasConflict = startMin !== null && dateVal === state.scheduleDate && slots.some((s) => {
-        const sCourts = s.courtIds || [s.courtId];
-        return sCourts.includes(court.id) && _overlaps(startMin, durVal, _tToMin(s.startTime), s.durationMinutes);
-      });
-      const isChecked = checkedIds.has(court.id);
-      let adjacencyLocked = false;
-      if (checkedIdxs.length > 0) {
-        if (!isChecked) adjacencyLocked = idx !== minIdx - 1 && idx !== maxIdx + 1;
-        else adjacencyLocked = idx > minIdx && idx < maxIdx;
-      }
-      const disable = hasConflict || adjacencyLocked;
-      chk.disabled = disable;
-      label.style.opacity = disable ? '0.45' : '';
-      label.title = hasConflict ? 'Already booked at this time' : adjacencyLocked ? 'Must select adjacent courts' : '';
-    });
-  }
-
-  document.getElementById('fBookingTime')?.addEventListener('change', () => { refreshNewDurations(); refreshNewCourtAvailability(); });
-  document.getElementById('fBookingCourt')?.addEventListener('change', refreshNewDurations);
-  document.getElementById('fBookingDate')?.addEventListener('change', () => { refreshNewDurations(); refreshNewCourtAvailability(); });
-  document.getElementById('fBookingDuration')?.addEventListener('change', refreshNewCourtAvailability);
-  document.querySelectorAll('.fBookingCourtChk').forEach((chk) => chk.addEventListener('change', () => { refreshNewCourtAvailability(); refreshNewDurations(); }));
-  refreshNewDurations();
-  refreshNewCourtAvailability();
-
-  // ---- Submit ----
-  document.getElementById('bookingForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const date = document.getElementById('fBookingDate').value;
-    const startTime = document.getElementById('fBookingTime').value;
-    const durationMinutes = Number(document.getElementById('fBookingDuration').value);
-    const name = document.getElementById('fBookingName').value.trim() || null;
-    const playerIds = selectedPlayers.map((p) => p.id);
-
-    // Resolve booking type (create custom if needed)
-    let bookingTypeId = document.getElementById('fBookingType').value;
-    if (bookingTypeId === '__custom__') {
-      const typeName = document.getElementById('fCustomTypeName').value.trim();
-      const typeColor = document.getElementById('fCustomTypeColor').value;
-      if (!typeName) { toast('Type name is required', 'error'); return; }
-      try {
-        const newType = await window.api.addBookingType({ name: typeName, color: typeColor });
-        bookingTypeId = newType.id;
-      } catch (err) { toast(err.message, 'error'); return; }
-    } else {
-      bookingTypeId = bookingTypeId ? Number(bookingTypeId) : null;
-    }
-
-    // Resolve courts
-    let courtId, courtIds;
-    if (isMulti) {
-      courtIds = [...document.querySelectorAll('.fBookingCourtChk:checked')].map((el) => Number(el.value));
-      if (!courtIds.length || !date || !startTime) return;
-    } else {
-      courtId = Number(document.getElementById('fBookingCourt').value);
-      if (!courtId || !date || !startTime) return;
-    }
-
-    const bookingData = { courtId, courtIds, date, startTime, durationMinutes, bookingTypeId, name, info: null, playerIds };
-
-    if (isRepeat) {
-      const daysOfWeek = [...document.querySelectorAll('.fDowChk:checked')].map((el) => Number(el.value));
-      if (!daysOfWeek.length) { toast('Select at least one day of week', 'error'); return; }
-      const indefinitely = document.getElementById('fIndefinitely').checked;
-      const weeks = indefinitely ? 52 : Math.min(52, Math.max(1, Number(document.getElementById('fRepeatWeeks').value) || 4));
-      try {
-        const result = await window.api.addRepeatBookings({
-          ...bookingData,
-          repeat: { startDate: date, daysOfWeek, weeks, conflictMode },
-        });
-        modal.close();
-        state.scheduleDate = date;
-        let msg = `${result.created} booking${result.created !== 1 ? 's' : ''} created`;
-        if (result.skipped > 0) msg += `, ${result.skipped} skipped`;
-        toast(msg);
-        if (result.leagueConflicts && result.leagueConflicts.length > 0) {
-          toast(`${result.leagueConflicts.length} date(s) skipped — league match conflict`, 'error');
-        }
-        renderSchedule();
-      } catch (err) { toast(err.message, 'error'); }
-    } else {
-      try {
-        const newBooking = await window.api.addBooking(bookingData);
-        if (newBooking?.id) _pushUndo({ type: 'delete-ids', ids: [newBooking.id] });
-        modal.close();
-        state.scheduleDate = date;
-        toast(isMulti && courtIds?.length > 1 ? `${courtIds.length} courts booked` : 'Booking added');
-        renderSchedule();
-      } catch (err) { toast(err.message, 'error'); }
-    }
-  });
-}
-
-// ===== EDIT BOOKING MODAL =====
-async function openEditBookingModal(slot, courts, slots) {
-  const [bookingTypes, allPlayers] = await Promise.all([
-    window.api.getBookingTypes(),
-    window.api.getPlayers(),
-  ]);
-
-  const slotCourts = slot.courtIds
-    ? slot.courtIds.map((id) => courts.find((c) => c.id === id)).filter(Boolean)
-    : [courts.find((c) => c.id === slot.courtId)].filter(Boolean);
-  const courtLabel = slotCourts.length > 1 ? 'Courts' : 'Court';
-  const courtNames = slotCourts.map((c) => c.name).join(', ');
-  const courtIdSet = new Set(slotCourts.map((c) => c.id));
-
-  const repeatDeleteHTML = slot.repeatGroupId
-    ? `<div id="deleteScope" class="bk-delete-scope" style="display:none">
-        <p class="bk-delete-scope-label">Delete which events?</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn btn-danger btn-sm" id="btnDelThis">This event</button>
-          <button type="button" class="btn btn-danger btn-sm" id="btnDelFuture">This &amp; all future</button>
-          <button type="button" class="btn btn-danger btn-sm" id="btnDelAll">All events</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="btnDelCancel">Cancel</button>
-        </div>
-      </div>`
-    : '';
-
-  modal.open('Edit Booking', `
-    <form id="bookingForm">
-      <div class="form-group">
-        <label class="form-label">${courtLabel}</label>
-        <div class="form-control-static">${esc(courtNames)}</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Date</label>
-        <input type="date" class="form-control" id="fBookingDate" value="${esc(slot.date || state.scheduleDate)}" required>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Start Time</label>
-          <input type="time" class="form-control" id="fBookingTime" value="${esc(slot.startTime)}" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Duration</label>
-          <select class="form-control" id="fBookingDuration">${durationOptions(slot.durationMinutes, slot.startTime)}</select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Name</label>
-        <input type="text" class="form-control" id="fBookingName" value="${esc(slot.name || '')}" placeholder="e.g. Training, Open Play…" maxlength="80">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Booking Type</label>
-        <select class="form-control" id="fBookingType">
-          <option value="">— None —</option>
-          ${bookingTypes.map((bt) => `<option value="${bt.id}"${slot.bookingTypeId === bt.id ? ' selected' : ''}>${esc(bt.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Players <span class="form-hint">(up to 4)</span></label>
-        <div class="bk-player-wrap">
-          <input type="text" class="form-control" id="fPlayerSearch" placeholder="Search players…" autocomplete="off">
-          <ul id="fPlayerSuggestions" class="bk-player-drop" style="display:none"></ul>
-          <div id="fPlayerChips" class="bk-player-chips"></div>
-        </div>
-      </div>
-      <div class="form-actions">
-        <div>
-          <button type="button" class="btn btn-danger" id="btnDeleteBooking">Delete</button>
-          ${repeatDeleteHTML}
-        </div>
-        <div style="display:flex;gap:8px">
-          <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save</button>
-        </div>
-      </div>
-    </form>
-  `, { medium: true });
-
-  // ---- Player state (pre-populate from slot) ----
-  let selectedPlayers = (slot.players || []).map((p) => ({ id: p.id, name: p.name }));
-
-  function renderChips() {
-    const container = document.getElementById('fPlayerChips');
-    if (!container) return;
-    container.innerHTML = selectedPlayers.map((p) =>
-      `<div class="bk-chip">${esc(p.name)}<button type="button" class="bk-chip-remove" data-pid="${p.id}" aria-label="Remove">×</button></div>`
-    ).join('');
-    container.querySelectorAll('.bk-chip-remove').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selectedPlayers = selectedPlayers.filter((p) => p.id !== Number(btn.dataset.pid));
-        renderChips();
-        const searchEl = document.getElementById('fPlayerSearch');
-        if (searchEl) searchEl.disabled = false;
-      });
-    });
-    const searchEl = document.getElementById('fPlayerSearch');
-    if (searchEl) searchEl.disabled = selectedPlayers.length >= 4;
-  }
-  renderChips();
-
-  function showSuggestions(query) {
-    const suggestEl = document.getElementById('fPlayerSuggestions');
-    if (!suggestEl) return;
-    if (!query.trim() || selectedPlayers.length >= 4) { suggestEl.style.display = 'none'; return; }
-    const q = query.toLowerCase();
-    const matches = allPlayers.filter((p) =>
-      p.name.toLowerCase().includes(q) && !selectedPlayers.some((sp) => sp.id === p.id)
-    ).slice(0, 8);
-    if (!matches.length) { suggestEl.style.display = 'none'; return; }
-    suggestEl.innerHTML = matches.map((p) =>
-      `<li class="bk-player-opt" data-pid="${p.id}" data-pname="${esc(p.name)}">${esc(p.name)}</li>`
-    ).join('');
-    suggestEl.style.display = 'block';
-    suggestEl.querySelectorAll('.bk-player-opt').forEach((li) => {
-      li.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        if (selectedPlayers.length < 4 && !selectedPlayers.some((sp) => sp.id === Number(li.dataset.pid))) {
-          selectedPlayers.push({ id: Number(li.dataset.pid), name: li.dataset.pname });
-          renderChips();
-        }
-        const searchEl = document.getElementById('fPlayerSearch');
-        if (searchEl) searchEl.value = '';
-        suggestEl.style.display = 'none';
-      });
-    });
-  }
-
-  const searchEl = document.getElementById('fPlayerSearch');
-  searchEl?.addEventListener('input', (e) => showSuggestions(e.target.value));
-  searchEl?.addEventListener('focus', (e) => showSuggestions(e.target.value));
-  searchEl?.addEventListener('blur', () => setTimeout(() => {
-    const suggestEl = document.getElementById('fPlayerSuggestions');
-    if (suggestEl) suggestEl.style.display = 'none';
-  }, 150));
-
-  // ---- Duration refresh ----
-  function refreshEditDurations() {
-    const durEl = document.getElementById('fBookingDuration');
-    const timeStr = document.getElementById('fBookingTime')?.value || slot.startTime;
-    const dateVal = document.getElementById('fBookingDate')?.value;
-    durEl.innerHTML = durationOptions(Number(durEl.value), timeStr);
-    if (dateVal === state.scheduleDate && slots) {
-      const startMin = _tToMin(timeStr);
-      Array.from(durEl.options).forEach((opt) => {
-        opt.disabled = slots.some((s) => {
-          if (s.id === slot.id) return false;
-          const sCourts = s.courtIds || [s.courtId];
-          return sCourts.some((id) => courtIdSet.has(id)) && _overlaps(startMin, Number(opt.value), _tToMin(s.startTime), s.durationMinutes);
-        });
-      });
-    }
-  }
-  document.getElementById('fBookingTime')?.addEventListener('change', refreshEditDurations);
-  document.getElementById('fBookingDate')?.addEventListener('change', refreshEditDurations);
-  refreshEditDurations();
-
-  // ---- Delete ----
-  document.getElementById('btnDeleteBooking').addEventListener('click', () => {
-    if (slot.repeatGroupId) {
-      const scopeEl = document.getElementById('deleteScope');
-      if (scopeEl) scopeEl.style.display = scopeEl.style.display === 'none' ? 'block' : 'none';
-    } else {
-      if (!confirm('Delete this booking?')) return;
-      _doDelete();
-    }
-  });
-
-  async function _doDelete(opts) {
-    try {
-      await window.api.deleteBooking(slot.id, opts);
-      modal.close();
-      toast('Booking deleted');
-      renderSchedule();
-    } catch (err) { toast(err.message, 'error'); }
-  }
-
-  if (slot.repeatGroupId) {
-    document.getElementById('btnDelThis')?.addEventListener('click', () => _doDelete());
-    document.getElementById('btnDelFuture')?.addEventListener('click', () =>
-      _doDelete({ scope: 'future', groupId: slot.repeatGroupId, date: slot.date || state.scheduleDate })
-    );
-    document.getElementById('btnDelAll')?.addEventListener('click', () =>
-      _doDelete({ scope: 'all', groupId: slot.repeatGroupId })
-    );
-    document.getElementById('btnDelCancel')?.addEventListener('click', () => {
-      const scopeEl = document.getElementById('deleteScope');
-      if (scopeEl) scopeEl.style.display = 'none';
-    });
-  }
-
-  // ---- Save ----
-  document.getElementById('bookingForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const date = document.getElementById('fBookingDate').value;
-    const startTime = document.getElementById('fBookingTime').value;
-    const durationMinutes = Number(document.getElementById('fBookingDuration').value);
-    const bookingTypeId = document.getElementById('fBookingType').value ? Number(document.getElementById('fBookingType').value) : null;
-    const name = document.getElementById('fBookingName').value.trim() || null;
-    const playerIds = selectedPlayers.map((p) => p.id);
-    try {
-      await window.api.updateBooking(slot.id, { date, startTime, durationMinutes, bookingTypeId, name, info: slot.info || null, playerIds });
-      modal.close();
-      state.scheduleDate = date;
-      toast('Booking updated');
-      renderSchedule();
-    } catch (err) { toast(err.message, 'error'); }
-  });
-}
