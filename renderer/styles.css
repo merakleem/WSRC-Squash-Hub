@@ -7853,3 +7853,15 @@ body.is-viewing-as .app-container { height: 100%; }
   cursor: pointer;
 }
 .sch-panel-del:hover { background: #fdf1ef; }
+
+/* Unlike the overlap warning, this one stops the save: the schedule cannot
+   store a booking whose courts are not next to each other. */
+.sch-panel-block {
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: #fdf1ef;
+  border: 1px solid #f0d4d0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #a5352a;
+}

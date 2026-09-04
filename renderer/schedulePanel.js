@@ -180,6 +180,22 @@ function clashCount() {
   return n;
 }
 
+// A multi-court booking is one block of court, not a scattering: the schedule
+// stores it as a group of adjacent rows and the server refuses anything else.
+// Said here as well, because chips make a scattered pick easy to make.
+function nonAdjacent() {
+  if (p.courtIds.length < 2) return false;
+  const idxs = p.courtIds
+    .map((id) => p.courts.findIndex((c) => c.id === id))
+    .filter((i) => i >= 0)
+    .sort((a, b) => a - b);
+  return idxs.some((v, i) => i > 0 && v !== idxs[i - 1] + 1);
+}
+
+function blocked() {
+  return !p.courtIds.length || nonAdjacent();
+}
+
 function searchResults() {
   const q = p.search.trim().toLowerCase();
   if (!q) return [];
@@ -262,6 +278,7 @@ function detailsHTML() {
     <div class="sch-panel-section">
       <span class="sch-panel-label">Courts</span>
       <div class="sch-chiprow">${courtChips}</div>
+      ${nonAdjacent() ? '<div class="sch-panel-block">Courts in one booking have to be next to each other.</div>' : ''}
     </div>
 
     <div class="sch-panel-section">
@@ -401,7 +418,7 @@ function footHTML() {
       </div>
       <div class="sch-panel-btns">
         <button class="sch-panel-secondary" id="schPanelSecondary">${secondary}</button>
-        <button class="sch-panel-primary" id="schPanelPrimary"${p.busy ? ' disabled' : ''}>${p.busy ? 'Saving…' : primary}</button>
+        <button class="sch-panel-primary" id="schPanelPrimary"${p.busy || blocked() ? ' disabled' : ''}>${p.busy ? 'Saving…' : primary}</button>
       </div>
       ${isEdit && !p.askingDelete ? `<button class="sch-panel-del" id="schPanelDelete">Delete booking</button>` : ''}
     </div>`;
@@ -544,8 +561,7 @@ function bookingData() {
 }
 
 async function submit() {
-  if (!p || p.busy) return;
-  if (!p.courtIds.length) { toast('Pick at least one court', 'error'); return; }
+  if (!p || p.busy || blocked()) return;
   if (p.mode === 'new' && p.step === 2 && !p.dows.length) {
     toast('Pick at least one day to repeat on', 'error');
     return;

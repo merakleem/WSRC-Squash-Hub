@@ -113,11 +113,26 @@ click($$('[data-del]')[1]); await new Promise(r=>setTimeout(r,120));
 const del = calls.find(c=>c[0]==='deleteBooking');
 ok('delete sends the future scope', del && del[2] && del[2].scope==='future', del&&JSON.stringify(del[2]));
 
+// ---- adjacency is a hard stop, unlike overlap ----
+await panel.openBookingPanel({ mode:'new', host:$('.sch-page'), courts:payload.courts,
+  slots:payload.slots, types:payload.types, players:PLAYERS, courtIds:[1], start:14*60, dur:60 });
+await tick();
+ok('one court is fine', !$('.sch-panel-block') && !$('#schPanelPrimary').disabled);
+click($$('[data-court]')[2]); await tick();   // add Court 3 -> 1 and 3, not adjacent
+ok('a scattered pick is called out', !!$('.sch-panel-block'));
+ok('a scattered pick stops the save', $('#schPanelPrimary').disabled);
+click($$('[data-court]')[1]); await tick();   // add Court 2 -> 1,2,3 contiguous
+ok('filling the gap clears the block', !$('.sch-panel-block') && !$('#schPanelPrimary').disabled);
+click($$('[data-court]')[0]); click($$('[data-court]')[1]); click($$('[data-court]')[2]); await tick();
+ok('no court at all stops the save', $('#schPanelPrimary').disabled);
+panel.closeBookingPanel(); await tick();
+
 // ---- overlap warning ----
 await panel.openBookingPanel({ mode:'new', host:$('.sch-page'), courts:payload.courts,
   slots:payload.slots, types:payload.types, players:PLAYERS, courtIds:[2,3], start:19*60, dur:90 });
 await tick();
 ok('overlap is warned about', $('.sch-panel-warn')?.textContent==='Overlaps 2 existing bookings', $('.sch-panel-warn')?.textContent);
+ok('overlap warns but does not block', !$('#schPanelPrimary').disabled);
 panel.closeBookingPanel(); await tick();
 
 // ---- the real gesture: a plain click on empty grid ----

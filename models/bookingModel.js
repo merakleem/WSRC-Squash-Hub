@@ -22,6 +22,12 @@ function deleteBookingType(id) {
 
 // ===== BOOKINGS =====
 
+function _validationError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
 function _checkConflict(courtId, date, startTime, durationMinutes, excludeIds) {
   const db = getDB();
   const [h, m] = startTime.split(':').map(Number);
@@ -50,10 +56,10 @@ function _checkAdjacency(courtIds) {
   const courts = db.prepare('SELECT id FROM courts ORDER BY sort_order ASC, id ASC').all();
   const idxMap = new Map(courts.map((c, i) => [c.id, i]));
   const idxs = courtIds.map((cId) => idxMap.get(cId)).filter((x) => x !== undefined);
-  if (idxs.length !== courtIds.length) throw new Error('One or more courts not found.');
+  if (idxs.length !== courtIds.length) throw _validationError('One or more courts not found.');
   const sorted = [...idxs].sort((a, b) => a - b);
   for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i] !== sorted[i - 1] + 1) throw new Error('Multi-court bookings must span adjacent courts.');
+    if (sorted[i] !== sorted[i - 1] + 1) throw _validationError('Multi-court bookings must span adjacent courts.');
   }
 }
 
@@ -97,7 +103,7 @@ function addBooking({ courtId, courtIds, date, startTime, durationMinutes, booki
   _checkAdjacency(effectiveCourtIds);
   for (const cId of effectiveCourtIds) {
     if (_checkConflict(cId, date, startTime, durationMinutes, [])) {
-      throw new Error('This time slot is already booked on one or more of those courts.');
+      throw _validationError('This time slot is already booked on one or more of those courts.');
     }
   }
   const db = getDB();
@@ -167,7 +173,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
 
     for (const cId of newCourtIds) {
       if (_checkConflict(cId, date, startTime, durationMinutes, memberIdsList)) {
-        throw new Error(newCourtIds.length === 1
+        throw _validationError(newCourtIds.length === 1
           ? 'This time slot is already booked on that court.'
           : 'This time slot is already booked on one or more of those courts.');
       }
@@ -199,7 +205,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
   } else {
     if (newCourtIds.length === 1) {
       if (_checkConflict(newCourtIds[0], date, startTime, durationMinutes, [Number(id), ...extraExclude])) {
-        throw new Error('This time slot is already booked on that court.');
+        throw _validationError('This time slot is already booked on that court.');
       }
       run(
         'UPDATE bookings SET court_id=?, date=?, start_time=?, duration_minutes=?, booking_type_id=?, name=?, info=? WHERE id=?',
@@ -213,7 +219,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
     } else {
       for (const cId of newCourtIds) {
         if (_checkConflict(cId, date, startTime, durationMinutes, [Number(id), ...extraExclude])) {
-          throw new Error('This time slot is already booked on one or more of those courts.');
+          throw _validationError('This time slot is already booked on one or more of those courts.');
         }
       }
       const groupId = Number(id);
