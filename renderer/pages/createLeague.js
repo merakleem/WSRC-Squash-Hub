@@ -1,7 +1,11 @@
 import { state, isAdmin } from '../state.js';
-import { esc, formatDate, toast, modal } from '../utils.js';
+import { esc, formatDate, toast, modal, avatarHTML } from '../utils.js';
 
 // ===== CREATE LEAGUE WIZARD =====
+// Five steps: League info → Add players → Structure → Blackout dates → Preview.
+// The wizard builds state.wizard as it goes and posts it once at the end via
+// submitCreateLeague() — nothing is saved before Create league is pressed.
+// Structure numbers recalculate live as fields change; there is no Apply step.
 export function startCreateLeague() {
   state.wizard = {
     step: 1,
@@ -33,37 +37,168 @@ function defaultStartDate() {
   return d.toISOString().split('T')[0];
 }
 
+const STEP_LABELS = ['League info', 'Add players', 'Structure', 'Blackout dates', 'Preview'];
+
+// An error queued by a step jump, shown once the target step has rendered
+// (steps 2 and 3 render async, so it can't be written straight away).
+let _pendingError = '';
+
+function _err(msg) {
+  const el = document.getElementById('wError');
+  if (el) el.textContent = msg;
+}
+
+function _flushError() {
+  if (!_pendingError) return;
+  _err(_pendingError);
+  _pendingError = '';
+}
+
+function _fmtShort(iso) {
+  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function _fmtLong(iso) {
+  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+// The derived structure numbers every step shares: validity, divisions,
+// weeks per round and total weeks. Same arithmetic the old steps 3 and 4
+// each computed for themselves.
+function _calc() {
+  const w = state.wizard;
+  const n = w.rankedPlayers.length;
+  if (w.setupType === 'traditional') {
+    const valid = w.numTeams >= 2 && n > 0 && n % w.numTeams === 0;
+    const divisions = valid ? n / w.numTeams : null;
+    const base = valid ? (w.numTeams % 2 === 0 ? w.numTeams - 1 : w.numTeams) : null;
+    return { n, valid, teams: w.numTeams, divisions, base, weeks: valid ? base * w.numRounds : null };
+  }
+  const maxDivs = Math.max(1, Math.floor(n / 2));
+  const valid = n >= 2 && w.modernNumDivisions >= 1 && w.modernNumDivisions <= Math.floor(n / 2);
+  const maxSize = valid ? Math.ceil(n / w.modernNumDivisions) : null;
+  const base = valid ? (maxSize % 2 === 0 ? maxSize - 1 : maxSize) : null;
+  return { n, valid, divisions: w.modernNumDivisions, maxDivs, base, weeks: valid ? base * w.numRounds : null };
+}
+
+// Even-split division sizes for a modern league (mirror of distributePlayersEvenly).
+function _divSizes(n, numDivisions) {
+  return Array.from({ length: numDivisions || 0 }, (_, i) =>
+    Math.floor(n / numDivisions) + (i < n % numDivisions ? 1 : 0));
+}
+
+function _weekDates(count) {
+  const skip = new Set(state.wizard.blackoutDates);
+  const out = [];
+  let cur = state.wizard.startDate;
+  for (let i = 0; i < count; i++) {
+    while (skip.has(cur)) cur = addDaysPreview(cur, 7);
+    out.push(cur);
+    cur = addDaysPreview(cur, 7);
+  }
+  return out;
+}
+
+function _summaryHTML() {
+  const w = state.wizard;
+  const c = _calc();
+  const teams = w.setupType === 'traditional';
+  const cell = (label, value, { desk = false } = {}) => `
+    <div class="wz-sum-cell${desk ? ' wz-sum-cell--desk' : ''}">
+      <span class="wz-sum-label">${label}</span>
+      <span class="wz-sum-val${value === '—' ? ' wz-sum-val--dash' : ''}">${value}</span>
+    </div>`;
+  return [
+    cell('League', esc(w.leagueName.trim()) || 'Untitled', { desk: true }),
+    cell('Starts', _fmtShort(w.startDate), { desk: true }),
+    cell('Format', teams ? 'Teams' : 'Divisions only', { desk: true }),
+    cell('Players', String(c.n)),
+    cell(teams ? 'Teams × divs' : 'Divisions', c.valid ? (teams ? `${c.teams} × ${c.divisions}` : String(c.divisions)) : '—'),
+    cell('Weeks', c.weeks ? String(c.weeks) : '—'),
+  ].join('');
+}
+
+// Step navigation, used by the footer buttons and the clickable stepper.
+// Forward jumps get the same guards Next applies: step 1 must have a name and
+// date, past step 2 needs at least 2 players, past step 3 a valid structure.
+function _goToStep(target) {
+  const w = state.wizard;
+  target = Math.max(1, Math.min(5, target));
+  if (target === w.step) return;
+
+  if (target > w.step) {
+    if (w.step === 1) {
+      const name = (document.getElementById('wName')?.value ?? w.leagueName).trim();
+      const date = document.getElementById('wDate')?.value ?? w.startDate;
+      if (!name) { _err('League name is required.'); return; }
+      if (!date) { _err('Start date is required.'); return; }
+      w.leagueName = name;
+      w.startDate = date;
+    }
+    if (target > 2 && w.rankedPlayers.length < 2) {
+      _pendingError = 'Select at least 2 players.';
+      w.step = 2;
+      renderCreateLeague();
+      return;
+    }
+    if (target > 3) {
+      const c = _calc();
+      if (!c.valid) {
+        _pendingError = 'Fix the structure before continuing.';
+        w.step = 3;
+        renderCreateLeague();
+        return;
+      }
+      if (w.step <= 3) {
+        // Leaving step 3 forward commits the derived numbers, as Next always has.
+        if (w.setupType === 'traditional') w.numDivisions = c.divisions;
+        else w.modernDivisionPlayers = null;
+      }
+    }
+  }
+
+  w.step = target;
+  renderCreateLeague();
+}
+
 export function renderCreateLeague() {
   document.getElementById('pageTitle').textContent = 'New League';
   document.getElementById('topbarActions').innerHTML = '';
   const content = document.getElementById('mainContent');
 
-  const steps = [
-    { label: 'League Info' },
-    { label: 'Add Players' },
-    { label: 'Structure' },
-    { label: 'Blackout Dates' },
-    { label: 'Preview' },
-  ];
   const s = state.wizard.step;
-
-  const stepsHTML = steps.map((step, i) => {
+  const stepsHTML = STEP_LABELS.map((label, i) => {
     const num = i + 1;
-    const cls = num < s ? 'done' : num === s ? 'active' : '';
-    const connCls = num < s ? 'done' : '';
+    const done = num < s;
+    const active = num === s;
     return `
-      <div class="wizard-step ${cls}">
-        <div class="step-num">${num < s ? '&#10003;' : num}</div>
-        <span class="step-label">${step.label}</span>
-      </div>
-      ${i < steps.length - 1 ? `<div class="step-connector ${connCls}"></div>` : ''}`;
+      <div class="wz-step${done ? ' wz-step--done' : ''}${active ? ' wz-step--on' : ''}" data-step="${num}">
+        <div class="wz-step-row">
+          <span class="wz-line${i === 0 ? ' wz-line--none' : num <= s ? ' wz-line--fill' : ''}"></span>
+          <button class="wz-dot" type="button">${done ? '&#10003;' : num}</button>
+          <span class="wz-line${i === STEP_LABELS.length - 1 ? ' wz-line--none' : done ? ' wz-line--fill' : ''}"></span>
+        </div>
+        <span class="wz-step-label">${label}</span>
+      </div>`;
   }).join('');
 
   content.innerHTML = `
-    <div class="wizard">
-      <div class="wizard-steps">${stepsHTML}</div>
-      <div class="wizard-card" id="wizardCard"></div>
+    <div class="wz-page">
+      <div class="wz-stepcard">
+        <div class="wz-steps">${stepsHTML}</div>
+        <div class="wz-mtitle">
+          <span class="wz-mtitle-name">${STEP_LABELS[s - 1]}</span>
+          <span class="wz-mtitle-n">Step ${s} of 5</span>
+        </div>
+        <div class="wz-summary" id="wzSummary">${_summaryHTML()}</div>
+      </div>
+      <div id="wizardCard"></div>
     </div>`;
+
+  content.querySelector('.wz-steps').addEventListener('click', (e) => {
+    const step = e.target.closest('.wz-step')?.dataset.step;
+    if (step) _goToStep(Number(step));
+  });
 
   renderWizardStep();
 }
@@ -78,59 +213,96 @@ function renderWizardStep() {
   }
 }
 
-// Step 1 — League Info + Setup Type
+function _footerHTML({ cancel = false, nextDisabled = false } = {}) {
+  return `
+    <div class="wz-foot">
+      <span id="wError" class="wz-foot-err"></span>
+      <span class="wz-foot-btns">
+        ${cancel
+          ? '<button class="btn btn-outline" id="wCancel">Cancel</button>'
+          : '<button class="btn btn-outline" id="wBack">Back</button>'}
+        <button class="btn btn-primary" id="wNext"${nextDisabled ? ' disabled' : ''}>Next</button>
+      </span>
+    </div>`;
+}
+
+// Step 1 — League information + format
 function renderStep1() {
-  const { setupType } = state.wizard;
-  document.getElementById('wizardCard').innerHTML = `
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">League Information</h3>
-    <div class="form-group">
-      <label>League Name *</label>
-      <input class="form-control" id="wName" value="${esc(state.wizard.leagueName)}" placeholder="e.g. Fall 2024 League" autofocus>
-    </div>
-    <div class="form-group">
-      <label>Start Date *</label>
-      <input class="form-control" id="wDate" type="date" value="${esc(state.wizard.startDate)}">
-    </div>
-    <div class="form-group">
-      <label>League Format</label>
-      <div class="setup-type-grid">
-        <div class="setup-type-card ${setupType === 'traditional' ? 'selected' : ''}" data-type="traditional">
-          <div class="setup-type-title">Teams</div>
-          <div class="setup-type-desc">Players are grouped into teams. Teams play each other each week, with one match per division.</div>
+  const w = state.wizard;
+
+  const formatCard = (type, title, tag, desc, chips) => {
+    const on = w.setupType === type;
+    return `
+      <div class="wz-format${on ? ' wz-format--on' : ''}" data-type="${type}">
+        <div class="wz-format-top">
+          <span class="wz-radio"><span></span></span>
+          <span class="wz-format-title">${title}</span>
+          ${tag ? `<span class="wz-format-tag">${tag}</span>` : ''}
         </div>
-        <div class="setup-type-card ${setupType === 'modern' ? 'selected' : ''}" data-type="modern">
-          <div class="setup-type-title">No Teams</div>
-          <div class="setup-type-desc">No teams. Players are grouped into divisions and play everyone in their division (round robin).</div>
+        <span class="wz-format-desc">${desc}</span>
+        <div class="wz-format-chips">${chips.map((c) => `<span class="wz-chip">${c}</span>`).join('')}</div>
+      </div>`;
+  };
+
+  document.getElementById('wizardCard').innerHTML = `
+    <div class="wz-card">
+      <div class="wz-head">
+        <div>
+          <div class="wz-title">League information</div>
+          <div class="wz-sub">Name it, pick a start date, and choose how players are grouped.</div>
         </div>
       </div>
-    </div>
-    <div id="wError" class="form-error"></div>
-    <div class="wizard-footer">
-      <button class="btn btn-outline" onclick="navigate('leagues')">Cancel</button>
-      <button class="btn btn-primary" id="wNext">Next &rarr;</button>
+      <div class="wz-body">
+        <div class="wz-row1">
+          <div class="wz-field">
+            <span class="wz-label">League name</span>
+            <input class="wz-input" id="wName" value="${esc(w.leagueName)}" placeholder="e.g. Fall 2026 League" autofocus>
+          </div>
+          <div class="wz-field">
+            <span class="wz-label">Start date</span>
+            <input class="wz-input" id="wDate" type="date" value="${esc(w.startDate)}">
+          </div>
+        </div>
+        <div class="wz-field">
+          <span class="wz-label">Format</span>
+          <div class="wz-formats">
+            ${formatCard('traditional', 'Teams', 'Current default',
+              'Players are grouped into teams. Teams play each other each week, with one match per division.',
+              ['Team standings', 'One night, one opponent'])}
+            ${formatCard('modern', 'No teams', '',
+              'No teams. Players are grouped into divisions and play everyone in their division (round robin).',
+              ['Division standings', 'Round robin'])}
+          </div>
+        </div>
+      </div>
+      ${_footerHTML({ cancel: true })}
     </div>`;
 
-  document.getElementById('wizardCard').querySelectorAll('.setup-type-card').forEach((card) => {
+  // Name and date feed the summary strip live; Next still validates them.
+  document.getElementById('wName').addEventListener('input', (e) => {
+    state.wizard.leagueName = e.target.value;
+    document.getElementById('wzSummary').innerHTML = _summaryHTML();
+    _err('');
+  });
+  document.getElementById('wDate').addEventListener('input', (e) => {
+    if (e.target.value) state.wizard.startDate = e.target.value;
+    document.getElementById('wzSummary').innerHTML = _summaryHTML();
+    _err('');
+  });
+
+  document.getElementById('wizardCard').querySelectorAll('.wz-format').forEach((card) => {
     card.addEventListener('click', () => {
-      document.querySelectorAll('.setup-type-card').forEach((c) => c.classList.remove('selected'));
-      card.classList.add('selected');
       state.wizard.setupType = card.dataset.type;
+      renderCreateLeague();
     });
   });
 
-  document.getElementById('wNext').addEventListener('click', () => {
-    const name = document.getElementById('wName').value.trim();
-    const date = document.getElementById('wDate').value;
-    if (!name) { document.getElementById('wError').textContent = 'League name is required.'; return; }
-    if (!date) { document.getElementById('wError').textContent = 'Start date is required.'; return; }
-    state.wizard.leagueName = name;
-    state.wizard.startDate = date;
-    state.wizard.step = 2;
-    renderCreateLeague();
-  });
+  document.getElementById('wCancel').addEventListener('click', () => window.navigate('leagues'));
+  document.getElementById('wNext').addEventListener('click', () => _goToStep(2));
+  _flushError();
 }
 
-// Step 2 — Select Players (order is determined by the Ladder)
+// Step 2 — Add players (order is determined by the Ladder)
 async function renderStep2() {
   // Load ladder (source of truth for skill ranking)
   if (!state.ladder.length) state.ladder = await window.api.getLadder();
@@ -151,73 +323,130 @@ async function renderStep2() {
     return list;
   }
 
-  function renderAvailableList(query) {
-    const q = query.trim().toLowerCase();
-    const filtered = buildAvailable().filter((p) => !q || p.name.toLowerCase().includes(q));
+  const ladderSort = () => {
+    state.wizard.rankedPlayers.sort((a, b) => {
+      const ai = ladderOrder.indexOf(a.id);
+      const bi = ladderOrder.indexOf(b.id);
+      return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
+    });
+  };
+
+  const query = () => document.getElementById('playerSearch')?.value || '';
+  const filteredAvailable = () => {
+    const q = query().trim().toLowerCase();
+    return buildAvailable().filter((p) => !q || p.name.toLowerCase().includes(q));
+  };
+
+  function renderAvailableList() {
+    const filtered = filteredAvailable();
     const el = document.getElementById('availableList');
     if (!el) return;
     el.innerHTML = filtered.length === 0
-      ? `<div class="empty-state"><strong>${buildAvailable().length === 0 ? 'All players added' : 'No players match'}</strong></div>`
-      : filtered.map((p) => `
-          <div class="picker-item" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
-            <span style="flex:1">${esc(p.name)}</span>
-            <span style="color:var(--accent);font-size:18px">+</span>
-          </div>`).join('');
+      ? `<div class="wz-lempty">
+          <span class="wz-lempty-t">${buildAvailable().length === 0 ? 'Every club player is in' : 'No players match'}</span>
+        </div>`
+      : filtered.map((p) => {
+          const li = ladderOrder.indexOf(p.id);
+          return `
+            <div class="wz-prow" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
+              ${avatarHTML(p, 'wz-avatar')}
+              <span class="wz-pname">${esc(p.name)}</span>
+              <span class="wz-prank">${li === -1 ? '' : `#${li + 1}`}</span>
+              <button class="wz-pbtn" type="button" tabindex="-1">+</button>
+            </div>`;
+        }).join('');
   }
 
   function renderSelectedList() {
     const el = document.getElementById('rankedList');
-    const hdr = document.getElementById('selectedHeader');
     if (!el) return;
-    if (hdr) hdr.textContent = `Selected (${state.wizard.rankedPlayers.length}) — ladder order`;
     el.innerHTML = state.wizard.rankedPlayers.length === 0
-      ? '<div class="empty-state" style="padding:40px 20px"><strong>No players selected</strong><p>Click players on the left to add them.</p></div>'
+      ? `<div class="wz-lempty">
+          <span class="wz-lempty-t">No players yet</span>
+          <span class="wz-lempty-s">Click a name on the left to add them.</span>
+        </div>`
       : state.wizard.rankedPlayers.map((p, i) => `
-          <div class="picker-item">
-            <div class="rank-badge">${i + 1}</div>
-            <span style="flex:1">${esc(p.name)}</span>
-            <button class="remove-btn" data-action="remove-player" data-idx="${i}">&times;</button>
+          <div class="wz-prow wz-prow--sel">
+            <span class="wz-seed">${i + 1}</span>
+            ${avatarHTML(p, 'wz-avatar wz-avatar--navy')}
+            <span class="wz-pname">${esc(p.name)}</span>
+            <button class="wz-pbtn" data-action="remove-player" data-idx="${i}" aria-label="Remove">&times;</button>
           </div>`).join('');
   }
 
+  // One refresh for anything a pick changes: both lists, the counts, the
+  // ghost-button states and the summary strip — the search box is left alone.
+  function refresh() {
+    renderAvailableList();
+    renderSelectedList();
+    document.getElementById('wzSelChip').textContent = `${state.wizard.rankedPlayers.length} selected`;
+    document.getElementById('wzAvailN').textContent = `${buildAvailable().length} available`;
+    document.getElementById('wzAddAll').disabled = filteredAvailable().length === 0;
+    document.getElementById('wzClear').disabled = state.wizard.rankedPlayers.length === 0;
+    document.getElementById('wzSummary').innerHTML = _summaryHTML();
+    _err('');
+  }
+
   document.getElementById('wizardCard').innerHTML = `
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">Select Players</h3>
-    <p class="text-muted" style="font-size:13px;margin-bottom:18px">
-      Click a player to add them. Order is set by the <strong>Ladder</strong> ranking.
-    </p>
-    <div class="player-picker">
-      <div class="picker-col">
-        <h4>Club Players</h4>
-        <input class="form-control" id="playerSearch" placeholder="Search players…" style="margin-bottom:8px" autocomplete="off">
-        <div class="picker-list" id="availableList"></div>
+    <div class="wz-card">
+      <div class="wz-head">
+        <div>
+          <div class="wz-title">Add players</div>
+          <div class="wz-sub">Seeding follows the ladder automatically &mdash; no dragging needed.</div>
+        </div>
+        <span class="wz-selchip" id="wzSelChip">${state.wizard.rankedPlayers.length} selected</span>
       </div>
-      <div class="picker-col">
-        <h4 id="selectedHeader">Selected (${state.wizard.rankedPlayers.length}) &mdash; ladder order</h4>
-        <div class="picker-list" id="rankedList"></div>
+
+      <div class="wz-cols">
+        <div class="wz-pickcol">
+          <div class="wz-colhead">
+            <div class="wz-colhead-row">
+              <span class="wz-label">Club players</span>
+              <span class="wz-hint" id="wzAvailN">${buildAvailable().length} available</span>
+              <button class="wz-ghost" id="wzAddAll"${buildAvailable().length === 0 ? ' disabled' : ''}>Add all</button>
+            </div>
+            <input class="wz-input wz-search" id="playerSearch" placeholder="Search players…" autocomplete="off">
+          </div>
+          <div class="wz-plist" id="availableList"></div>
+        </div>
+
+        <div class="wz-pickcol">
+          <div class="wz-colhead wz-colhead--sel">
+            <span class="wz-label">In this league</span>
+            <span class="wz-hint">ladder order</span>
+            <button class="wz-ghost" id="wzClear"${state.wizard.rankedPlayers.length === 0 ? ' disabled' : ''}>Clear</button>
+          </div>
+          <div class="wz-plist wz-plist--sel" id="rankedList"></div>
+        </div>
       </div>
-    </div>
-    <div id="wError" class="form-error mt-4"></div>
-    <div class="wizard-footer">
-      <button class="btn btn-outline" id="wBack">&larr; Back</button>
-      <button class="btn btn-primary" id="wNext">Next &rarr;</button>
+
+      ${_footerHTML()}
     </div>`;
 
-  renderAvailableList('');
+  renderAvailableList();
   renderSelectedList();
 
-  document.getElementById('playerSearch').addEventListener('input', (e) => {
-    renderAvailableList(e.target.value);
+  document.getElementById('playerSearch').addEventListener('input', () => {
+    renderAvailableList();
+    document.getElementById('wzAddAll').disabled = filteredAvailable().length === 0;
   });
 
-  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 1; renderCreateLeague(); });
-  document.getElementById('wNext').addEventListener('click', () => {
-    if (state.wizard.rankedPlayers.length < 2) {
-      document.getElementById('wError').textContent = 'Select at least 2 players.';
-      return;
-    }
-    state.wizard.step = 3;
-    renderCreateLeague();
+  document.getElementById('wzAddAll').addEventListener('click', () => {
+    const remaining = buildAvailable();
+    if (!remaining.length) return;
+    remaining.forEach((p) => state.wizard.rankedPlayers.push({ id: p.id, name: p.name }));
+    ladderSort();
+    refresh();
   });
+
+  document.getElementById('wzClear').addEventListener('click', () => {
+    if (!state.wizard.rankedPlayers.length) return;
+    state.wizard.rankedPlayers = [];
+    refresh();
+  });
+
+  document.getElementById('wBack').addEventListener('click', () => _goToStep(1));
+  document.getElementById('wNext').addEventListener('click', () => _goToStep(3));
 
   document.getElementById('wizardCard').addEventListener('click', (e) => {
     const action = e.target.closest('[data-action]')?.dataset.action;
@@ -226,22 +455,15 @@ async function renderStep2() {
     if (action === 'add-player') {
       const el = e.target.closest('[data-action]');
       state.wizard.rankedPlayers.push({ id: Number(el.dataset.id), name: el.dataset.name });
-      state.wizard.rankedPlayers.sort((a, b) => {
-        const ai = ladderOrder.indexOf(a.id);
-        const bi = ladderOrder.indexOf(b.id);
-        return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
-      });
-      const query = document.getElementById('playerSearch')?.value || '';
-      renderAvailableList(query);
-      renderSelectedList();
+      ladderSort();
+      refresh();
     } else if (action === 'remove-player') {
       const idx = Number(e.target.closest('[data-action]').dataset.idx);
       state.wizard.rankedPlayers.splice(idx, 1);
-      const query = document.getElementById('playerSearch')?.value || '';
-      renderAvailableList(query);
-      renderSelectedList();
+      refresh();
     }
   });
+  _flushError();
 }
 
 // Step 3 — Structure (dispatches based on setupType)
@@ -250,239 +472,277 @@ async function renderStep3() {
   return renderStep3Traditional();
 }
 
-async function renderStep3Modern() {
-  const n = state.wizard.rankedPlayers.length;
-  const { modernNumDivisions, numRounds, matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
-  const allCourts = await window.api.getCourts();
-  const maxDivs = Math.floor(n / 2);
-  const isValid = modernNumDivisions >= 1 && modernNumDivisions <= maxDivs;
-
-  const numCourts = selectedCourtIds.length;
-
-  // Compute estimated total weeks based on even distribution
-  let totalWeeks = null;
-  if (isValid) {
-    const maxDivSize = Math.ceil(n / modernNumDivisions);
-    const singleRound = maxDivSize % 2 === 0 ? maxDivSize - 1 : maxDivSize;
-    totalWeeks = singleRound * numRounds;
-  }
-
-  // Preview distribution
-  let distPreview = '';
-  if (isValid) {
-    const sizes = Array.from({ length: modernNumDivisions }, (_, i) =>
-      Math.floor(n / modernNumDivisions) + (i < n % modernNumDivisions ? 1 : 0)
-    );
-    distPreview = sizes.map((s, i) => `Div ${i + 1}: ${s} player${s !== 1 ? 's' : ''}`).join(' &nbsp;&middot;&nbsp; ');
-  }
-
-  document.getElementById('wizardCard').innerHTML = `
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">League Structure</h3>
-    <p class="text-muted" style="font-size:13px;margin-bottom:20px">
-      You have <strong>${n} players</strong>. Set the number of divisions (minimum 2 players per division).
-    </p>
-
-    <div class="step3-grid">
-      <div>
-        <div class="form-group">
-          <label>Number of Divisions</label>
-          <input class="form-control" id="wModernDivs" type="number" min="1" max="${maxDivs}" value="${modernNumDivisions}" style="font-size:16px;font-weight:600">
-          <p class="text-muted" style="font-size:12px;margin-top:6px">Min 1 &nbsp;&middot;&nbsp; Max ${maxDivs} (at least 2 players per division)</p>
-        </div>
-
-        ${isValid ? `<div class="structure-calc" style="font-size:13px">${distPreview}</div>` : ''}
-        ${!isValid && modernNumDivisions >= 1 ? `<div class="struct-warning">Can't create ${modernNumDivisions} divisions with ${n} players — each division needs at least 2 players.</div>` : ''}
-
-        <div class="form-group" style="margin-top:20px">
-          <label>Rounds through the schedule</label>
-          <input class="form-control" id="wRounds" type="number" min="1" value="${numRounds}">
-          ${isValid ? `<p class="text-muted" style="font-size:12px;margin-top:6px">~${totalWeeks} total weeks (based on largest division)</p>` : ''}
-        </div>
-      </div>
-
-      <div>
-        <div class="form-group">
-          <label>Match Start Time</label>
-          <input class="form-control" id="wStartTime" type="time" value="${matchStartTime}">
-        </div>
-        <div class="form-group">
-          <label>Courts</label>
-          ${allCourts.length === 0
-            ? `<p class="text-muted" style="font-size:12px;margin-top:4px">No courts set up. <a href="#" onclick="navigate('clubSettings');return false">Add courts in Club Settings</a> first.</p>`
-            : `<div class="court-picker">${allCourts.map((c) => `
-                <label class="court-pick-item">
-                  <input type="checkbox" class="wCourtCheck" value="${c.id}" ${selectedCourtIds.includes(c.id) ? 'checked' : ''}>
-                  ${esc(c.name)}
-                </label>`).join('')}
-              </div>`
-          }
-        </div>
-        <div class="form-group">
-          <label>Match Duration <span class="form-hint">(minutes)</span></label>
-          <input class="form-control" id="wDuration" type="number" min="1" value="${matchDuration}">
-        </div>
-        <div class="form-group">
-          <label>Buffer Between Matches <span class="form-hint">(minutes)</span></label>
-          <input class="form-control" id="wBuffer" type="number" min="0" value="${matchBuffer}">
-        </div>
-      </div>
-    </div>
-
-    <div id="wError" class="form-error mt-4"></div>
-    <div class="wizard-footer">
-      <button class="btn btn-outline" id="wBack">&larr; Back</button>
-      <button class="btn btn-outline" id="wApply">Apply Settings</button>
-      <button class="btn btn-primary" id="wNext" ${!isValid ? 'disabled' : ''}>Next &rarr;</button>
+function _numCtlHTML(ctl, val) {
+  return `
+    <div class="wz-num">
+      <button class="wz-num-btn" type="button" data-ctl="${ctl}-dec">&minus;</button>
+      <span class="wz-num-val">${val}</span>
+      <button class="wz-num-btn" type="button" data-ctl="${ctl}-inc">+</button>
     </div>`;
-
-  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 2; renderCreateLeague(); });
-  document.getElementById('wNext').addEventListener('click', () => {
-    if (!isValid) return;
-    state.wizard.modernNumDivisions = modernNumDivisions;
-    state.wizard.modernDivisionPlayers = null;
-    state.wizard.step = 4;
-    renderCreateLeague();
-  });
-
-  function applyModernSettings() {
-    state.wizard.modernNumDivisions = Math.max(1, Number(document.getElementById('wModernDivs').value) || 1);
-    state.wizard.numRounds = Math.max(1, Number(document.getElementById('wRounds').value) || 1);
-    state.wizard.matchStartTime = document.getElementById('wStartTime').value;
-    state.wizard.selectedCourtIds = [...document.querySelectorAll('.wCourtCheck:checked')].map((el) => Number(el.value));
-    state.wizard.matchDuration = Math.max(1, Number(document.getElementById('wDuration').value) || 1);
-    state.wizard.matchBuffer = Math.max(0, Number(document.getElementById('wBuffer').value) || 0);
-    state.wizard.modernDivisionPlayers = null;
-    renderCreateLeague();
-  }
-
-  document.getElementById('wApply').addEventListener('click', applyModernSettings);
 }
 
-async function renderStep3Traditional() {
-  const n = state.wizard.rankedPlayers.length;
-  const { numTeams, numRounds, matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
-  const [configs, allCourts] = await Promise.all([window.api.getValidConfigs(n), window.api.getCourts()]);
-  const numCourts = selectedCourtIds.length;
+function _presetsHTML(values, current) {
+  return `<div class="wz-presets">${values.map((v) => `
+    <button class="wz-preset${v === current ? ' wz-preset--on' : ''}" type="button" data-preset="${v}">${v}</button>`).join('')}
+  </div>`;
+}
 
-  const isValid = numTeams >= 2 && n % numTeams === 0;
-  const numDivisions = isValid ? n / numTeams : null;
-  const baseWeeks = isValid ? (numTeams % 2 === 0 ? numTeams - 1 : numTeams) : null;
-  const totalWeeks = isValid ? baseWeeks * numRounds : null;
-  const calcClass = numTeams < 2 ? '' : isValid ? 'ok' : 'err';
-
-  let warning = '';
-  if (numTeams >= 2 && !isValid) {
-    warning = nearestConfigWarning(n, configs, 'teams', numTeams);
-  }
-
-  // Late night warning: calculate latest possible end time on a league night
-  let lateWarning = '';
-  if (isValid && matchStartTime && numCourts >= 1) {
-    const matchesPerWeek = Math.floor(numTeams / 2) * numDivisions;
-    const slots = Math.ceil(matchesPerWeek / numCourts);
-    const totalMins = slots * (matchDuration + matchBuffer);
-    const [sh, sm] = matchStartTime.split(':').map(Number);
-    const endMins = sh * 60 + sm + totalMins;
-    if (endMins > 21 * 60) {
-      const endH = Math.floor(endMins / 60);
-      const endM = String(endMins % 60).padStart(2, '0');
-      lateWarning = `Latest matches on a league night may finish around <strong>${endH}:${endM}</strong> — after 9:00 PM.`;
+function _calcCardHTML(configs) {
+  const w = state.wizard;
+  const c = _calc();
+  let label, text, chips = [];
+  if (w.setupType === 'traditional') {
+    if (c.valid) {
+      label = 'Checks out';
+      text = `${c.teams} teams &times; ${c.divisions} divisions = ${c.n} players`;
+      chips = Array.from({ length: c.divisions }, (_, i) => `Div ${i + 1}: ${c.teams}`);
+    } else {
+      label = 'Doesn&rsquo;t divide evenly';
+      text = nearestConfigWarning(c.n, configs, 'teams', w.numTeams);
     }
+  } else if (c.valid) {
+    label = 'Distribution';
+    text = `${c.divisions} divisions from ${c.n} players`;
+    chips = _divSizes(c.n, c.divisions).map((sz, i) => `Div ${i + 1}: ${sz}`);
+  } else {
+    label = 'Too many divisions';
+    text = `Can't create ${w.modernNumDivisions} divisions with ${c.n} players &mdash; each division needs at least 2 players.`;
   }
+  return `
+    <div class="wz-calc ${c.valid ? 'wz-calc--ok' : 'wz-calc--warn'}">
+      <span class="wz-calc-label">${label}</span>
+      <span class="wz-calc-text">${text}</span>
+      ${chips.length ? `<div class="wz-distchips">${chips.map((t) => `<span class="wz-distchip">${t}</span>`).join('')}</div>` : ''}
+    </div>`;
+}
 
-  document.getElementById('wizardCard').innerHTML = `
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">League Structure</h3>
-    <p class="text-muted" style="font-size:13px;margin-bottom:20px">
-      You have <strong>${n} players</strong>. Set the number of teams and match scheduling options.
-    </p>
+function _weeksLineText() {
+  const c = _calc();
+  return c.valid ? `${c.base} weeks &times; ${state.wizard.numRounds} = ${c.weeks} total weeks` : 'Set a valid structure first';
+}
 
-    <div class="step3-grid">
-      <div>
-        <div class="form-group">
-          <label>Number of Teams</label>
-          <input class="form-control" id="wTeams" type="number" min="2" value="${numTeams}" style="font-size:16px;font-weight:600">
+// Same late-finish arithmetic the old step 3 used: matches a week, stacked
+// across the selected courts, flagged when the last one runs past 9 PM.
+function _nightText(anyCourts) {
+  const w = state.wizard;
+  const c = _calc();
+  const numCourts = w.selectedCourtIds.length;
+  if (c.valid && numCourts >= 1 && w.matchStartTime) {
+    const perWeek = w.setupType === 'traditional'
+      ? Math.floor(c.teams / 2) * c.divisions
+      : _divSizes(c.n, c.divisions).reduce((a, sz) => a + Math.floor(sz / 2), 0);
+    const slots = Math.ceil(perWeek / numCourts);
+    const totalMins = slots * (w.matchDuration + w.matchBuffer);
+    const [sh, sm] = w.matchStartTime.split(':').map(Number);
+    const end = sh * 60 + sm + totalMins;
+    if (end > 21 * 60) {
+      return `With ${numCourts} court${numCourts === 1 ? '' : 's'}, the last match could finish around ` +
+        `${Math.floor(end / 60)}:${String(end % 60).padStart(2, '0')} — after 9:00 PM.`;
+    }
+    return '';
+  }
+  if (anyCourts && numCourts === 0) {
+    return 'No courts selected — matches will be scheduled without a court assigned.';
+  }
+  return '';
+}
+
+function _nightHTML(anyCourts) {
+  const text = _nightText(anyCourts);
+  return text ? `
+    <div class="wz-night">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#a8710f" stroke-width="2.2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+      <span>${text}</span>
+    </div>` : '';
+}
+
+function _step3RightHTML(allCourts) {
+  const w = state.wizard;
+  return `
+    <div class="wz-col">
+      <div class="wz-grid2">
+        <div class="wz-field">
+          <span class="wz-label">Match start</span>
+          <input class="wz-input" id="wStartTime" type="time" value="${esc(w.matchStartTime)}">
         </div>
+        <div class="wz-field">
+          <span class="wz-label">Match length</span>
+          <div class="wz-mininput">
+            <input id="wDuration" type="number" min="1" value="${w.matchDuration}">
+            <span>min</span>
+          </div>
+        </div>
+      </div>
 
-        <div class="structure-calc">
-          <div class="calc-row">
-            <span><strong>${numTeams || '?'}</strong> teams</span>
-            <span class="calc-eq">&times;</span>
-            <span><strong>${isValid ? numDivisions : '?'}</strong> divisions</span>
-            <span class="calc-eq">=</span>
-            <span class="calc-val ${calcClass}">${isValid ? n : '?'} players ${isValid ? '&#10003;' : ''}</span>
+      <div class="wz-field">
+        <div class="wz-colhead-row">
+          <span class="wz-label">Courts</span>
+          <span class="wz-hint" id="wzCourtN">${w.selectedCourtIds.length ? `${w.selectedCourtIds.length} selected` : 'none selected'}</span>
+        </div>
+        ${allCourts.length === 0
+          ? `<p class="wz-hintline">No courts set up. <a href="#" onclick="navigate('clubSettings');return false">Add courts in Club Settings</a> first.</p>`
+          : `<div class="wz-courts">${allCourts.map((ct) => `
+              <button class="wz-court${w.selectedCourtIds.includes(ct.id) ? ' wz-court--on' : ''}" type="button" data-court="${ct.id}">
+                <span class="wz-court-tick">&#10003;</span>${esc(ct.name)}
+              </button>`).join('')}
+            </div>`}
+      </div>
+
+      <div class="wz-field wz-buffer">
+        <span class="wz-label">Buffer between</span>
+        <div class="wz-mininput">
+          <input id="wBuffer" type="number" min="0" value="${w.matchBuffer}">
+          <span>min</span>
+        </div>
+      </div>
+
+      <div id="wzNight">${_nightHTML(allCourts.length > 0)}</div>
+    </div>`;
+}
+
+// Live recalculation: typing patches only the derived nodes so the focused
+// input never re-renders; the click controls (steppers, presets, pills)
+// re-render the whole page, which they can afford since they hold no focus.
+function _patchStep3Derived(configs, anyCourts) {
+  const calcWrap = document.getElementById('wzCalc');
+  if (calcWrap) calcWrap.innerHTML = _calcCardHTML(configs);
+  const weeks = document.getElementById('wzWeeks');
+  if (weeks) weeks.innerHTML = _weeksLineText();
+  const night = document.getElementById('wzNight');
+  if (night) night.innerHTML = _nightHTML(anyCourts);
+  document.getElementById('wzSummary').innerHTML = _summaryHTML();
+  const next = document.getElementById('wNext');
+  if (next) next.disabled = !_calc().valid;
+}
+
+function _wireStep3({ configs, allCourts }) {
+  const w = state.wizard;
+  const modern = w.setupType === 'modern';
+  const anyCourts = allCourts.length > 0;
+
+  const setGroup = (v) => {
+    if (modern) {
+      w.modernNumDivisions = Math.max(1, v);
+      w.modernDivisionPlayers = null;
+    } else {
+      w.numTeams = Math.max(1, v);
+    }
+    renderCreateLeague();
+  };
+  const group = () => (modern ? w.modernNumDivisions : w.numTeams);
+
+  document.getElementById('wizardCard').addEventListener('click', (e) => {
+    const ctl = e.target.closest('[data-ctl]')?.dataset.ctl;
+    if (ctl === 'group-dec') return setGroup(group() - 1);
+    if (ctl === 'group-inc') return setGroup(group() + 1);
+    if (ctl === 'rounds-dec' || ctl === 'rounds-inc') {
+      w.numRounds = Math.max(1, w.numRounds + (ctl === 'rounds-inc' ? 1 : -1));
+      return renderCreateLeague();
+    }
+    const preset = e.target.closest('[data-preset]')?.dataset.preset;
+    if (preset) return setGroup(Number(preset));
+    const court = e.target.closest('[data-court]')?.dataset.court;
+    if (court) {
+      const id = Number(court);
+      w.selectedCourtIds = w.selectedCourtIds.includes(id)
+        ? w.selectedCourtIds.filter((c) => c !== id)
+        : [...w.selectedCourtIds, id];
+      return renderCreateLeague();
+    }
+  });
+
+  document.getElementById('wStartTime').addEventListener('input', (e) => {
+    if (e.target.value) w.matchStartTime = e.target.value;
+    _patchStep3Derived(configs, anyCourts);
+  });
+  document.getElementById('wDuration').addEventListener('input', (e) => {
+    w.matchDuration = Math.max(1, Number(e.target.value) || 1);
+    _patchStep3Derived(configs, anyCourts);
+  });
+  document.getElementById('wBuffer').addEventListener('input', (e) => {
+    w.matchBuffer = Math.max(0, Number(e.target.value) || 0);
+    _patchStep3Derived(configs, anyCourts);
+  });
+
+  document.getElementById('wBack').addEventListener('click', () => _goToStep(2));
+  document.getElementById('wNext').addEventListener('click', () => _goToStep(4));
+  _flushError();
+}
+
+function _step3CardHTML({ subtitle, groupLabel, groupVal, presets, groupHint, configs, allCourts }) {
+  const c = _calc();
+  return `
+    <div class="wz-card">
+      <div class="wz-head">
+        <div>
+          <div class="wz-title">Structure</div>
+          <div class="wz-sub">${subtitle}</div>
+        </div>
+      </div>
+
+      <div class="wz-cols wz-cols--pad">
+        <div class="wz-col">
+          <div class="wz-field">
+            <span class="wz-label">${groupLabel}</span>
+            <div class="wz-numrow">
+              ${_numCtlHTML('group', groupVal)}
+              ${_presetsHTML(presets, groupVal)}
+            </div>
+            <span class="wz-hintline">${groupHint}</span>
+          </div>
+
+          <div id="wzCalc">${_calcCardHTML(configs)}</div>
+
+          <div class="wz-field">
+            <span class="wz-label">Rounds through the schedule</span>
+            <div class="wz-numrow">
+              ${_numCtlHTML('rounds', state.wizard.numRounds)}
+              <span class="wz-weeksline" id="wzWeeks">${_weeksLineText()}</span>
+            </div>
           </div>
         </div>
 
-        ${warning ? `<div class="struct-warning">${warning}</div>` : ''}
-
-        <div class="form-group" style="margin-top:20px">
-          <label>Rounds through the schedule</label>
-          <input class="form-control" id="wRounds" type="number" min="1" value="${numRounds}">
-          ${isValid ? `<p class="text-muted" style="font-size:12px;margin-top:6px">${baseWeeks} weeks &times; ${numRounds} round(s) = <strong>${totalWeeks} total weeks</strong></p>` : ''}
-        </div>
-
-        ${configs.length > 0 ? `
-          <p style="font-size:12px;color:var(--text-muted);margin-top:4px">
-            Valid team counts: ${configs.map((c) => `<strong>${c.teams}</strong>`).join(', ')}
-          </p>` : ''}
+        ${_step3RightHTML(allCourts)}
       </div>
 
-      <div>
-        <div class="form-group">
-          <label>Match Start Time</label>
-          <input class="form-control" id="wStartTime" type="time" value="${matchStartTime}">
-        </div>
-        <div class="form-group">
-          <label>Courts</label>
-          ${allCourts.length === 0
-            ? `<p class="text-muted" style="font-size:12px;margin-top:4px">No courts set up. <a href="#" onclick="navigate('clubSettings');return false">Add courts in Club Settings</a> first.</p>`
-            : `<div class="court-picker">${allCourts.map((c) => `
-                <label class="court-pick-item">
-                  <input type="checkbox" class="wCourtCheck" value="${c.id}" ${selectedCourtIds.includes(c.id) ? 'checked' : ''}>
-                  ${esc(c.name)}
-                </label>`).join('')}
-              </div>`
-          }
-        </div>
-        <div class="form-group">
-          <label>Match Duration <span class="form-hint">(minutes)</span></label>
-          <input class="form-control" id="wDuration" type="number" min="1" value="${matchDuration}">
-        </div>
-        <div class="form-group">
-          <label>Buffer Between Matches <span class="form-hint">(minutes)</span></label>
-          <input class="form-control" id="wBuffer" type="number" min="0" value="${matchBuffer}">
-        </div>
-        ${lateWarning ? `<div class="struct-warning struct-warning-late">&#9888; ${lateWarning}</div>` : ''}
-      </div>
-    </div>
-
-    <div id="wError" class="form-error mt-4"></div>
-    <div class="wizard-footer">
-      <button class="btn btn-outline" id="wBack">&larr; Back</button>
-      <button class="btn btn-outline" id="wApply">Apply Settings</button>
-      <button class="btn btn-primary" id="wNext" ${!isValid ? 'disabled' : ''}>Next &rarr;</button>
+      ${_footerHTML({ nextDisabled: !c.valid })}
     </div>`;
+}
 
-  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 2; renderCreateLeague(); });
-  document.getElementById('wNext').addEventListener('click', () => {
-    if (!isValid) return;
-    state.wizard.numTeams = numTeams;
-    state.wizard.numDivisions = numDivisions;
-    state.wizard.step = 4;
-    renderCreateLeague();
+async function renderStep3Modern() {
+  const w = state.wizard;
+  const allCourts = await window.api.getCourts();
+  const c = _calc();
+
+  document.getElementById('wizardCard').innerHTML = _step3CardHTML({
+    subtitle: `${c.n} players selected. Set the division count &mdash; at least 2 players each.`,
+    groupLabel: 'Number of divisions',
+    groupVal: w.modernNumDivisions,
+    presets: [2, 3, 4],
+    groupHint: `Minimum 1, maximum ${c.maxDivs} with ${c.n} players.`,
+    configs: [],
+    allCourts,
   });
 
-  function applyStep3Settings() {
-    state.wizard.numTeams = Number(document.getElementById('wTeams').value) || 0;
-    state.wizard.numRounds = Math.max(1, Number(document.getElementById('wRounds').value) || 1);
-    state.wizard.matchStartTime = document.getElementById('wStartTime').value;
-    state.wizard.selectedCourtIds = [...document.querySelectorAll('.wCourtCheck:checked')].map((el) => Number(el.value));
-    state.wizard.matchDuration = Math.max(1, Number(document.getElementById('wDuration').value) || 1);
-    state.wizard.matchBuffer = Math.max(0, Number(document.getElementById('wBuffer').value) || 0);
-    renderCreateLeague();
-  }
+  _wireStep3({ configs: [], allCourts });
+}
 
-  document.getElementById('wApply').addEventListener('click', applyStep3Settings);
+async function renderStep3Traditional() {
+  const w = state.wizard;
+  const c = _calc();
+  const [configs, allCourts] = await Promise.all([window.api.getValidConfigs(c.n), window.api.getCourts()]);
+
+  document.getElementById('wizardCard').innerHTML = _step3CardHTML({
+    subtitle: `${c.n} players selected. Set the team count &mdash; divisions follow from it.`,
+    groupLabel: 'Number of teams',
+    groupVal: w.numTeams,
+    presets: [2, 3, 4, 6, 8],
+    groupHint: `Each team fields one player per division. ${c.n} players must divide evenly.`,
+    configs,
+    allCourts,
+  });
+
+  _wireStep3({ configs, allCourts });
 }
 
 function nearestConfigWarning(n, configs, mode, inputVal) {
@@ -498,53 +758,57 @@ function nearestConfigWarning(n, configs, mode, inputVal) {
   return `${n} players can't be split into ${inputVal} divisions evenly. Try <strong>${nearest.divisions} divisions</strong> (${nearest.teams} teams).`;
 }
 
-// Step 4 — Blackout Dates
+// Step 4 — Blackout dates
 function renderStep4() {
-  const { blackoutDates, startDate, numTeams, numRounds, setupType, modernNumDivisions, rankedPlayers } = state.wizard;
-  let totalWeeks;
-  if (setupType === 'modern') {
-    const maxDivSize = Math.ceil(rankedPlayers.length / modernNumDivisions);
-    const singleRound = maxDivSize % 2 === 0 ? maxDivSize - 1 : maxDivSize;
-    totalWeeks = singleRound * numRounds;
-  } else {
-    const baseWeeks = numTeams % 2 === 0 ? numTeams - 1 : numTeams;
-    totalWeeks = baseWeeks * numRounds;
-  }
+  const w = state.wizard;
+  const c = _calc();
+  const weeks = c.weeks || 0;
+  const dates = _weekDates(weeks);
 
   document.getElementById('wizardCard').innerHTML = `
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">Blackout Dates</h3>
-    <p class="text-muted" style="font-size:13px;margin-bottom:4px">
-      Mark any weeks to skip. The schedule will extend past those dates automatically.
-    </p>
-    <p class="text-muted" style="font-size:12px;margin-bottom:20px">
-      League runs <strong>${totalWeeks} week${totalWeeks !== 1 ? 's' : ''}</strong> starting ${formatDate(startDate)}.
-    </p>
-
-    <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px">
-      <div class="form-group" style="flex:1;max-width:240px;margin-bottom:0">
-        <label>Add a date to skip</label>
-        <input class="form-control" id="wBlackoutDate" type="date" min="${startDate}">
+    <div class="wz-card">
+      <div class="wz-head">
+        <div>
+          <div class="wz-title">Blackout dates</div>
+          <div class="wz-sub">The league runs ${weeks} week${weeks !== 1 ? 's' : ''} from ${_fmtShort(w.startDate)}. Skipped weeks push every later date back.</div>
+        </div>
       </div>
-      <button class="btn btn-outline" id="wAddBlackout">Add</button>
-    </div>
+      <div class="wz-body">
+        <div class="wz-addrow">
+          <div class="wz-field wz-addrow-date">
+            <span class="wz-label">Skip a week</span>
+            <input class="wz-input" id="wBlackoutDate" type="date" min="${w.startDate}">
+          </div>
+          <button class="btn btn-outline" id="wAddBlackout">Add date</button>
+        </div>
 
-    ${blackoutDates.length === 0
-      ? '<p class="text-muted" style="font-size:13px">No blackout dates added.</p>'
-      : `<div class="blackout-list">
-          ${blackoutDates.map((d, i) => `
-            <div class="blackout-item">
-              <span>${formatDate(d)}</span>
-              <button class="btn btn-ghost btn-sm" data-action="remove-blackout" data-idx="${i}">&times; Remove</button>
-            </div>`).join('')}
-        </div>`}
+        <div class="wz-bolist">
+          ${w.blackoutDates.length === 0
+            ? `<div class="wz-boempty">No dates skipped. The league runs ${weeks} straight weeks.</div>`
+            : w.blackoutDates.map((d, i) => `
+                <div class="wz-borow">
+                  <span class="wz-bodate">${_fmtLong(d)}</span>
+                  <span class="wz-bonote">Schedule shifts a week later</span>
+                  <button class="btn btn-outline btn-sm" data-action="remove-blackout" data-idx="${i}">Remove</button>
+                </div>`).join('')}
+        </div>
 
-    <div class="wizard-footer" style="margin-top:24px">
-      <button class="btn btn-outline" id="wBack">&larr; Back</button>
-      <button class="btn btn-primary" id="wNext">Next &rarr;</button>
+        <div class="wz-field">
+          <span class="wz-label">Resulting week dates</span>
+          <div class="wz-wkchips">
+            ${dates.map((d, i) => `
+              <span class="wz-wkchip">
+                <span class="wz-wkchip-n">WK ${i + 1}</span>
+                <span class="wz-wkchip-d">${_fmtShort(d)}</span>
+              </span>`).join('')}
+          </div>
+        </div>
+      </div>
+      ${_footerHTML()}
     </div>`;
 
-  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 3; renderCreateLeague(); });
-  document.getElementById('wNext').addEventListener('click', () => { state.wizard.step = 5; renderCreateLeague(); });
+  document.getElementById('wBack').addEventListener('click', () => _goToStep(3));
+  document.getElementById('wNext').addEventListener('click', () => _goToStep(5));
 
   document.getElementById('wAddBlackout').addEventListener('click', () => {
     const dateVal = document.getElementById('wBlackoutDate').value;
@@ -564,9 +828,10 @@ function renderStep4() {
       renderCreateLeague();
     }
   });
+  _flushError();
 }
 
-// Step 5 — Preview & Confirm
+// Step 5 — Preview & confirm
 function renderStep5() {
   if (state.wizard.setupType === 'modern') return renderStep5Modern();
   return renderStep5Traditional();
@@ -607,8 +872,59 @@ function previewModernRoundRobin(players) {
   return rounds;
 }
 
+function _step5ShellHTML({ meta, stats, rosterLabel, editId, editLabel, rostersHTML, previewNote, weeksHTML }) {
+  return `
+    <div class="wz-step5">
+      <div class="wz-hero">
+        <div class="wz-hero-left">
+          <span class="wz-hero-name">${esc(state.wizard.leagueName)}</span>
+          <span class="wz-hero-meta">${meta}</span>
+        </div>
+        <div class="wz-hero-stats">
+          ${stats.map(([value, label]) => `
+            <div class="wz-tile">
+              <span class="wz-tile-val">${value}</span>
+              <span class="wz-tile-label">${label}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <div class="wz-prev2">
+        <div class="wz-card">
+          <div class="wz-card5head">
+            <span class="wz-label">${rosterLabel}</span>
+            <button class="btn btn-outline btn-sm wz-editbtn" id="${editId}">${editLabel}</button>
+          </div>
+          <div class="wz-rosterbody">${rostersHTML}</div>
+        </div>
+
+        <div class="wz-card">
+          <div class="wz-card5head">
+            <span class="wz-label">Schedule preview</span>
+            <span class="wz-hint wz-card5note">${previewNote}</span>
+          </div>
+          <div class="wz-schedbody">${weeksHTML}</div>
+        </div>
+      </div>
+
+      <div class="wz-card wz-foot5">
+        <span class="wz-foot-note">Fixtures, teams and dates are generated when you create the league.</span>
+        <span id="wError" class="wz-foot-err"></span>
+        <span class="wz-foot-btns">
+          <button class="btn btn-outline" id="wBack">Back</button>
+          <button class="btn btn-success btn-lg" id="wCreate">Create League</button>
+        </span>
+      </div>
+    </div>`;
+}
+
+function _blackoutMetaNote() {
+  const n = state.wizard.blackoutDates.length;
+  return n > 0 ? ` &middot; ${n} blackout date${n !== 1 ? 's' : ''}` : '';
+}
+
 function renderStep5Modern() {
-  const { leagueName, startDate, rankedPlayers, modernNumDivisions, numRounds, blackoutDates } = state.wizard;
+  const { startDate, rankedPlayers, modernNumDivisions, numRounds, selectedCourtIds } = state.wizard;
 
   // Initialize or re-initialize division players if needed
   if (!state.wizard.modernDivisionPlayers ||
@@ -626,75 +942,53 @@ function renderStep5Modern() {
     return all;
   });
   const totalWeeks = Math.max(...divRounds.map((d) => d.length), 0);
-
-  // Assign dates skipping blackouts
-  const blackoutSet = new Set(blackoutDates);
-  const weekDates = [];
-  let cur = startDate;
-  for (let i = 0; i < totalWeeks; i++) {
-    while (blackoutSet.has(cur)) cur = addDaysPreview(cur, 7);
-    weekDates.push(cur);
-    cur = addDaysPreview(cur, 7);
-  }
-
+  const weekDates = _weekDates(totalWeeks);
   const previewCount = Math.min(3, totalWeeks);
-  const blackoutNote = blackoutDates.length > 0
-    ? ` (${blackoutDates.length} blackout date${blackoutDates.length !== 1 ? 's' : ''} skipped)` : '';
 
   const weeksHTML = Array.from({ length: previewCount }, (_, w) => {
-    const dateStr = new Date(weekDates[w] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const divsHTML = divRounds.map((rounds, dIdx) => {
+    const groups = divRounds.slice(0, 2).map((rounds, dIdx) => {
       if (w >= rounds.length) return '';
       const round = rounds[w];
-      const matchLines = round.matches.map(([p1, p2]) =>
-        `<div style="font-size:12px;padding:2px 0">${esc(p1.name)} vs ${esc(p2.name)}</div>`
-      ).join('');
-      const byeLines = round.byes.length
-        ? `<div style="font-size:12px;color:var(--text-muted);padding:2px 0">Bye: ${round.byes.map((p) => esc(p.name)).join(', ')}</div>` : '';
-      return `<div style="margin-bottom:6px"><span style="font-size:11px;font-weight:700;color:var(--text-muted)">DIV ${dIdx + 1}</span>${matchLines}${byeLines}</div>`;
+      const lines = [
+        ...round.matches.map(([p1, p2]) => `<span class="wz-fixline">${esc(p1.name)} vs ${esc(p2.name)}</span>`),
+        ...round.byes.map((p) => `<span class="wz-fixline wz-fixline--bye">${esc(p.name)} &mdash; bye</span>`),
+      ].join('');
+      return `<div class="wz-fixgroup"><span class="wz-fixlabel">Division ${dIdx + 1}</span>${lines}</div>`;
     }).join('');
-    return `<div style="margin-bottom:14px">
-      <div style="font-weight:600;font-size:13px;margin-bottom:6px">Week ${w + 1}: ${dateStr}</div>
-      ${divsHTML}
-    </div>`;
+    return `
+      <div class="wz-week">
+        <div class="wz-week-top">
+          <span class="wz-week-title">Week ${w + 1}</span>
+          <span class="wz-week-date">${_fmtShort(weekDates[w])}</span>
+        </div>
+        ${groups}
+      </div>`;
   }).join('');
 
-  const rostersHTML = divPlayers.map((div, i) =>
-    `<div style="margin-bottom:6px"><strong>Division ${i + 1}</strong> (${div.length}): ${div.map((p) => esc(p.name)).join(', ')}</div>`
-  ).join('');
-
-  document.getElementById('wizardCard').innerHTML = `
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">Preview &amp; Confirm</h3>
-
-    <div class="info-banner">
-      <strong>${esc(leagueName)}</strong> &mdash; starts ${formatDate(startDate)} &mdash;
-      ${modernNumDivisions} division${modernNumDivisions !== 1 ? 's' : ''} &mdash; ${rankedPlayers.length} players &mdash; ${totalWeeks} weeks${blackoutNote}
-    </div>
-
-    <div class="preview-grid">
-      <div class="preview-section">
-        <h4 style="display:flex;align-items:center;justify-content:space-between">
-          Division Rosters
-          <button class="btn btn-outline btn-sm" id="btnEditDivisions">Edit Divisions</button>
-        </h4>
-        <div style="font-size:13px">${rostersHTML}</div>
+  const rostersHTML = divPlayers.map((div, i) => `
+    <div class="wz-rosterrow">
+      <div class="wz-rosterrow-top">
+        <span class="wz-rostername">Division ${i + 1}</span>
+        <span class="wz-countchip">${div.length} players</span>
       </div>
-      <div class="preview-section">
-        <h4>Schedule Preview (first ${previewCount} week${previewCount !== 1 ? 's' : ''})</h4>
-        ${weeksHTML}
-        ${totalWeeks > previewCount ? `<p class="text-muted" style="font-size:12px;margin-top:4px">+ ${totalWeeks - previewCount} more weeks…</p>` : ''}
-      </div>
-    </div>
+      <span class="wz-rosternames">${div.map((p) => esc(p.name)).join(', ')}</span>
+    </div>`).join('');
 
-    <div id="wError" class="form-error"></div>
-    <div class="wizard-footer">
-      <button class="btn btn-outline" id="wBack">&larr; Back</button>
-      <button class="btn btn-success btn-lg" id="wCreate">Create League</button>
-    </div>`;
+  document.getElementById('wizardCard').innerHTML = _step5ShellHTML({
+    meta: `Starts ${_fmtLong(startDate)} &middot; ${modernNumDivisions} division${modernNumDivisions !== 1 ? 's' : ''}${_blackoutMetaNote()}`,
+    stats: [[rankedPlayers.length, 'Players'], [totalWeeks, 'Weeks'], [selectedCourtIds.length, 'Courts']],
+    rosterLabel: 'Division rosters',
+    editId: 'btnEditDivisions',
+    editLabel: 'Edit divisions',
+    rostersHTML,
+    previewNote: totalWeeks > previewCount ? `First ${previewCount} of ${totalWeeks} weeks` : `All ${totalWeeks} weeks`,
+    weeksHTML,
+  });
 
-  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 4; renderCreateLeague(); });
+  document.getElementById('wBack').addEventListener('click', () => _goToStep(4));
   document.getElementById('wCreate').addEventListener('click', submitCreateLeague);
   document.getElementById('btnEditDivisions').addEventListener('click', openEditDivisionsModal);
+  _flushError();
 }
 
 function openEditDivisionsModal() {
@@ -764,7 +1058,7 @@ function openEditDivisionsModal() {
 }
 
 function renderStep5Traditional() {
-  const { leagueName, startDate, rankedPlayers, numTeams, numDivisions, numRounds, blackoutDates } = state.wizard;
+  const { startDate, rankedPlayers, numTeams, numDivisions, numRounds, selectedCourtIds } = state.wizard;
   const LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
   // Initialise / resize teamNames, preserving any custom names already entered
@@ -778,9 +1072,7 @@ function renderStep5Traditional() {
   // Build preview teams using current teamNames
   const teams = Array.from({ length: numTeams }, (_, i) => ({ name: teamNames[i], players: [] }));
   rankedPlayers.forEach((p, i) => {
-    const teamIdx = i % numTeams;
-    const divIdx = Math.floor(i / numTeams);
-    teams[teamIdx].players.push({ name: p.name, div: `Div ${divIdx + 1}` });
+    teams[i % numTeams].players.push(p);
   });
 
   // Build full schedule with numRounds repetitions, skipping blackout dates
@@ -789,75 +1081,49 @@ function renderStep5Traditional() {
   const allRounds = [];
   for (let rep = 0; rep < numRounds; rep++) allRounds.push(...oneRoundRobin);
 
-  // Assign dates, skipping blackouts
-  const blackoutSet = new Set(blackoutDates);
-  const weekDates = [];
-  let cur = startDate;
-  for (let i = 0; i < allRounds.length; i++) {
-    while (blackoutSet.has(cur)) cur = addDaysPreview(cur, 7);
-    weekDates.push(cur);
-    cur = addDaysPreview(cur, 7);
-  }
-
   const totalWeeks = allRounds.length;
+  const weekDates = _weekDates(totalWeeks);
   const previewCount = Math.min(3, totalWeeks);
-  const weeksHTML = allRounds.slice(0, previewCount).map((round, r) => {
-    const dateStr = new Date(weekDates[r] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    return `
-      <div style="margin-bottom:12px">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--text)">
-          Week ${r + 1}: ${dateStr}
-        </div>
+
+  const weeksHTML = allRounds.slice(0, previewCount).map((round, r) => `
+    <div class="wz-week">
+      <div class="wz-week-top">
+        <span class="wz-week-title">Week ${r + 1}</span>
+        <span class="wz-week-date">${_fmtShort(weekDates[r])}</span>
+      </div>
+      <div class="wz-fixgroup">
+        <span class="wz-fixlabel">Fixtures</span>
         ${round.map((mu) => mu.bye != null
-          ? `<div style="font-size:13px;color:var(--text-muted);padding:3px 0"><span class="sched-team" data-team-idx="${mu.bye}">${esc(teams[mu.bye].name)}</span> — <em>Bye</em></div>`
-          : `<div style="font-size:13px;padding:3px 0"><span class="sched-team" data-team-idx="${mu.team1}">${esc(teams[mu.team1].name)}</span> vs <span class="sched-team" data-team-idx="${mu.team2}">${esc(teams[mu.team2].name)}</span></div>`
+          ? `<span class="wz-fixline wz-fixline--bye">${esc(teams[mu.bye].name)} &mdash; bye</span>`
+          : `<span class="wz-fixline">${esc(teams[mu.team1].name)} vs ${esc(teams[mu.team2].name)}</span>`
         ).join('')}
-      </div>`;
-  }).join('');
-
-  const blackoutNote = blackoutDates.length > 0
-    ? ` (${blackoutDates.length} blackout date${blackoutDates.length !== 1 ? 's' : ''} skipped)`
-    : '';
-
-  document.getElementById('wizardCard').innerHTML = `
-    <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">Preview &amp; Confirm</h3>
-
-    <div class="info-banner">
-      <strong>${esc(leagueName)}</strong> &mdash; starts ${formatDate(startDate)} &mdash;
-      ${numTeams} teams &times; ${numDivisions} divisions &mdash; ${totalWeeks} weeks${blackoutNote}
-    </div>
-
-    <div class="preview-grid">
-      <div class="preview-section">
-        <h4 style="display:flex;align-items:center;justify-content:space-between">
-          Team Rosters
-          <button class="btn btn-outline btn-sm" id="btnEditTeams">Edit Teams</button>
-        </h4>
-        <div class="team-list" id="rosterPreview">
-          ${teams.map((t) => `
-            <div class="team-row">
-              <div class="team-name-display">${esc(t.name)}</div>
-              <div class="team-players">${t.players.map((p) => `${esc(p.name)} (${p.div})`).join(', ')}</div>
-            </div>`).join('')}
-        </div>
       </div>
-      <div class="preview-section">
-        <h4>Schedule Preview (first ${previewCount} weeks)</h4>
-        ${weeksHTML}
-        ${totalWeeks > previewCount ? `<p class="text-muted" style="font-size:12px;margin-top:4px">+ ${totalWeeks - previewCount} more weeks…</p>` : ''}
+    </div>`).join('');
+
+  const rostersHTML = teams.map((t) => `
+    <div class="wz-rosterrow">
+      <div class="wz-rosterrow-top">
+        <span class="wz-rostername">${esc(t.name)}</span>
+        <span class="wz-countchip">${t.players.length} players</span>
       </div>
-    </div>
+      <span class="wz-rosternames">${t.players.map((p) => esc(p.name)).join(', ')}</span>
+    </div>`).join('');
 
-    <div id="wError" class="form-error"></div>
-    <div class="wizard-footer">
-      <button class="btn btn-outline" id="wBack">&larr; Back</button>
-      <button class="btn btn-success btn-lg" id="wCreate">Create League</button>
-    </div>`;
+  document.getElementById('wizardCard').innerHTML = _step5ShellHTML({
+    meta: `Starts ${_fmtLong(startDate)} &middot; ${numTeams} teams &times; ${numDivisions} divisions${_blackoutMetaNote()}`,
+    stats: [[rankedPlayers.length, 'Players'], [totalWeeks, 'Weeks'], [selectedCourtIds.length, 'Courts']],
+    rosterLabel: 'Team rosters',
+    editId: 'btnEditTeams',
+    editLabel: 'Edit teams',
+    rostersHTML,
+    previewNote: totalWeeks > previewCount ? `First ${previewCount} of ${totalWeeks} weeks` : `All ${totalWeeks} weeks`,
+    weeksHTML,
+  });
 
-  document.getElementById('wBack').addEventListener('click', () => { state.wizard.step = 4; renderCreateLeague(); });
+  document.getElementById('wBack').addEventListener('click', () => _goToStep(4));
   document.getElementById('wCreate').addEventListener('click', submitCreateLeague);
-
   document.getElementById('btnEditTeams').addEventListener('click', () => openEditTeamsModal(numTeams, numDivisions));
+  _flushError();
 }
 
 function openEditTeamsModal(numTeams, numDivisions) {
