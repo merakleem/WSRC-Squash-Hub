@@ -7255,7 +7255,10 @@ body.is-viewing-as .app-container { height: 100%; }
   position: absolute;
   inset: 0;
   background: rgba(28, 43, 58, .4);
-  z-index: 8;
+  /* Above everything that lives in the main column - the date bar (10), its
+     calendar popover (20), the block toolbar (14), the page toast (40) - so
+     nothing stays bright or clickable over the tint. */
+  z-index: 60;
 }
 .sch-panel {
   position: absolute;
@@ -7265,7 +7268,7 @@ body.is-viewing-as .app-container { height: 100%; }
   width: 430px;
   max-width: 100%;
   background: #fff;
-  z-index: 9;
+  z-index: 61;
   display: flex;
   flex-direction: column;
   box-shadow: -14px 0 40px rgba(28, 43, 58, .18);

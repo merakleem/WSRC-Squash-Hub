@@ -201,6 +201,34 @@ me('mouseup', tr.left+30, tr.top+10+76); await tick();
 ok('a tournament match cannot be dragged', !calls.length && block('t_5').style.top===`${((12*60-360)/30)*38+1}px`);
 cardOpened=null;
 
+// ---- the scrim owns every pixel of the column ----
+// A real grid click opens the panel through the page's own opener, then the
+// things that used to stay bright - the top-bar button and the date bar's
+// week chips - must hit-test to the scrim, not to themselves.
+{
+  const colsS=$$('.sch-court-col');
+  const cs=colsS[0].getBoundingClientRect();
+  const cy=yFor(14*60+20);
+  me('mousedown', cs.left+40, cy, colsS[0]); me('mouseup', cs.left+40, cy);
+  await new Promise(rr=>setTimeout(rr,200));
+  ok('a grid click opens the panel', panel.isBookingPanelOpen());
+  const scrim=$('.sch-panel-scrim');
+  const hit = (el) => {
+    if (!el) return 'missing-el';
+    const logEl = document.getElementById('log');
+    logEl.style.display = 'none';           // the test's own overlay must not catch the ray
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    logEl.style.display = '';
+    return at ? (at.className && String(at.className).split(' ')[0]) || at.id || at.tagName : 'null';
+  };
+  // Landing on the scrim or the panel both mean the control is sealed off.
+  const sealed = (name) => name === 'sch-panel-scrim' || name === 'sch-panel' || String(name).startsWith('sch-panel');
+  ok('the scrim covers the top bar', sealed(hit(document.getElementById('btnNewBooking'))), hit(document.getElementById('btnNewBooking')));
+  ok('the scrim covers the date bar', sealed(hit($('.cb-day'))), hit($('.cb-day')));
+  panel.closeBookingPanel(); await tick();
+}
+
 // ---- panel: contiguous runs ----
 await panel.openBookingPanel({ mode:'new', host:$('.sch-page'), courts:payload.courts,
   slots:[], types:payload.types, players:PLAYERS, courtIds:[1], start:14*60, dur:60,
