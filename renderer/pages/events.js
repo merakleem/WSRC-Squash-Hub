@@ -107,7 +107,7 @@ export function renderEvents() {
 
   document.getElementById('pageTitle').textContent = 'Events';
   const content = document.getElementById('mainContent');
-  content.classList.remove('content--schedule', 'content--dashboard', 'content--court-booking');
+  content.classList.add('content--flush');
   content.innerHTML = '<div class="ev-page"><div class="modal-loading">Loading events…</div></div>';
 
   _load(true);

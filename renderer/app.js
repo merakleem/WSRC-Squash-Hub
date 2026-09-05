@@ -94,7 +94,7 @@ document.querySelectorAll('.nav-item').forEach((el) => {
 
 function renderPage() {
   const contentEl = document.querySelector('.content');
-  contentEl.classList.remove('content--dashboard', 'content--schedule', 'content--court-booking');
+  contentEl.classList.remove('content--flush', 'content--dashboard', 'content--schedule', 'content--court-booking');
   _setConflictCursor(false); // clear any stuck drag cursor from the schedule page
   switch (state.page) {
     case 'dashboard':        renderDashboard(); break;

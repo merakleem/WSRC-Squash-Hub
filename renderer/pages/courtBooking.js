@@ -197,7 +197,7 @@ export function renderCourtBooking() {
   };
 
   const content = document.querySelector('.content');
-  content.classList.add('content--court-booking');
+  content.classList.add('content--flush');
   content.innerHTML = '<div id="cbPage" class="cb-page"></div>';
 
   _init();

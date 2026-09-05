@@ -128,7 +128,7 @@ function _renderToast() {
 export async function renderSchedule() {
   document.getElementById('pageTitle').textContent = 'Schedule';
   const content = document.getElementById('mainContent');
-  content.classList.add('content--schedule');
+  content.classList.add('content--flush');
 
   // Any re-render replaces the grid the panel is anchored to, so it closes
   // first rather than being orphaned in the DOM.

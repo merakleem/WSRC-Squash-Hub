@@ -206,7 +206,7 @@ export async function renderReportScore() {
   document.getElementById('pageTitle').textContent = 'Report a score';
   document.getElementById('topbarActions').innerHTML = '';
   const content = document.querySelector('.content');
-  content.classList.remove('content--dashboard', 'content--schedule', 'content--court-booking');
+  content.classList.remove('content--flush', 'content--dashboard');
   content.innerHTML = '<div class="rs-page"><div class="modal-loading">Loading your matches…</div></div>';
 
   await _load();
