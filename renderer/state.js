@@ -41,6 +41,8 @@ export const state = {
 // ===== ROLE HELPERS =====
 export const isAdmin = () => state.currentUser?.role === 'admin';
 export const isTester = () => !!state.currentUser?.is_tester;
+// Members (and admins) can use the court booking feature.
+export const isMember = () => isAdmin() || !!state.currentUser?.is_member;
 
 // ===== CONFLICT CURSOR =====
 // Injects a <style> override to show not-allowed cursor during conflicting drags.

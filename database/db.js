@@ -51,6 +51,7 @@ function initDB(dbPath) {
     `CREATE TABLE IF NOT EXISTS tournament_players (id INTEGER PRIMARY KEY AUTOINCREMENT, tournament_id INTEGER NOT NULL, player_id INTEGER NOT NULL, group_id INTEGER, seed INTEGER, FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE, FOREIGN KEY (player_id) REFERENCES players(id), FOREIGN KEY (group_id) REFERENCES tournament_groups(id))`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_players_email ON players (LOWER(email)) WHERE email IS NOT NULL AND email != ''`,
     `ALTER TABLE players ADD COLUMN is_tester INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE players ADD COLUMN is_member INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
     `ALTER TABLE players ADD COLUMN photo_path TEXT`,
     `CREATE TABLE IF NOT EXISTS seasons (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, is_current INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,

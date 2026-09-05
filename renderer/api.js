@@ -33,6 +33,7 @@ if (typeof window !== 'undefined' && !window.api) {
     addPlayer:        (d) => _apiFetch('POST',   '/api/players', d),
     updatePlayer:     (d) => _apiFetch('PUT',    `/api/players/${d.id}`, d),
     deletePlayer:     (id)=> _apiFetch('DELETE', `/api/players/${id}`),
+    setPlayersMembership: (d) => _apiFetch('POST', '/api/players/membership', d),
 
     getLeagues:       ()  => _apiFetch('GET',    '/api/leagues'),
     getLeague:        (id)=> _apiFetch('GET',    `/api/leagues/${id}`),

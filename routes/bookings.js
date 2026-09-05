@@ -3,13 +3,13 @@ const { getDB } = require('../database/db');
 const { clubNow } = require('../lib/clock');
 const bookingModel = require('../models/bookingModel');
 const { reservations, RESERVATION_TTL_MS, hasBookingConflict, hasReservationConflict, nextReservationId } = require('../lib/reservations');
-const { wrap, requireAdmin, requireAuth } = require('../middleware');
+const { wrap, requireAdmin, requireAuth, requireMember } = require('../middleware');
 
 const router = express.Router();
 
 // ===== RESERVATIONS =====
 
-router.post('/reservations', requireAuth, wrap(async (req, res) => {
+router.post('/reservations', requireAuth, requireMember, wrap(async (req, res) => {
   const { courtId, date, startTime, durationMinutes } = req.body;
   if (!courtId || !date || !startTime || !durationMinutes) {
     return res.status(400).json({ error: 'Missing required fields.' });
@@ -30,7 +30,7 @@ router.post('/reservations', requireAuth, wrap(async (req, res) => {
   res.json({ reservationId: id, expiresAt });
 }));
 
-router.delete('/reservations/:id', requireAuth, wrap(async (req, res) => {
+router.delete('/reservations/:id', requireAuth, requireMember, wrap(async (req, res) => {
   const r = reservations.get(req.params.id);
   if (r && r.playerId !== req.session.playerId) {
     return res.status(403).json({ error: 'Not your reservation.' });
@@ -41,7 +41,7 @@ router.delete('/reservations/:id', requireAuth, wrap(async (req, res) => {
 
 // ===== PLAYER BOOKINGS =====
 
-router.post('/player-bookings', requireAuth, wrap(async (req, res) => {
+router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res) => {
   const { reservationId, durationMinutes, playerIds } = req.body;
   const rsv = reservationId ? reservations.get(String(reservationId)) : null;
   if (!rsv) return res.status(400).json({ error: 'Reservation not found or expired. Please try again.' });
@@ -77,7 +77,7 @@ router.post('/player-bookings', requireAuth, wrap(async (req, res) => {
   res.json(booking);
 }));
 
-router.get('/my-bookings', requireAuth, wrap(async (req, res) => {
+router.get('/my-bookings', requireAuth, requireMember, wrap(async (req, res) => {
   // Club time, not the container's and not the client's. The container runs UTC,
   // which is already tomorrow by early evening here; the client's clock is not
   // something a booking list should depend on.
@@ -85,7 +85,7 @@ router.get('/my-bookings', requireAuth, wrap(async (req, res) => {
   res.json(bookingModel.getUpcomingBookingsForPlayer(req.session.playerId, date, time));
 }));
 
-router.delete('/player-bookings/:id', requireAuth, wrap(async (req, res) => {
+router.delete('/player-bookings/:id', requireAuth, requireMember, wrap(async (req, res) => {
   const db = getDB();
   const isMember = db.prepare('SELECT 1 FROM booking_players WHERE booking_id = ? AND player_id = ?')
     .get(Number(req.params.id), req.session.playerId);
@@ -94,7 +94,7 @@ router.delete('/player-bookings/:id', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-router.put('/player-bookings/:id', requireAuth, wrap(async (req, res) => {
+router.put('/player-bookings/:id', requireAuth, requireMember, wrap(async (req, res) => {
   const db = getDB();
   const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(Number(req.params.id));
   if (!booking) return res.status(404).json({ error: 'Booking not found.' });

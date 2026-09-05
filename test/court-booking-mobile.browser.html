@@ -13,6 +13,18 @@
 const out=[]; let fails=0;
 const ok=(n,c,x='')=>{ if(!c) fails++; out.push((c?'  PASS  ':'  FAIL  ')+n+(x!==''?'  ['+x+']':'')); };
 try {
+// Pin the clock to 9 AM today: the fixture's bookings live at fixed wall
+// times (5 PM on), so with a real clock the suite started failing every
+// evening once "now" overtook them.
+{
+  const RealDate = Date;
+  const fixed = new RealDate(); fixed.setHours(9, 0, 0, 0);
+  const FIXED = fixed.getTime();
+  window.Date = class extends RealDate {
+    constructor(...a) { a.length ? super(...a) : super(FIXED); }
+    static now() { return FIXED; }
+  };
+}
 const { state } = await import('../renderer/state.js');
 state.currentUser = { role:'user', playerId:42 };
 state.players = [{ id:42, name:'Merak Lee' }];

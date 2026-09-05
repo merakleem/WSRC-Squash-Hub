@@ -1,5 +1,5 @@
 import './api.js';
-import { state, _setConflictCursor } from './state.js';
+import { state, isMember, _setConflictCursor } from './state.js';
 import { modal, toast } from './utils.js';
 import { renderSchedule } from './schedule.js';
 
@@ -113,7 +113,7 @@ function renderPage() {
     case 'tournaments':      renderTournaments(); break;
     case 'tournamentDetail': renderTournamentDetail(); break;
     case 'createTournament': renderCreateTournament(); break;
-    case 'courtBooking':     renderCourtBooking(); break;
+    case 'courtBooking':     if (!isMember()) { navigate('dashboard'); return; } renderCourtBooking(); break;
   }
 }
 
@@ -201,8 +201,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     navMyProfile.addEventListener('click', () => openPlayerProfile(state.currentUser.playerId));
   }
 
-  // Show tester-only nav items
-  if (state.currentUser?.is_tester) {
+  // Court booking is members-only (admins always see it, to test the flow)
+  if (isMember()) {
     document.getElementById('navCourtBooking').style.display = '';
   }
 

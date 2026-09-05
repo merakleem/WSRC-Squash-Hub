@@ -17,11 +17,28 @@ function addPlayer({ name, email, phone, club_locker_rating, exclude_from_ladder
   return getPlayerById(result.lastInsertRowid);
 }
 
-function updatePlayer({ id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester }) {
+function updatePlayer({ id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester, is_member }) {
+  // The account flags update only when the caller actually sent them —
+  // callers that edit other fields (bulk edit, profile forms) must not
+  // silently strip a player's membership or tester status.
   getDB().prepare(
-    'UPDATE players SET name = ?, email = ?, phone = ?, club_locker_rating = ?, exclude_from_ladder = ?, is_tester = ? WHERE id = ?'
-  ).run(name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0, is_tester ? 1 : 0, Number(id));
+    `UPDATE players SET name = ?, email = ?, phone = ?, club_locker_rating = ?, exclude_from_ladder = ?,
+       is_tester = COALESCE(?, is_tester), is_member = COALESCE(?, is_member)
+     WHERE id = ?`
+  ).run(
+    name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0,
+    is_tester === undefined ? null : (is_tester ? 1 : 0),
+    is_member === undefined ? null : (is_member ? 1 : 0),
+    Number(id)
+  );
   return getPlayerById(id);
+}
+
+// Bulk membership toggle for the players page: one statement, all-or-nothing.
+function setMembership(ids, isMember) {
+  const list = ids.map(() => '?').join(',');
+  return getDB().prepare(`UPDATE players SET is_member = ? WHERE id IN (${list})`)
+    .run(isMember ? 1 : 0, ...ids.map(Number)).changes;
 }
 
 function deletePlayer(id) {
@@ -234,6 +251,6 @@ function getPlayerUpcomingMatches(id) {
 }
 
 module.exports = {
-  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, setPlayerPhoto,
+  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, setPlayerPhoto, setMembership,
   getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
 };

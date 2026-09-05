@@ -1,4 +1,4 @@
-import { state, isAdmin, isTester } from '../state.js';
+import { state, isAdmin } from '../state.js';
 import { esc, formatDate, formatShortDate, toast, modal, avatarHTML, playerInitials } from '../utils.js';
 
 // ===== PLAYERS PAGE =====
@@ -99,6 +99,8 @@ function renderPlayerTable(players) {
             <button class="btn btn-outline btn-sm" id="bulkMenuBtn">Bulk Actions <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" style="vertical-align:middle;margin-left:2px"><path d="M0 0l5 6 5-6z"/></svg></button>
             <div class="options-dropdown" id="bulkMenuDropdown">
               <button class="options-item" data-bulk-action="edit">Edit</button>
+              <button class="options-item" data-bulk-action="make-members">Make members</button>
+              <button class="options-item" data-bulk-action="remove-members">Remove membership</button>
             </div>
           </div>
         </div>` : ''}
@@ -138,6 +140,9 @@ function renderPlayerTable(players) {
       if (!action) return;
       document.getElementById('bulkMenuDropdown').classList.remove('open');
       if (action === 'edit') openBulkEditModal(new Set(selectedPlayerIds));
+      if (action === 'make-members' || action === 'remove-members') {
+        bulkSetMembership([...selectedPlayerIds], action === 'make-members');
+      }
     });
     document.addEventListener('click', () => document.getElementById('bulkMenuDropdown')?.classList.remove('open'));
   }
@@ -157,9 +162,27 @@ function renderPlayerTable(players) {
   });
 }
 
+async function bulkSetMembership(ids, isMember) {
+  if (!ids.length) return;
+  try {
+    const { changed } = await window.api.setPlayersMembership({ ids, is_member: isMember });
+    toast(`${changed} player${changed !== 1 ? 's' : ''} ${isMember ? 'marked as members' : 'removed from membership'}`, 'success');
+    state.players = await window.api.getPlayers();
+    renderPlayerTable(state.players);
+  } catch (e) {
+    toast(e.message || 'Could not update membership.', 'error');
+  }
+}
+
 function playerFormHTML(player = {}) {
   const excluded = player.id ? !!player.exclude_from_ladder : false;
   const testerCheck = (player.id && isAdmin()) ? `
+    <div class="form-group form-group-check">
+      <label class="check-label">
+        <input type="checkbox" id="fMember" ${player.is_member ? 'checked' : ''}>
+        Club member <span class="form-hint">(can book courts)</span>
+      </label>
+    </div>
     <div class="form-group form-group-check">
       <label class="check-label">
         <input type="checkbox" id="fTester" ${player.is_tester ? 'checked' : ''}>
@@ -230,9 +253,10 @@ function openEditPlayerModal(player) {
     const club_locker_rating = ratingRaw !== '' ? parseFloat(ratingRaw) : null;
     const exclude_from_ladder = document.getElementById('fExclude').checked;
     const is_tester = document.getElementById('fTester')?.checked ?? false;
+    const is_member = document.getElementById('fMember')?.checked ?? false;
     if (!name) { document.getElementById('fError').textContent = 'Name is required.'; return; }
     try {
-      await window.api.updatePlayer({ id: player.id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester });
+      await window.api.updatePlayer({ id: player.id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester, is_member });
       modal.close();
       toast('Player updated', 'success');
       state.players = await window.api.getPlayers();

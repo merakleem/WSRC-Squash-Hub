@@ -65,15 +65,17 @@ app.use(express.static(path.join(__dirname, 'renderer'), {
 // ===== API: WHO AM I =====
 app.get('/api/me', (req, res) => {
   let is_tester = 0;
+  let is_member = 0;
   let viewing_as = null;
   if (req.session.playerId) {
-    const player = getDB().prepare('SELECT is_tester, name FROM players WHERE id = ?').get(req.session.playerId);
+    const player = getDB().prepare('SELECT is_tester, is_member, name FROM players WHERE id = ?').get(req.session.playerId);
     is_tester = player?.is_tester || 0;
+    is_member = player?.is_member || 0;
     // Set only when an admin is looking through a member's eyes, so the app can
     // say so and offer the way back.
     if (req.session.viewingAs) viewing_as = player?.name || 'this player';
   }
-  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, viewing_as, club_timezone: require('./lib/clock').getClubTimezone() });
+  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, is_member, viewing_as, club_timezone: require('./lib/clock').getClubTimezone() });
 });
 
 // ===== API ROUTES =====

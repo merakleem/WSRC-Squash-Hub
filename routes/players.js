@@ -13,8 +13,11 @@ const { buildTournamentTiers } = require('../utils/tournamentHelpers');
 
 const router = express.Router();
 
+// What a non-admin may see of another player. Contact details, and the
+// account flags — who is a member (or tester) is the club's business, not
+// something any signed-in player can enumerate.
 function _stripContact(player) {
-  const { email, phone, member_number, ...rest } = player;
+  const { email, phone, member_number, is_member, is_tester, ...rest } = player;
   return rest;
 }
 
@@ -149,6 +152,14 @@ router.post('/players', requireAdmin, wrap(async (req, res) => {
 router.put('/players/:id', requireAdmin, wrap(async (req, res) => {
   const player = await playerService.updatePlayer({ ...req.body, id: Number(req.params.id) });
   res.json(player);
+}));
+
+// Bulk membership toggle from the players page. Admin-only — membership is
+// both an access switch (court booking) and private information.
+router.post('/players/membership', requireAdmin, wrap(async (req, res) => {
+  const { ids, is_member } = req.body;
+  const changed = await playerService.setMembership(ids, !!is_member);
+  res.json({ changed });
 }));
 
 router.delete('/players/:id', requireAdmin, wrap(async (req, res) => {

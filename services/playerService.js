@@ -37,6 +37,11 @@ function updatePlayer(data) {
   return result;
 }
 
+function setMembership(ids, isMember) {
+  if (!Array.isArray(ids) || ids.length === 0) throw _validationError('Select at least one player');
+  return playerModel.setMembership(ids, isMember);
+}
+
 function deletePlayer(id) {
   return playerModel.deletePlayer(id);
 }
@@ -62,6 +67,6 @@ function getAllPlayerRecords() {
 }
 
 module.exports = {
-  getAllPlayers, addPlayer, updatePlayer, deletePlayer,
+  getAllPlayers, addPlayer, updatePlayer, deletePlayer, setMembership,
   getPlayerById, getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
 };
