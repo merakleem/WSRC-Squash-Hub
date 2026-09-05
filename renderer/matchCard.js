@@ -111,6 +111,7 @@ function _cardHTML(c) {
 
   return `
     <div class="mc-card">
+      <div class="mc-handle"><span></span></div>
       <div class="mc-band">
         <span class="mc-kicker">${esc(_kicker(c))}</span>
         <button class="mc-close" id="mcClose" aria-label="Close">
@@ -133,20 +134,27 @@ function _cardHTML(c) {
       </div>
 
       <div class="mc-h2h">
-        <div class="mc-h2h-head">
-          <span class="mc-h2h-label">Head to head</span>
-          ${lead ? `<span class="mc-h2h-lead">${esc(lead)}</span>` : ''}
+        <button class="mc-h2h-toggle" id="mcH2hToggle" aria-expanded="false" aria-controls="mcH2hBody">
+          <span>View head-to-head</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="mc-h2h-body" id="mcH2hBody">
+          <div class="mc-h2h-head">
+            <span class="mc-h2h-label">Head to head</span>
+            ${lead ? `<span class="mc-h2h-lead">${esc(lead)}</span>` : ''}
+          </div>
+          ${h.total ? `
+            <div class="mc-bar"><span class="mc-bar-fill" style="width:${barPct}%"></span></div>
+            <div class="mc-meetings">${meetings}</div>
+          ` : '<div class="mc-h2h-empty">First meeting — these two have never played.</div>'}
         </div>
-        ${h.total ? `
-          <div class="mc-bar"><span class="mc-bar-fill" style="width:${barPct}%"></span></div>
-          <div class="mc-meetings">${meetings}</div>
-        ` : '<div class="mc-h2h-empty">First meeting — these two have never played.</div>'}
       </div>
 
       ${c.can_submit_score ? `
         <div class="mc-foot">
           <button class="btn btn-primary btn-lg btn-block" id="mcSubmit">Submit score</button>
         </div>` : ''}
+      <div class="mc-sheet-pad"></div>
     </div>`;
 }
 
@@ -174,6 +182,15 @@ export async function openMatchCard(matchId) {
   document.getElementById('modalBody').innerHTML = _cardHTML(card);
 
   document.getElementById('mcClose')?.addEventListener('click', () => modal.close());
+
+  // Head-to-head starts collapsed on every open; the toggle only flips a
+  // class, so the rest of the card never re-renders.
+  const h2hToggle = document.getElementById('mcH2hToggle');
+  h2hToggle?.addEventListener('click', () => {
+    const open = h2hToggle.closest('.mc-h2h').classList.toggle('mc-h2h--open');
+    h2hToggle.setAttribute('aria-expanded', String(open));
+    h2hToggle.querySelector('span').textContent = open ? 'Hide head-to-head' : 'View head-to-head';
+  });
 
   document.querySelectorAll('#modalBody .mc-name').forEach((el) => {
     el.addEventListener('click', () => {
