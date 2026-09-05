@@ -177,7 +177,7 @@ export function renderCourtBooking() {
     tab: 'book',
     courtId: null,
     courts: [],
-    mTime: null,
+    mCourt: null,
     scheduleCache: {},
     myBookings: [],
     listConfirm: null,
@@ -207,7 +207,10 @@ async function _init() {
     const courts = await window.api.getCourts();
     if (_instance !== myInstance) return;
     cb.courts = courts.filter(c => c.active);
-    if (cb.courts.length > 0) cb.courtId = cb.courts[0].id;
+    if (cb.courts.length > 0) {
+      cb.courtId = cb.courts[0].id;
+      cb.mCourt = cb.courts[0].id;
+    }
     await _loadSchedule(cb.date);
     if (_instance !== myInstance) return;
     _loadMyBookings();
@@ -490,40 +493,24 @@ function _buildGrid() {
 }
 
 // ── Mobile court cards ────────────────────────────────────────────────────────
-// ── Mobile: pick a start time, then a court ───────────────────────────────────
-// The Mobile Booking 2c handoff inverts the old layout: one rail of start
-// times across the top, then a list of courts answering "who is free at that
-// time, and for how long". Own bookings live in the My Bookings card below,
-// not in this list.
-
-// Start times on offer: today from the next 30-minute boundary (nothing
-// already gone is listed), any other date from opening.
-function _mTimes() {
-  const from = cb.date === todayStr() ? Math.ceil(nowMin() / SLOT_MIN) * SLOT_MIN : DAY_START;
-  const out = [];
-  for (let m = Math.max(DAY_START, from); m < DAY_END; m += SLOT_MIN) out.push(m);
-  return out;
-}
-
-// The chosen chip, falling back to the first listed time when none is chosen
-// yet - or when the chosen one has since gone past.
-function _mSelectedTime() {
-  const mins = _mTimes();
-  if (!mins.length) return null;
-  return mins.includes(cb.mTime) ? cb.mTime : mins[0];
-}
+// ── Mobile: a court per page ──────────────────────────────────────────────────
+// One row of court pill tabs, then the whole day for the selected court as
+// 30-minute rows. Picking the court first, then scanning its day, replaced the
+// time-first rail: a page per court reads like the paper sheet on the wall.
 
 function _mBookingAt(courtId, m) {
   return getCourtSlots(cb.date, courtId)
     .find(s => m < s.startMin + s.durationMinutes && m + SLOT_MIN > s.startMin) || null;
 }
 
-// Walk forward in 30-minute steps to the first booked one; that step's start
-// is where "free until" ends.
-function _mFreeUntil(courtId, m) {
-  let end = m;
-  while (end < DAY_END && !_mBookingAt(courtId, end)) end += SLOT_MIN;
-  return end;
+// The 30-minute steps on offer: today from the next boundary at or after now,
+// other future dates from opening, past dates none at all.
+function _mMins() {
+  if (cb.date < todayStr()) return [];
+  const from = cb.date === todayStr() ? Math.ceil(nowMin() / SLOT_MIN) * SLOT_MIN : DAY_START;
+  const out = [];
+  for (let m = Math.max(DAY_START, from); m < DAY_END; m += SLOT_MIN) out.push(m);
+  return out;
 }
 
 function _buildMobileBooking() {
@@ -531,58 +518,45 @@ function _buildMobileBooking() {
   if (cb.status === 'error')   return `<div class="cb-centered cb-error">Couldn't load the schedule. Please try again.</div>`;
   if (!cb.courts.length)       return `<div class="cb-centered">No courts available.</div>`;
 
-  const time = _mSelectedTime();
-  if (time == null) {
-    // Late enough that no 30-minute start remains today.
-    return `
-      <div class="cb-mlist">
-        <span class="cb-mhead">No more start times today.</span>
-      </div>`;
-  }
+  if (cb.mCourt == null || !cb.courts.some(c => c.id === cb.mCourt)) cb.mCourt = cb.courts[0].id;
 
-  const chips = _mTimes().map(m => {
-    const on = m === time;
-    const n = cb.courts.filter(c => !_mBookingAt(c.id, m)).length;
-    // A full time stays selectable: seeing all five courts booked is a
-    // legitimate thing to check.
-    return `<button class="cb-mchip${on ? ' cb-mchip--on' : ''}${n ? '' : ' cb-mchip--full'}" data-time="${m}">
-      <span class="cb-mchip-t">${fmtPill(m)}</span>
-      <span class="cb-mchip-n">${n ? `${n} free` : 'full'}</span>
-    </button>`;
-  }).join('');
+  const tabs = cb.courts.map(c =>
+    `<button class="cb-mtab${c.id === cb.mCourt ? ' cb-mtab--on' : ''}" data-mcourt="${c.id}">${esc(c.name)}</button>`
+  ).join('');
 
-  const rows = cb.courts.map(c => {
-    const bk = _mBookingAt(c.id, time);
-    const sel = !bk && cb.panel === 'book' && cb.courtId === c.id && cb.panelStartMin === time;
-    let sub;
-    if (bk) {
-      sub = `${esc(isMine(bk) ? 'You' : bk.title)} · until ${fmtShort(bk.startMin + bk.durationMinutes)}`;
-    } else {
-      const until = _mFreeUntil(c.id, time);
-      sub = until >= DAY_END ? 'Free for the rest of the day' : `Free until ${fmtPill(until)}`;
-    }
-    return `<div class="cb-mrow${bk ? ' cb-mrow--booked' : sel ? ' cb-mrow--sel' : ''}"${bk ? '' : ` data-court="${c.id}"`}>
-      <div class="cb-mrow-text">
-        <span class="cb-mrow-name">${esc(c.name)}</span>
-        <span class="cb-mrow-sub">${sub}</span>
-      </div>
-      <span class="cb-mrow-mark${bk ? ' cb-mrow-mark--booked' : sel ? ' cb-mrow-mark--sel' : ''}">${bk ? 'Booked' : sel ? 'Selected' : '+'}</span>
+  const mins = _mMins();
+  const rows = mins.map(m => {
+    const bk = _mBookingAt(cb.mCourt, m);
+    // A booking is one row, at its first listed step; the later steps it
+    // covers are skipped, so an hour booking is one row, not two.
+    const first = bk && (bk.startMin >= mins[0] ? bk.startMin === m : m === mins[0]);
+    if (bk && !first) return null;
+    const sel = !bk && cb.panel === 'book' && cb.courtId === cb.mCourt && cb.panelStartMin === m;
+    const mine = !!bk && isMine(bk);
+    const league = !!bk && bk.source && bk.source !== 'custom';
+    const kind = bk ? (mine ? 'mine' : league ? 'league' : 'other') : sel ? 'sel' : 'open';
+    const label = bk ? (mine ? 'You' : bk.title) : 'Open';
+    const mark = bk
+      ? `${fmtShort(bk.startMin)}–${fmtShort(bk.startMin + bk.durationMinutes)}`
+      : sel ? 'Selected' : '+';
+    const attrs = bk
+      ? (mine ? ` data-mbid="${esc(String(bk.id))}"` : '')
+      : ` data-mstart="${m}"`;
+    return `<div class="cb-mslot cb-mslot--${kind}"${attrs}>
+      <span class="cb-mslot-t">${fmtPill(m)}</span>
+      <span class="cb-mslot-l">${esc(label)}</span>
+      <span class="cb-mslot-m">${esc(mark)}</span>
     </div>`;
-  }).join('');
+  }).filter(Boolean).join('');
 
-  const freeNow = cb.courts.filter(c => !_mBookingAt(c.id, time)).length;
-  const headline = freeNow
-    ? `${freeNow} of ${cb.courts.length} courts free at ${fmtPill(time)}`
-    : `No courts free at ${fmtPill(time)}`;
+  const dots = cb.courts.map(c =>
+    `<span class="cb-mdot${c.id === cb.mCourt ? ' cb-mdot--on' : ''}"></span>`).join('');
 
   return `
-    <div class="cb-mrail">
-      <span class="cb-mrail-label">Start time</span>
-      <div class="cb-mrail-scroll" id="cbRail">${chips}</div>
-    </div>
-    <div class="cb-mlist">
-      <span class="cb-mhead">${headline}</span>
-      ${rows}
+    <div class="cb-mtabs" id="cbMTabs">${tabs}</div>
+    <div class="cb-mpage">
+      <div class="cb-mslots" id="cbMSlots">${rows || '<span class="cb-mempty">No times left on this day.</span>'}</div>
+      <div class="cb-mdots">${dots}</div>
     </div>`;
 }
 
@@ -705,15 +679,17 @@ function _renderBody() {
   if (!body) return;
   const wrap = document.getElementById('cbGridWrap');
   const saved = wrap?.scrollTop || 0;
-  // The rail keeps its place across re-renders: tapping a chip must change the
-  // selection where it stands, not scroll it anywhere.
-  const rail = document.getElementById('cbRail');
-  const railSaved = rail ? rail.scrollLeft || 0 : null;
+  // The tab row and the slot list keep their places across re-renders: tapping
+  // something must change the selection where it stands, not scroll it away.
+  const tabsSaved = document.getElementById('cbMTabs')?.scrollLeft || 0;
+  const slotsSaved = document.getElementById('cbMSlots')?.scrollTop || 0;
   body.innerHTML = _buildBody();
   const next = document.getElementById('cbGridWrap');
   if (next && saved) next.scrollTop = saved;
-  const nextRail = document.getElementById('cbRail');
-  if (nextRail) nextRail.scrollLeft = cb._railHome ? 0 : (railSaved || 0);
+  const nextTabs = document.getElementById('cbMTabs');
+  if (nextTabs) nextTabs.scrollLeft = tabsSaved;
+  const nextSlots = document.getElementById('cbMSlots');
+  if (nextSlots) nextSlots.scrollTop = cb._railHome ? 0 : slotsSaved;
   cb._railHome = false;
   _attachBodyListeners();
 }
@@ -733,9 +709,7 @@ function _render() {
 // ── Listeners ─────────────────────────────────────────────────────────────────
 function _setDate(next, { closeCal = true } = {}) {
   cb.date = next;
-  // A start time chosen for one day means nothing on another, and the rail
-  // starts over from that day's first chip.
-  cb.mTime = null;
+  // The court page carries over to the new day; only the list scrolls home.
   cb._railHome = true;
   if (closeCal) cb.calOpen = false;
   if (cb.panel === 'book') _closePanel();
@@ -777,7 +751,7 @@ function _attachBodyListeners() {
 // SPA; this one re-fetches the schedule and bookings in place.
 function _attachPullToRefresh() {
   if (!isMobile()) return;
-  const list = document.querySelector('.cb-mlist');
+  const list = document.getElementById('cbMSlots') || document.querySelector('.cb-mlist');
   const body = document.getElementById('cbBody');
   if (!list || !body || list._ptrWired) return;
   list._ptrWired = true;
@@ -842,26 +816,56 @@ function _attachPullToRefresh() {
 
 function _attachMobileListeners() {
   _attachPullToRefresh();
-  document.querySelectorAll('.cb-mchip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      // Re-selecting a time clears any court selection - and an open booking
-      // sheet is that selection, holding a slot at the old time.
-      if (cb.panel === 'book') _closePanel();
-      cb.mTime = Number(chip.dataset.time);
+
+  // A tab changes the page. An open sheet for another court stays open - the
+  // selection simply isn't highlighted on the page now showing.
+  document.querySelectorAll('.cb-mtab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      cb.mCourt = Number(tab.dataset.mcourt);
       _renderBody();
     });
   });
 
-  document.querySelectorAll('.cb-mrow[data-court]').forEach(row => {
+  document.querySelectorAll('.cb-mslot[data-mstart]').forEach(row => {
     row.addEventListener('click', () => {
       if (cb.date < todayStr()) return;
-      const time = _mSelectedTime();
-      if (time == null) return;
-      cb.courtId = Number(row.dataset.court);
-      _startReservation(time);
+      cb.courtId = cb.mCourt;
+      _startReservation(Number(row.dataset.mstart));
     });
   });
 
+  // Your own booking opens its edit sheet, as on the desktop grid.
+  document.querySelectorAll('.cb-mslot[data-mbid]').forEach(row => {
+    row.addEventListener('click', () => {
+      cb.courtId = cb.mCourt;
+      const booking = getCourtSlots(cb.date, cb.courtId).find(s => String(s.id) === String(row.dataset.mbid));
+      if (booking) _openPanel('edit', { booking });
+    });
+  });
+
+  // Swipe between courts, as the dots imply. Horizontal and decisive only, so
+  // scrolling the list never changes the page.
+  const slots = document.getElementById('cbMSlots');
+  if (slots && !slots._swipeWired) {
+    slots._swipeWired = true;
+    let sx = null, sy = null;
+    slots.addEventListener('touchstart', (e) => {
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+    }, { passive: true });
+    slots.addEventListener('touchend', (e) => {
+      if (sx == null) return;
+      const dx = e.changedTouches[0].clientX - sx;
+      const dy = e.changedTouches[0].clientY - sy;
+      sx = sy = null;
+      if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy)) return;
+      const idx = cb.courts.findIndex(c => c.id === cb.mCourt);
+      const nextIdx = dx < 0 ? idx + 1 : idx - 1;
+      if (nextIdx < 0 || nextIdx >= cb.courts.length) return;
+      cb.mCourt = cb.courts[nextIdx].id;
+      _renderBody();
+    }, { passive: true });
+  }
 }
 
 function _shiftMonth(ym, delta) {

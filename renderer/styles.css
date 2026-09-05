@@ -5529,49 +5529,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-rail-empty { padding: 0 13px; font-size: 12.5px; color: #93a2b5; }
 
 /* --- Mobile: pick a start time, then a court (Mobile Booking 2c) --- */
-.cb-mrail {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 13px 0 12px;
-  border-bottom: 1px solid #eef1f6;
-  background: #fff;
-}
-.cb-mrail-label {
-  padding: 0 14px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .09em;
-  text-transform: uppercase;
-  color: #93a2b5;
-}
 /* Padding on the scrolling element, not the wrapper, so the end chips clear
    the screen edge when scrolled. */
-.cb-mrail-scroll { display: flex; gap: 7px; overflow-x: auto; padding: 1px 14px 2px; }
-.cb-mchip {
-  flex-shrink: 0;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  min-width: 72px;
-  height: 52px;
-  padding: 0;
-  border: 1px solid #e2e7ef;
-  border-radius: 12px;
-  background: #fff;
-  font-family: inherit;
-  cursor: pointer;
-}
-.cb-mchip-t { font-family: 'Barlow', sans-serif; font-size: 14px; font-weight: 700; color: #1c2b3a; }
-.cb-mchip-n { font-size: 10px; font-weight: 600; color: #0f5c31; }
-.cb-mchip--full .cb-mchip-t, .cb-mchip--full .cb-mchip-n { color: #aab4c5; }
 /* Border width does not change between states, so nothing shifts. */
-.cb-mchip--on { border-color: #1e2758; background: #1e2758; }
-.cb-mchip--on .cb-mchip-t { color: #fff; }
-.cb-mchip--on .cb-mchip-n { color: rgba(255, 255, 255, .7); }
 
 /* The tinted background is what separates the list from the rail above. */
 .cb-mlist {
@@ -5587,9 +5547,115 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   padding: 14px;
   background: #f6f8fb;
 }
-.cb-mhead { font-size: 12.5px; color: #6b7e93; }
 
 /* --- Pull to refresh --- */
+/* ── Mobile: a court per page ─────────────────────────────────────────────────
+   Court pill tabs, then the selected court's whole day as 30-minute rows,
+   with page dots pinned under the list. */
+.cb-mtabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 12px 12px 10px;
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+.cb-mtabs::-webkit-scrollbar { display: none; }
+.cb-mtab {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 15px;
+  flex-shrink: 0;
+  border: 1px solid #dce3ed;
+  border-radius: 19px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7e93;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cb-mtab--on {
+  border-color: #1e2758;
+  background: #1e2758;
+  color: #fff;
+  font-weight: 700;
+}
+.cb-mpage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f5f5f7;
+}
+.cb-mslots {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cb-mslot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 54px;
+  padding: 0 14px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.cb-mslot--open { border: 1.5px dashed #d5dfec; background: #fff; cursor: pointer; }
+.cb-mslot--sel  { border: 1.5px solid #3550c8; background: #eaeffd; cursor: pointer; }
+.cb-mslot--mine   { border: 1px solid transparent; border-left: 3px solid #5b7cf9; background: #eaeefe; cursor: pointer; }
+.cb-mslot--league { border: 1px solid transparent; border-left: 3px solid #8a6d1f; background: #fbf5e6; }
+.cb-mslot--other  { border: 1px solid transparent; border-left: 3px solid #8793ab; background: #f4f6fa; }
+.cb-mslot-t {
+  width: 62px;
+  flex-shrink: 0;
+  font-family: 'Barlow', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1c2b3a;
+}
+.cb-mslot--sel .cb-mslot-t { color: #1e2758; }
+.cb-mslot--mine .cb-mslot-t, .cb-mslot--league .cb-mslot-t, .cb-mslot--other .cb-mslot-t { color: #93a2b5; }
+.cb-mslot-l {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #aab4c5;
+}
+.cb-mslot--sel .cb-mslot-l { color: #1e2758; }
+.cb-mslot--mine .cb-mslot-l { color: #23306b; }
+.cb-mslot--league .cb-mslot-l { color: #6f5716; }
+.cb-mslot--other .cb-mslot-l { color: #6b7e93; }
+.cb-mslot-m { flex-shrink: 0; font-size: 15px; font-weight: 700; color: #3550c8; }
+.cb-mslot--sel .cb-mslot-m { font-size: 11px; }
+.cb-mslot--mine .cb-mslot-m, .cb-mslot--league .cb-mslot-m, .cb-mslot--other .cb-mslot-m {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #aab4c5;
+}
+.cb-mempty { font-size: 12.5px; color: #93a2b5; padding: 14px 2px; }
+.cb-mdots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 0 14px;
+  flex-shrink: 0;
+}
+.cb-mdot { width: 6px; height: 6px; border-radius: 3px; background: #dce3ed; }
+.cb-mdot--on { width: 18px; background: #1e2758; }
+
 .cb-ptr {
   position: absolute;
   left: 50%;
@@ -5620,35 +5686,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   border-radius: 50%;
   animation: cb-spin .8s linear infinite;
 }
-.cb-mrow {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 62px;
-  padding: 11px 14px;
-  border-radius: 13px;
-  border: 1.5px dashed #d5dfec;
-  background: #fff;
-  cursor: pointer;
-}
-.cb-mrow--sel { border: 1.5px solid #3550c8; }
-.cb-mrow--booked { border: 1px solid #e7ebf2; background: #f1f4f8; cursor: default; }
-.cb-mrow-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.cb-mrow-name { font-family: 'Barlow', sans-serif; font-size: 15px; font-weight: 700; color: #1c2b3a; }
-.cb-mrow--booked .cb-mrow-name { color: #93a2b5; }
-.cb-mrow-sub {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #0f5c31;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cb-mrow--booked .cb-mrow-sub { color: #aab4c5; }
-.cb-mrow-mark { margin-left: auto; flex-shrink: 0; font-size: 17px; font-weight: 700; color: #3550c8; }
-.cb-mrow-mark--sel { font-size: 11px; }
-.cb-mrow-mark--booked { font-size: 11px; font-weight: 600; color: #aab4c5; }
 
 /* --- My Bookings (desktop) --- */
 .cb-mine-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }

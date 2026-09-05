@@ -1,0 +1,94 @@
+<!-- Drives the real Book a Court page module at a mobile width and asserts
+     the court-per-page handoff's behaviour. Serve the repo root and open
+     /test/court-booking-mobile.browser.html at <=768px wide - the title
+     becomes PASS or FAIL. -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../renderer/styles.css"></head>
+<body><div class="app-container"><div class="main-wrapper">
+<header class="topbar"><h1 id="pageTitle"></h1><div id="topbarActions"></div></header>
+<main class="content" id="mainContent" style="height:800px;display:flex;flex-direction:column"></main></div></div>
+<div id="modalOverlay" style="display:none"><div id="modal"><div id="modalTitle"></div><div id="modalBody"></div><button id="modalClose"></button></div></div>
+<div id="toastContainer"></div>
+<pre id="log" style="position:fixed;inset:0;background:#fff;z-index:999;font:12px monospace;padding:12px;white-space:pre-wrap;overflow:auto"></pre>
+<script type="module">
+const out=[]; let fails=0;
+const ok=(n,c,x='')=>{ if(!c) fails++; out.push((c?'  PASS  ':'  FAIL  ')+n+(x!==''?'  ['+x+']':'')); };
+try {
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role:'user', playerId:42 };
+state.players = [{ id:42, name:'Merak Lee' }];
+const t=(m)=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const today = new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const courts=[1,2,3,4,5].map(i=>({id:i,name:i===5?'Doubles Court':'Court '+i,active:1,sort_order:i}));
+const mk=(id,courtId,s,d,title,opts={})=>({id,courtId,startTime:t(s),durationMinutes:d,title,source:opts.source||'custom',players:opts.players||[],name:title,info:'',color:'#3550c8',bookingTypeId:null,repeatGroupId:null,date:today});
+const slots=[
+  mk(1,1,17*60,60,'Merak Lee',{players:[{id:42,name:'Merak Lee'}]}),
+  mk(2,1,18*60+30,90,'League Match',{source:'league'}),
+  mk(3,1,20*60+30,60,'Sofia Duarte',{players:[{id:7,name:'Sofia Duarte'}]}),
+  mk(4,2,17*60+30,60,'Priya Raman',{players:[{id:8,name:'Priya Raman'}]}),
+];
+const calls=[];
+window.api = {
+  getCourts: async()=>courts,
+  getSchedule: async()=>({courts, slots}),
+  getMyBookings: async()=>[],
+  createReservation: async(d)=>{ calls.push(['reserve',d]); return { reservationId:'r1', expiresAt: Date.now()+300000 }; },
+  deleteReservation: async()=>({}),
+};
+window.navigate=()=>{};
+const { renderCourtBooking } = await import('../renderer/pages/courtBooking.js');
+const $=(s)=>document.querySelector(s), $$=(s)=>[...document.querySelectorAll(s)];
+const tick=(ms=150)=>new Promise(r=>setTimeout(r,ms));
+// The page decides mobile by width; the headless window is 500 so it is mobile.
+renderCourtBooking(); await tick(300);
+
+// ---- structure ----
+ok('five court tabs in club order', $$('.cb-mtab').map(x=>x.textContent).join('|')==='Court 1|Court 2|Court 3|Court 4|Doubles Court');
+ok('Court 1 selected by default', $('.cb-mtab').classList.contains('cb-mtab--on'));
+ok('five dots, first elongated', $$('.cb-mdot').length===5 && $('.cb-mdot').classList.contains('cb-mdot--on'));
+ok('rows exist for today', $$('.cb-mslot').length>0, $$('.cb-mslot').length);
+
+// ---- booking rows: one row each, right kind, right texts ----
+const mine=$('.cb-mslot--mine'), league=$('.cb-mslot--league'), other=$('.cb-mslot--other');
+ok('own booking is one blue row saying You', !!mine && mine.querySelector('.cb-mslot-l').textContent==='You');
+ok('own booking mark is its range', mine?.querySelector('.cb-mslot-m').textContent==='5:00–6:00', mine?.querySelector('.cb-mslot-m').textContent);
+ok('league booking renders amber with its title', !!league && league.querySelector('.cb-mslot-l').textContent==='League Match');
+ok('a 90-minute booking is one row, not three', $$('.cb-mslot--league').length===1);
+ok("someone else's booking is grey and inert", !!other && !other.dataset.mstart && !other.dataset.mbid);
+ok('booked steps are skipped as open rows', !$$('.cb-mslot[data-mstart]').some(r=>['17:00','17:30','18:30','19:00','19:30','20:30'].includes(t(Number(r.dataset.mstart)))));
+const firstOpen=$('.cb-mslot[data-mstart]');
+ok('open rows say Open with a plus', firstOpen.querySelector('.cb-mslot-l').textContent==='Open' && firstOpen.querySelector('.cb-mslot-m').textContent==='+');
+
+// ---- tab switch ----
+$$('.cb-mtab')[1].click(); await tick();
+ok('tab tap changes the page', $$('.cb-mtab')[1].classList.contains('cb-mtab--on') && $$('.cb-mdot')[1].classList.contains('cb-mdot--on'));
+ok('the new page shows its own bookings', !!$('.cb-mslot--other') && $('.cb-mslot--other').querySelector('.cb-mslot-l').textContent==='Priya Raman');
+ok("and not the old court's", !$('.cb-mslot--league'));
+
+// ---- open tap books on the shown court ----
+$('.cb-mslot[data-mstart]').click(); await tick(250);
+const rsv=calls.find(c=>c[0]==='reserve');
+ok('tapping an open row reserves on the shown court', rsv && rsv[1].courtId===2, rsv&&JSON.stringify(rsv[1]));
+ok('the sheet opens', !!$('.cb-panel'));
+ok('the tapped row shows Selected', $('.cb-mslot--sel')?.querySelector('.cb-mslot-m').textContent==='Selected');
+
+// ---- switching court keeps the sheet open ----
+$$('.cb-mtab')[0].click(); await tick();
+ok('sheet stays open on another page', !!$('.cb-panel'));
+ok('selection not highlighted on this page', !$('.cb-mslot--sel'));
+document.getElementById('cbPanelCancel')?.click(); await tick(250);
+
+// ---- own booking opens the edit sheet ----
+$('.cb-mslot[data-mbid]')?.click(); await tick(250);
+ok('own row opens the edit sheet', !!$('.cb-panel') && document.body.textContent.includes('Cancel booking'), $('.cb-panel')?'panel':'none');
+document.getElementById('cbPanelClose')?.click(); await tick(250);
+
+// ---- past date: no rows, the empty line ----
+const { state: st } = await import('../renderer/state.js');
+document.getElementById('cbPrevDay').click(); await tick(250);
+ok('yesterday shows no rows', $$('.cb-mslot').length===0);
+ok('and says so', $('.cb-mempty')?.textContent==='No times left on this day.');
+ok('the court page carried over', $('.cb-mtab').classList.contains('cb-mtab--on'));
+} catch (e) { fails++; out.push('  THREW  '+e.message+'\n'+(e.stack||'').split('\n').slice(0,4).join('\n')); }
+document.getElementById('log').textContent = out.join('\n')+'\n\n'+(fails? fails+' FAILED':'ALL '+out.length+' PASSED');
+document.title = fails? 'FAIL':'PASS';
+</script></body></html>
