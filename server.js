@@ -89,6 +89,7 @@ app.use('/api', require('./routes/tournaments'));
 app.use('/api', require('./routes/settings'));
 app.use('/api', require('./routes/session'));
 app.use('/api', require('./routes/seasons'));
+app.use('/api', require('./routes/events'));
 
 // ===== 404 =====
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));

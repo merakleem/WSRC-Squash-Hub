@@ -12,6 +12,7 @@ import { renderLeagues } from './pages/leagues.js';
 import { renderLeagueDetail, resetLeagueEditMode } from './pages/leagueDetail.js';
 import { renderCreateLeague } from './pages/createLeague.js';
 import { renderTournaments, renderTournamentDetail, renderCreateTournament } from './pages/tournaments.js';
+import { renderEvents } from './pages/events.js';
 import { renderCourtBooking } from './pages/courtBooking.js';
 
 // ===== NAVIGATION =====
@@ -32,6 +33,7 @@ function navigate(page, params = {}, { pushHistory = true } = {}) {
   const isOwnProfile = page === 'playerProfile' && state.currentPlayer?.id === state.currentUser?.playerId;
   const navPage = (page === 'leagueDetail' || page === 'createLeague') ? 'leagues'
     : (page === 'tournamentDetail' || page === 'createTournament') ? 'tournaments'
+    : page === 'eventDetail' ? 'events'
     : isOwnProfile ? 'myProfile'
     : page === 'playerProfile' ? 'players'
     : page === 'myProfile' ? 'myProfile'
@@ -106,6 +108,8 @@ function renderPage() {
     case 'createLeague':     renderCreateLeague(); break;
     case 'playerProfile':    renderPlayerProfile(); break;
     case 'reportScore':      renderReportScore(); break;
+    case 'events':           renderEvents(); break;
+    case 'eventDetail':      renderEvents(); break;
     case 'tournaments':      renderTournaments(); break;
     case 'tournamentDetail': renderTournamentDetail(); break;
     case 'createTournament': renderCreateTournament(); break;

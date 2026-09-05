@@ -81,6 +81,18 @@ if (typeof window !== 'undefined' && !window.api) {
     addBookingType:     (d)       => _apiFetch('POST',   '/api/booking-types', d),
     updateBookingType:  (id, d)   => _apiFetch('PUT',    `/api/booking-types/${id}`, d),
     deleteBookingType:  (id)      => _apiFetch('DELETE', `/api/booking-types/${id}`),
+    // ---- Events ----
+    getEvents:            (scope)   => _apiFetch('GET',    `/api/events?scope=${scope || 'upcoming'}`),
+    getEvent:             (id)      => _apiFetch('GET',    `/api/events/${id}`),
+    createEvent:          (d)       => _apiFetch('POST',   '/api/events', d),
+    updateEvent:          (id, d)   => _apiFetch('PUT',    `/api/events/${id}`, d),
+    deleteEvent:          (id)      => _apiFetch('DELETE', `/api/events/${id}`),
+    signUpForEvent:       (id, d)   => _apiFetch('POST',   `/api/events/${id}/signup`, d),
+    updateEventSignup:    (id, d)   => _apiFetch('PUT',    `/api/events/${id}/signup`, d),
+    withdrawFromEvent:    (id)      => _apiFetch('DELETE', `/api/events/${id}/signup`),
+    removeEventAttendee:  (id, pid) => _apiFetch('DELETE', `/api/events/${id}/signups/${pid}`),
+    searchLinkables:      (q)       => _apiFetch('GET',    `/api/events/linkables?q=${encodeURIComponent(q || '')}`),
+
     getTournaments:          ()        => _apiFetch('GET',    '/api/tournaments'),
     getTournament:           (id)      => _apiFetch('GET',    `/api/tournaments/${id}`),
     createTournament:        (d)       => _apiFetch('POST',   '/api/tournaments', d),
