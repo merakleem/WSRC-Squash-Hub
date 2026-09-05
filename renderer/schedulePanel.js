@@ -414,15 +414,15 @@ function deleteHTML() {
         : 'Delete this booking and release the court? You can undo right after.'}</span>
       ${repeats ? `
         <div class="sch-del-scopes">
-          <button class="sch-del-btn" data-del="this">This event</button>
-          <button class="sch-del-btn" data-del="future">This &amp; all future</button>
-          <button class="sch-del-btn" data-del="all">All events</button>
+          <button class="btn btn-danger btn-sm" data-del="this">This event</button>
+          <button class="btn btn-danger btn-sm" data-del="future">This &amp; all future</button>
+          <button class="btn btn-danger btn-sm" data-del="all">All events</button>
         </div>
         <button class="sch-del-keeplink" data-del="keep">Keep the booking</button>
       ` : `
         <div class="sch-del-simple">
-          <button class="sch-del-keep" data-del="keep">Keep it</button>
-          <button class="sch-del-btn" data-del="this">Delete booking</button>
+          <button class="btn btn-secondary btn-sm" data-del="keep">Keep it</button>
+          <button class="btn btn-danger btn-sm" data-del="this">Delete booking</button>
         </div>`}
     </div>`;
 }
@@ -440,10 +440,10 @@ function footHTML() {
         <span>${esc(summaryLine())}</span>
       </div>
       <div class="sch-panel-btns">
-        <button class="sch-panel-secondary" id="schPanelSecondary">${secondary}</button>
-        <button class="sch-panel-primary" id="schPanelPrimary"${p.busy || !canSave() ? ' disabled' : ''}>${p.busy ? 'Saving…' : primary}</button>
+        <button class="btn btn-secondary btn-lg" id="schPanelSecondary">${secondary}</button>
+        <button class="btn btn-primary btn-lg" id="schPanelPrimary"${p.busy || !canSave() ? ' disabled' : ''}>${p.busy ? 'Saving…' : primary}</button>
       </div>
-      ${isEdit && !p.askingDelete ? `<button class="sch-panel-del" id="schPanelDelete">Delete booking</button>` : ''}
+      ${isEdit && !p.askingDelete ? `<button class="btn btn-danger-outline btn-block" id="schPanelDelete">Delete booking</button>` : ''}
     </div>`;
 }
 

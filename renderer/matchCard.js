@@ -145,7 +145,7 @@ function _cardHTML(c) {
 
       ${c.can_submit_score ? `
         <div class="mc-foot">
-          <button class="mc-submit" id="mcSubmit">Submit score</button>
+          <button class="btn btn-primary btn-lg btn-block" id="mcSubmit">Submit score</button>
         </div>` : ''}
     </div>`;
 }

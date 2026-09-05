@@ -147,7 +147,7 @@ export async function renderSchedule() {
   // other page, rather than the page growing a second bar of its own.
   actionsEl.innerHTML = isAdmin()
     ? `<span class="sch-topbar-help">Drag empty space to book · drag a booking to move it · pull its edges to resize · ${K.mod}C ${K.mod}V ${K.mod}D ${K.del} ${K.mod}Z</span>
-       <button class="sch-new-btn" id="btnNewBooking">
+       <button class="btn btn-primary" id="btnNewBooking">
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
          New booking
        </button>`

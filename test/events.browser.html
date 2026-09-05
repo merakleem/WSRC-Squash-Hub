@@ -42,8 +42,8 @@ ok('count line reads upcoming', text('.ev-count')==='4 upcoming', text('.ev-coun
 ok('players get no New event button', !$('#evNew'));
 ok('months group the list', $$('.ev-month').map(m=>m.textContent).join('|')==='September 2026|October 2026|December 2026', $$('.ev-month').map(m=>m.textContent).join('|'));
 const cards=$$('.ev-card');
-ok('pills follow priority', cards[0].querySelector('.ev-pill').textContent==='Open' && cards[1].querySelector('.ev-pill').textContent==='Full' && cards[2].querySelector('.ev-pill').textContent==='Signed up');
-ok('type chips on linked events', cards[1].querySelector('.ev-chip')?.textContent==='tournament' && cards[3].querySelector('.ev-chip')?.textContent==='league');
+ok('pills follow priority', cards[0].querySelector('.pill').textContent==='Open' && cards[1].querySelector('.pill').textContent==='Full' && cards[2].querySelector('.pill').textContent==='Signed up');
+ok('type chips on linked events', cards[1].querySelector('.chip')?.textContent==='tournament' && cards[3].querySelector('.chip')?.textContent==='league');
 ok('league-linked counts say registered', cards[3].textContent.includes('9 registered'));
 ok('past-free spots lines', cards[0].textContent.includes('13 spots left') && cards[1].textContent.includes('32 of 32') && cards[2].textContent.includes('No limit'));
 ok('ME leads the stack when signed up', cards[2].querySelector('.ev-av').textContent==='ME');
@@ -85,10 +85,10 @@ $('#evGoLink').click(); await tick(30);
 ok('it navigates to the league', navved && navved[0]==='leagueDetail' && navved[1].league.id===4, JSON.stringify(navved));
 
 // past tab
-$$('.ev-tab')[1].click(); await tick(250);
+$$('.ev-tabs .tab')[1].click(); await tick(250);
 ok('past count line', text('.ev-count')==='2 past');
 const pcards=$$('.ev-card');
-ok('You went beats Past', pcards[0].querySelector('.ev-pill').textContent==='You went' && pcards[1].querySelector('.ev-pill').textContent==='Past');
+ok('You went beats Past', pcards[0].querySelector('.pill').textContent==='You went' && pcards[1].querySelector('.pill').textContent==='Past');
 ok('past cards say attended', pcards[0].textContent.includes('44 attended'));
 ok('past cards drop the spots line', pcards[0].querySelector('.ev-card-spots').textContent==='');
 ok('past events take no action', !$('.ev-action'));
@@ -131,7 +131,7 @@ $('#evEdit')?.click(); await tick(80);
 ok('edit prefills the form', $('#evfName')?.value==='Back to the Bunker' && $('#evfDate')?.value==='2026-09-18', $('#evfName')?.value);
 ok('delete asks first', text('#evDelete')==='Delete event');
 $('#evDelete').click(); await tick(40);
-ok('then confirms', text('#evDelete')==='Confirm delete' && $('.ev-del--confirm'));
+ok('then confirms', text('#evDelete')==='Confirm delete' && $('#evDelete').classList.contains('btn-danger'));
 calls.length=0;
 $('#evDelete').click(); await tick(300);
 ok('second click deletes', calls.some(c=>c[0]==='deleteEvent' && c[1]===1));

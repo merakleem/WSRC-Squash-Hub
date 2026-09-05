@@ -1665,7 +1665,7 @@ export async function openPickupGameModal() {
         <span class="em-missing" id="emMissing"></span>
         <div class="em-footer-btns">
           <button type="button" class="btn btn-ghost" id="emCancel">Cancel</button>
-          <button type="button" class="btn em-submit" id="puSubmit" disabled>Log match</button>
+          <button type="button" class="btn btn-primary" id="puSubmit" disabled>Log match</button>
         </div>
       </div>
     </div>`;

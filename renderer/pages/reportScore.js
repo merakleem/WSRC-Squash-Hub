@@ -45,7 +45,7 @@ function _rowHTML(m) {
         <span class="rs-row-context">${esc(_context(m))}</span>
       </div>
       <span class="rs-row-when${when ? '' : ' rs-row-when--none'}">${when ? esc(when) : 'No time set'}</span>
-      <button class="rs-row-btn" data-report="${m.id}">Report score</button>
+      <button class="btn btn-secondary btn-sm" data-report="${m.id}">Report score</button>
     </div>`;
 }
 
@@ -69,7 +69,7 @@ function _pageHTML() {
         <span class="rs-divider-text">Played a match that isn't listed?</span>
         <span class="rs-rule"></span>
       </div>
-      <button class="rs-create" id="rsCreate">
+      <button class="btn btn-secondary rs-create" id="rsCreate">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         Create ladder match &amp; report score
       </button>
@@ -134,8 +134,8 @@ function _openForm(m) {
           </div>` : ''}
       </div>
       <div class="rs-form-foot">
-        <button class="rs-btn rs-btn--ghost" id="rsCancel">Cancel</button>
-        <button class="rs-btn rs-btn--primary" id="rsSubmit"${complete && !_busy ? '' : ' disabled'}>${_busy ? 'Submitting…' : 'Submit score'}</button>
+        <button class="btn btn-secondary btn-lg" id="rsCancel">Cancel</button>
+        <button class="btn btn-primary btn-lg" id="rsSubmit"${complete && !_busy ? '' : ' disabled'}>${_busy ? 'Submitting…' : 'Submit score'}</button>
       </div>`;
 
     document.querySelectorAll('.rs-winner').forEach((b) => b.addEventListener('click', () => {

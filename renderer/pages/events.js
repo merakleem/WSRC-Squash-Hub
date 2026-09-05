@@ -75,7 +75,7 @@ function _avatarStack(e, cls) {
 
 function _typeChip(link, hero) {
   if (!link) return '';
-  return `<span class="ev-chip${hero ? ' ev-chip--hero' : ` ev-chip--${link.type}`}">${esc(link.type)}</span>`;
+  return `<span class="chip${hero ? ' chip--hero' : ` chip--${link.type}`}">${esc(link.type)}</span>`;
 }
 
 function _spotsLine(e) {
@@ -167,7 +167,7 @@ function _topbarHTML() {
   return `
     <span class="ev-count">${n} ${ev.tab === 'past' ? 'past' : 'upcoming'}</span>
     ${isAdmin() ? `
-      <button class="ev-new-btn" id="evNew">
+      <button class="btn btn-primary" id="evNew">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
         New event
       </button>` : ''}`;
@@ -193,7 +193,7 @@ function _cardHTML(e) {
         </div>
       </div>
       <div class="ev-card-right">
-        <span class="ev-pill ev-pill--${p.cls}">${p.label}</span>
+        <span class="pill pill--${p.cls}">${p.label}</span>
         <span class="ev-card-spots">${_spotsLine(e)}</span>
       </div>
       <svg class="ev-card-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
@@ -213,9 +213,9 @@ function _listHTML() {
     ${g.events.map(_cardHTML).join('')}`).join('');
   return `
     <div class="ev-list-col">
-      <div class="ev-tabs">
-        <button class="ev-tab${ev.tab === 'upcoming' ? ' ev-tab--on' : ''}" data-tab="upcoming">Upcoming</button>
-        <button class="ev-tab${ev.tab === 'past' ? ' ev-tab--on' : ''}" data-tab="past">Past</button>
+      <div class="tabbar ev-tabs">
+        <button class="tab${ev.tab === 'upcoming' ? ' tab--on' : ''}" data-tab="upcoming">Upcoming</button>
+        <button class="tab${ev.tab === 'past' ? ' tab--on' : ''}" data-tab="past">Past</button>
       </div>
       ${ev.events.length ? cards : `<div class="ev-empty">No ${ev.tab === 'past' ? 'past' : 'upcoming'} events${isAdmin() && ev.tab === 'upcoming' ? ' — create one with New event.' : '.'}</div>`}
     </div>`;
@@ -227,7 +227,7 @@ function _heroHTML(e) {
   return `
     <div class="ev-hero">
       <div class="ev-hero-top">
-        <span class="ev-pill ev-pill--hero-${p.cls}">${p.label}</span>
+        <span class="pill pill--hero-${p.cls}">${p.label}</span>
         ${_typeChip(e.link, true)}
         <span class="ev-spacer"></span>
         ${isAdmin() ? `
@@ -256,7 +256,7 @@ function _factsHTML(e) {
     <div class="ev-facts">
       <div class="ev-facts-main">
         <div class="ev-facts-head">
-          <span class="ev-label">Attending</span>
+          <span class="section-label">Attending</span>
           <span class="ev-facts-cap">${esc(capacityLine)}</span>
         </div>
         <div class="ev-facts-nrow">
@@ -307,7 +307,7 @@ function _actionHTML(e) {
           </div>
           <button class="ev-withdraw" id="evWithdraw">Withdraw</button>
         </div>` : `
-        <button class="ev-signup" id="evSignUp"${canJoin ? '' : ' disabled'}>${btnLabel}</button>`}
+        <button class="btn btn-primary btn-lg btn-block" id="evSignUp"${canJoin ? '' : ' disabled'}>${btnLabel}</button>`}
     </div>`;
 }
 
@@ -337,7 +337,7 @@ function _rosterHTML(e) {
   return `
     <div class="ev-roster">
       <div class="ev-roster-head">
-        <span class="ev-label">Who's going</span>
+        <span class="section-label">Who's going</span>
         <span class="ev-roster-count">${esc(countText)}</span>
       </div>
       ${admin && rows.length ? `
@@ -349,13 +349,13 @@ function _rosterHTML(e) {
         <button class="ev-roster-more" id="evRosterToggle">${ev.rosterOpen ? 'Show fewer' : `Show all ${rows.length}`}</button>` : ''}
       ${admin ? `
         <div class="ev-roster-foot">
-          <span class="ev-chip ev-chip--league">ADMIN</span>
+          <span class="chip chip--league">ADMIN</span>
           <span class="ev-spacer"></span>
-          <button class="ev-print" id="evPrintBtn">
+          <button class="btn btn-secondary btn-sm" id="evPrintBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v7H6z"/></svg>
             Print
           </button>
-          <button class="ev-export" id="evExportBtn">
+          <button class="btn btn-primary btn-sm" id="evExportBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>
             Export CSV
           </button>
@@ -428,7 +428,7 @@ function _modalHTML() {
             <span>Link to a league or tournament <i class="ev-optional">(optional)</i></span>
             ${linked ? `
               <div class="ev-linked">
-                <span class="ev-chip ev-chip--${linked.type}">${esc(linked.type)}</span>
+                <span class="chip chip--${linked.type}">${esc(linked.type)}</span>
                 <span class="ev-linked-name">${esc(linked.name)}</span>
                 <button class="ev-linked-x" id="evLinkClear">×</button>
               </div>` : `
@@ -439,7 +439,7 @@ function _modalHTML() {
                   <div class="ev-search-drop" id="evLinkDrop">
                     ${ev.linkResults.length ? ev.linkResults.map((l, i) => `
                       <button class="ev-search-row" data-link="${i}">
-                        <span class="ev-chip ev-chip--${l.type}">${esc(l.type)}</span>
+                        <span class="chip chip--${l.type}">${esc(l.type)}</span>
                         <span class="ev-search-name">${esc(l.name)}</span>
                         <span class="ev-search-meta">${esc(l.meta || '')}</span>
                       </button>`).join('') : '<span class="ev-search-none">No matches</span>'}
@@ -449,10 +449,10 @@ function _modalHTML() {
           </div>
         </div>
         <div class="ev-modal-foot">
-          ${editing ? `<button class="ev-del${ev.confirmDelete ? ' ev-del--confirm' : ''}" id="evDelete">${ev.confirmDelete ? 'Confirm delete' : 'Delete event'}</button>` : ''}
+          ${editing ? `<button class="btn ${ev.confirmDelete ? 'btn-danger' : 'btn-danger-outline'}" id="evDelete">${ev.confirmDelete ? 'Confirm delete' : 'Delete event'}</button>` : ''}
           <span class="ev-spacer"></span>
-          <button class="ev-cancel" id="evCancel">Cancel</button>
-          <button class="ev-save" id="evSave"${valid && !ev.busy ? '' : ' disabled'}>${editing ? 'Save changes' : 'Create event'}</button>
+          <button class="btn btn-secondary" id="evCancel">Cancel</button>
+          <button class="btn btn-primary" id="evSave"${valid && !ev.busy ? '' : ' disabled'}>${editing ? 'Save changes' : 'Create event'}</button>
         </div>
       </div>
     </div>`;
@@ -491,7 +491,7 @@ function _paint() {
 function _wire(content) {
   document.getElementById('evNew')?.addEventListener('click', () => _openModal('create'));
 
-  content.querySelectorAll('.ev-tab').forEach((b) => b.addEventListener('click', () => {
+  content.querySelectorAll('.ev-tabs .tab').forEach((b) => b.addEventListener('click', () => {
     if (ev.tab === b.dataset.tab) return;
     ev.tab = b.dataset.tab;
     ev.rosterOpen = false;
