@@ -134,17 +134,32 @@ export async function renderClubActivity(days = 7) {
 }
 
 // ===== CLUB SETTINGS =====
+// Every IANA zone the browser knows, with the chosen one selected. Older
+// browsers without supportedValuesOf get a short list of plausible zones.
+function _timezoneOptionsHTML(current) {
+  let zones;
+  try { zones = Intl.supportedValuesOf('timeZone'); }
+  catch (_) {
+    zones = ['America/Winnipeg', 'America/Toronto', 'America/Vancouver', 'America/Edmonton',
+      'America/Regina', 'America/Halifax', 'America/St_Johns', 'UTC'];
+  }
+  if (!zones.includes(current)) zones = [current, ...zones];
+  return zones.map((z) =>
+    `<option value="${esc(z)}"${z === current ? ' selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('');
+}
+
 export async function renderClubSettings() {
   document.getElementById('pageTitle').textContent = 'Club Settings';
   document.getElementById('topbarActions').innerHTML = '';
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
 
-  const [courts, bookingTypes, seasons, settings] = await Promise.all([
+  const [courts, bookingTypes, seasons, settings, clubSettings] = await Promise.all([
     window.api.getCourts(),
     window.api.getBookingTypes(),
     window.api.getSeasons(),
     window.api.getSeasonSettings(),
+    window.api.getSettings(),
   ]);
 
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -194,6 +209,27 @@ export async function renderClubSettings() {
                 </div>
               </div>
             </div>`).join('')}
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Time zone</h2>
+        </div>
+        <p class="settings-section-desc">
+          The club's clock. Everything time-related — the schedule's Now line, what counts as
+          today, when a booking or event is in the past — follows this time zone for everyone,
+          no matter where their own device thinks it is.
+        </p>
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fClubTimezone">Club time zone</label>
+            <select class="form-control" id="fClubTimezone">${_timezoneOptionsHTML(clubSettings.club_timezone || 'America/Winnipeg')}</select>
+            <p class="form-hint">Right now at the club: <span id="clubTzPreview"></span></p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveClubTimezone">Save</button>
+          </div>
         </div>
       </div>
 
@@ -250,6 +286,29 @@ export async function renderClubSettings() {
       await window.api.updateSeasonSettings({ season_start_md: md });
       toast('Season settings saved');
       renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  const tzSelect = document.getElementById('fClubTimezone');
+  const tzPreview = () => {
+    const el = document.getElementById('clubTzPreview');
+    if (!el || !tzSelect) return;
+    try {
+      el.textContent = new Intl.DateTimeFormat('en-US', {
+        timeZone: tzSelect.value, weekday: 'short', hour: 'numeric', minute: '2-digit',
+      }).format(new Date());
+    } catch (_) { el.textContent = '—'; }
+  };
+  tzPreview();
+  tzSelect?.addEventListener('change', tzPreview);
+  document.getElementById('btnSaveClubTimezone')?.addEventListener('click', async () => {
+    try {
+      await window.api.updateSettings({ club_timezone: tzSelect.value });
+      // The running session follows the new clock immediately.
+      if (state.currentUser) state.currentUser.club_timezone = tzSelect.value;
+      toast('Time zone saved');
     } catch (err) {
       toast(err.message, 'error');
     }

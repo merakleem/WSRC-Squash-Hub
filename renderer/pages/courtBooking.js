@@ -1,5 +1,5 @@
 import { state } from '../state.js';
-import { esc, toast } from '../utils.js';
+import { esc, toast, clubTodayStr, clubNowMin } from '../utils.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // The grid stops at 11pm to match the admin schedule page, which uses the same
@@ -15,8 +15,7 @@ let _instance = 0;
 
 // ── Time helpers ──────────────────────────────────────────────────────────────
 function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return clubTodayStr();
 }
 
 function addDays(dateStr, n) {
@@ -68,8 +67,7 @@ function topFor(min) {
 }
 
 function nowMin() {
-  const n = new Date();
-  return n.getHours() * 60 + n.getMinutes();
+  return clubNowMin();
 }
 
 function durLabel(d) {

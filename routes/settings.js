@@ -15,6 +15,10 @@ router.put('/settings', requireAdmin, wrap(async (req, res) => {
   if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
     return res.status(400).json({ error: 'Expected an object of key/value pairs' });
   }
+  if ('club_timezone' in updates) {
+    try { new Intl.DateTimeFormat('en-CA', { timeZone: String(updates.club_timezone) }); }
+    catch (_) { return res.status(400).json({ error: 'That is not a valid time zone.' }); }
+  }
   res.json(await settingsModel.setSettings(updates));
 }));
 

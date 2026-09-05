@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast } from '../utils.js';
+import { esc, toast, clubTodayStr } from '../utils.js';
 
 // ===== EVENTS =====
 // Club happenings members sign up for. One list, one detail column: socials,
@@ -21,8 +21,7 @@ function _d(dateStr) {
   return new Date(dateStr + 'T12:00:00');
 }
 function _todayIso() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return clubTodayStr();
 }
 // "7:00 pm" from "19:00".
 function _time12(hhmm) {

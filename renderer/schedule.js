@@ -1,5 +1,5 @@
 import { state, isAdmin } from './state.js';
-import { esc, toast } from './utils.js';
+import { esc, toast, clubTodayStr, clubNowMin } from './utils.js';
 import { openBookingPanel, closeBookingPanel, isBookingPanelOpen } from './schedulePanel.js';
 
 // AbortController for document-level drag/click listeners — aborted and recreated on each renderSchedule() call
@@ -134,8 +134,8 @@ export async function renderSchedule() {
   // first rather than being orphaned in the DOM.
   closeBookingPanel();
 
-  if (!state.scheduleDate) state.scheduleDate = _isoDate(new Date());
-  const today = _isoDate(new Date());
+  if (!state.scheduleDate) state.scheduleDate = clubTodayStr();
+  const today = clubTodayStr();
 
   const savedScrollTop = content.querySelector('.sch-grid-scroll')?.scrollTop ?? 0;
 
@@ -254,8 +254,7 @@ export async function renderSchedule() {
   }
 
   // "Now" indicator — only on today, within operating hours
-  const _nowDate = new Date();
-  const nowMins = _nowDate.getHours() * 60 + _nowDate.getMinutes();
+  const nowMins = clubNowMin();
   const showNow = isToday && nowMins >= DAY_START && nowMins < DAY_END;
   const nowTop = topFor(nowMins);
   if (showNow) {

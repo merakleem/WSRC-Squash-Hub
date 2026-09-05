@@ -281,6 +281,19 @@ ok('repeat posts with days, weeks and player', rep && rep[1].repeat.weeks===4 &&
 ok('repeat undo op holds the created ids', window.__op?.type==='delete-ids' && window.__op.ids.length===4);
 ok('repeat toast counts created and skipped', window.__note[0]==='Added 4 bookings · 1 skipped' && window.__note[1]===true, JSON.stringify(window.__note));
 
+// ---- the page runs on the club's clock, not the device's ----
+{
+  state.scheduleDate = null;
+  state.currentUser.club_timezone = 'Pacific/Kiritimati';   // UTC+14, first to every date
+  await sched.renderSchedule(); await tick(120);
+  const expected = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Kiritimati', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  ok('the schedule opens on the club\'s today', state.scheduleDate === expected, state.scheduleDate + ' vs ' + expected);
+  delete state.currentUser.club_timezone;
+  state.scheduleDate = '2026-08-12';
+}
+
 } catch (e) { fails++; out.push('  THREW  '+e.message+'\n'+(e.stack||'').split('\n').slice(0,4).join('\n')); }
 document.getElementById('log').textContent = out.join('\n')+'\n\n'+(fails? fails+' FAILED':'ALL '+out.length+' PASSED');
 document.title = fails? 'FAIL':'PASS';

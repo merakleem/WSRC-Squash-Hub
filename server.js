@@ -73,7 +73,7 @@ app.get('/api/me', (req, res) => {
     // say so and offer the way back.
     if (req.session.viewingAs) viewing_as = player?.name || 'this player';
   }
-  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, viewing_as });
+  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, viewing_as, club_timezone: require('./lib/clock').getClubTimezone() });
 });
 
 // ===== API ROUTES =====

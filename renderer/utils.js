@@ -1,3 +1,5 @@
+import { state } from './state.js';
+
 // ===== UTILS =====
 export function esc(str) {
   if (str == null) return '';
@@ -98,3 +100,44 @@ document.getElementById('modalClose').addEventListener('click', () => modal.clos
 document.getElementById('modalOverlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('modalOverlay')) modal.close();
 });
+
+
+// ===== CLUB CLOCK =====
+// Everything stored is club wall-clock time, and the club's timezone is a
+// setting the admin controls (carried to the SPA on /api/me). "Now" and
+// "today" must come from here, never from new Date() maths - otherwise a
+// player abroad sees the wrong day, a Now line in the wrong place, and slots
+// going past at the wrong moment.
+export function clubNow(at = new Date()) {
+  const tz = state.currentUser?.club_timezone;
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz || undefined,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(at).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  } catch (_) {
+    // An unknown timezone string falls back to the device rather than crashing.
+    parts = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(at).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  }
+  const hour = parts.hour === '24' ? 0 : Number(parts.hour);
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: hour * 60 + Number(parts.minute),
+  };
+}
+
+/** Today's date at the club, 'YYYY-MM-DD'. */
+export function clubTodayStr(at) {
+  return clubNow(at).date;
+}
+
+/** Minutes since the club's midnight. */
+export function clubNowMin(at) {
+  return clubNow(at).minutes;
+}
