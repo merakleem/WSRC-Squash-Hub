@@ -82,23 +82,52 @@ export function toast(msg, type = 'default') {
 }
 
 // ===== MODAL =====
+// `sticky` opts a modal out of close-on-backdrop-click (the backdrop nudges
+// instead); `onRequestClose` intercepts every polite close (✕, Esc, backdrop)
+// so a modal can confirm before discarding work. modal.close() always closes.
 export const modal = {
-  open(title, bodyHTML, { wide = false, medium = false } = {}) {
+  _sticky: false,
+  _onRequestClose: null,
+  open(title, bodyHTML, { wide = false, medium = false, sticky = false, onRequestClose = null } = {}) {
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = bodyHTML;
     document.getElementById('modal').classList.toggle('modal-wide', wide);
     document.getElementById('modal').classList.toggle('modal-medium', medium && !wide);
     document.getElementById('modalOverlay').classList.add('open');
+    this._sticky = sticky;
+    this._onRequestClose = onRequestClose;
   },
   close() {
     document.getElementById('modal').classList.remove('modal-wide');
     document.getElementById('modalOverlay').classList.remove('open');
+    this._sticky = false;
+    this._onRequestClose = null;
+  },
+  requestClose() {
+    if (this._onRequestClose) this._onRequestClose();
+    else this.close();
   },
 };
 
-document.getElementById('modalClose').addEventListener('click', () => modal.close());
+// "I heard you, but no": a brief shake when a sticky modal's backdrop is clicked.
+function nudgeModal() {
+  const el = document.getElementById('modal');
+  el.classList.remove('nudge');
+  void el.offsetWidth; // restart the animation on repeat clicks
+  el.classList.add('nudge');
+  setTimeout(() => el.classList.remove('nudge'), 350);
+}
+
+document.getElementById('modalClose').addEventListener('click', () => modal.requestClose());
 document.getElementById('modalOverlay').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('modalOverlay')) modal.close();
+  if (e.target !== document.getElementById('modalOverlay')) return;
+  if (modal._sticky) { nudgeModal(); return; }
+  modal.close();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('modalOverlay').classList.contains('open')) {
+    modal.requestClose();
+  }
 });
 
 

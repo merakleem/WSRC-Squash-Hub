@@ -657,6 +657,7 @@ tbody td {
 .modal-overlay.open { display: flex; }
 
 .modal {
+  position: relative; /* in-modal layers (e.g. the discard confirm) anchor here */
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
@@ -8845,3 +8846,141 @@ body.is-viewing-as .app-container { height: 100%; }
   .ev-hero-name { font-size: 26px; }
   .ev-roster-cols, .ev-row-no, .ev-roster-foot { display: none; }
 }
+
+/* ===== MESSAGE PLAYERS MODAL (mp-) =====
+   Rich-text league email: a Quill editor restyled to the app's theme, and a
+   sticky modal that shakes off backdrop clicks instead of losing the draft. */
+@keyframes mp-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.modal.nudge { animation: mp-shake .3s ease; }
+
+.mp-recipients { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+.mp-skip { color: #a8710f; }
+.mp-label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mp-label-opt { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.mp-subject { height: 44px; border-radius: 10px; font-size: 14.5px; }
+.mp-subject:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(30, 39, 88, .1); }
+
+/* The shell wraps toolbar + editor so it reads as one form control. */
+.mp-editor { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
+.mp-editor .ql-toolbar.ql-snow { border: none; border-bottom: 1px solid #f0f3f7; background: #fbfcfd; padding: 6px 8px; font-family: inherit; }
+.mp-editor .ql-container.ql-snow { border: none; font-family: inherit; font-size: 14.5px; }
+.mp-editor .ql-editor { min-height: 200px; max-height: 320px; line-height: 1.6; color: var(--text); padding: 14px 16px; }
+.mp-editor .ql-editor.ql-blank::before { color: #93a2b5; font-style: normal; left: 16px; }
+.mp-editor .ql-snow .ql-stroke { stroke: #4a5568; }
+.mp-editor .ql-snow .ql-fill { fill: #4a5568; }
+.mp-editor .ql-snow .ql-picker { color: #4a5568; }
+.mp-editor .ql-snow.ql-toolbar button:hover .ql-stroke,
+.mp-editor .ql-snow.ql-toolbar button.ql-active .ql-stroke,
+.mp-editor .ql-snow .ql-picker-label:hover .ql-stroke { stroke: var(--primary); }
+.mp-editor .ql-snow.ql-toolbar button:hover .ql-fill,
+.mp-editor .ql-snow.ql-toolbar button.ql-active .ql-fill { fill: var(--primary); }
+.mp-editor .ql-snow.ql-toolbar button.ql-active { background: #eaefff; border-radius: 6px; }
+.mp-editor .ql-snow .ql-picker-label:hover,
+.mp-editor .ql-snow .ql-picker-item:hover,
+.mp-editor .ql-snow .ql-picker.ql-expanded .ql-picker-label { color: var(--primary); }
+.mp-editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-top: 1px solid #f0f3f7;
+  font-size: 11.5px;
+  color: #93a2b5;
+}
+
+.mp-attach { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface-2);
+  border: 1px solid #e7ebf2;
+  border-radius: 9px;
+  padding: 7px 8px 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 100%;
+}
+.mp-chip svg { width: 14px; height: 14px; flex: none; color: var(--text-muted); }
+.mp-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-chip-size { font-size: 11.5px; color: #93a2b5; flex: none; }
+.mp-chip-x {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.mp-chip-x:hover { background: #e7ebf2; }
+.mp-addfile {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px dashed #c8d0dd;
+  border-radius: 9px;
+  background: none;
+  color: #3550c8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mp-addfile:hover { background: var(--surface-2); border-color: #3550c8; }
+
+.mp-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 14px;
+  margin-top: 4px;
+  border-top: 1px solid #f0f3f7;
+}
+.mp-foot-left { min-width: 0; }
+.mp-err { margin: 0; }
+.mp-draftnote { font-size: 12px; color: #93a2b5; }
+.mp-foot-btns { margin-left: auto; display: flex; gap: 10px; flex: none; }
+
+/* In-modal discard confirmation: a veil over the draft, never a second modal. */
+.mp-discard {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, .72);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 5;
+}
+.mp-discard-card {
+  width: 360px;
+  max-width: 100%;
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 14px 34px rgba(28, 43, 58, .18);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mp-discard-title { font-family: 'Barlow', sans-serif; font-size: 17px; font-weight: 700; }
+.mp-discard-body { font-size: 13.5px; color: var(--text-muted); }
+.mp-discard-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }

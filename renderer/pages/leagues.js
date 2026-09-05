@@ -349,52 +349,131 @@ export function copyPublicLink(league) {
 export function openMessagePlayersModal(league) {
   const players = (league.players || []).filter((p) => p.player_email);
   const noEmailPlayers = (league.players || []).filter((p) => !p.player_email);
+  const attachments = [];
+  let quill = null;
 
-  modal.open('Message Players', `
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
-      Sending to <strong>${players.length}</strong> player${players.length !== 1 ? 's' : ''} with an email address on file.
-      ${noEmailPlayers.length ? `<span style="color:var(--warning)"> ${noEmailPlayers.length} player${noEmailPlayers.length !== 1 ? 's have' : ' has'} no email and will be skipped.</span>` : ''}
+  const fmtSize = (bytes) => {
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+  };
+
+  const hasDraft = () =>
+    !!(document.getElementById('fMsgSubject')?.value.trim() || quill?.getText().trim() || attachments.length);
+
+  // The confirmation is a layer inside the modal, not a second modal.open —
+  // that would tear down the editor and lose the draft it is guarding.
+  function showDiscardConfirm() {
+    if (document.getElementById('mpDiscard')) return;
+    const layer = document.createElement('div');
+    layer.id = 'mpDiscard';
+    layer.className = 'mp-discard';
+    layer.innerHTML = `
+      <div class="mp-discard-card">
+        <div class="mp-discard-title">Discard this message?</div>
+        <div class="mp-discard-body">Your subject, message and attachments will be lost.</div>
+        <div class="mp-discard-btns">
+          <button class="btn btn-outline" id="mpKeep">Keep editing</button>
+          <button class="btn btn-danger" id="mpDiscardBtn">Discard</button>
+        </div>
+      </div>`;
+    document.getElementById('modal').appendChild(layer);
+    document.getElementById('mpKeep').addEventListener('click', () => layer.remove());
+    document.getElementById('mpDiscardBtn').addEventListener('click', () => { layer.remove(); modal.close(); });
+  }
+
+  modal.open('Message players', `
+    <p class="mp-recipients">
+      Sending to <strong>${players.length} player${players.length !== 1 ? 's' : ''}</strong> with an email on file.
+      ${noEmailPlayers.length ? `<span class="mp-skip">${noEmailPlayers.length} player${noEmailPlayers.length !== 1 ? 's have' : ' has'} no email and will be skipped.</span>` : ''}
     </p>
     <div class="form-group">
-      <label>Subject</label>
-      <input class="form-control" id="fMsgSubject" type="text" placeholder="e.g. League night this week">
+      <label class="mp-label">Subject</label>
+      <input class="form-control mp-subject" id="fMsgSubject" type="text" placeholder="e.g. League night this week">
     </div>
     <div class="form-group">
-      <label>Message</label>
-      <textarea class="form-control" id="fMsgBody" rows="6" placeholder="Write your message here…" style="resize:vertical"></textarea>
-    </div>
-    <div class="form-group">
-      <label>Attachments <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input class="form-control" id="fMsgFile" type="file" style="flex:1">
-        <button class="btn btn-outline" id="fAddFile" type="button" style="white-space:nowrap;flex-shrink:0">Add</button>
+      <label class="mp-label">Message</label>
+      <div class="mp-editor">
+        <div id="fMsgEditor"></div>
+        <div class="mp-editor-foot">
+          <span>Formatting is kept in the email.</span>
+          <span id="mpWords" hidden></span>
+        </div>
       </div>
-      <div id="fAttachmentList" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
     </div>
-    <div id="fMsgError" class="form-error"></div>
-    <div class="form-actions">
-      <button class="btn btn-outline" id="fCancel">Cancel</button>
-      <button class="btn btn-primary" id="fSend">Send Email</button>
-    </div>`);
+    <div class="form-group">
+      <label class="mp-label">Attachments <span class="mp-label-opt">(optional)</span></label>
+      <div class="mp-attach" id="fAttachmentList"></div>
+      <input id="fMsgFile" type="file" hidden>
+    </div>
+    <div class="mp-foot">
+      <div class="mp-foot-left">
+        <span id="fMsgError" class="form-error mp-err"></span>
+        <span id="mpDraftNote" class="mp-draftnote" hidden>Draft in progress</span>
+      </div>
+      <div class="mp-foot-btns">
+        <button class="btn btn-outline" id="fCancel">Cancel</button>
+        <button class="btn btn-primary" id="fSend">Send email</button>
+      </div>
+    </div>`, {
+    medium: true,
+    sticky: true,
+    onRequestClose: () => {
+      if (!hasDraft()) return modal.close();
+      showDiscardConfirm();
+    },
+  });
 
-  const attachments = [];
+  quill = new Quill('#fMsgEditor', {
+    theme: 'snow',
+    placeholder: 'Write your message here…',
+    modules: { toolbar: [
+      [{ header: [false, 2, 3] }],
+      ['bold', 'italic', 'underline'],
+      [{ list: 'ordered' }, { list: 'bullet' }],
+      ['link'],
+      ['clean'],
+    ] },
+  });
+
+  function updateDraftBits() {
+    const words = quill.getText().trim().split(/\s+/).filter(Boolean).length;
+    const wordsEl = document.getElementById('mpWords');
+    if (wordsEl) {
+      wordsEl.hidden = words === 0;
+      wordsEl.textContent = `${words} word${words !== 1 ? 's' : ''}`;
+    }
+    const note = document.getElementById('mpDraftNote');
+    if (note) note.hidden = !hasDraft() || !!document.getElementById('fMsgError')?.textContent;
+  }
+  quill.on('text-change', updateDraftBits);
+  document.getElementById('fMsgSubject').addEventListener('input', updateDraftBits);
 
   function renderAttachmentList() {
     const list = document.getElementById('fAttachmentList');
     list.innerHTML = attachments.map((a, i) => `
-      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-subtle,#f4f6fb);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename)}</span>
-        <button class="btn btn-ghost btn-sm" data-remove="${i}" style="flex-shrink:0;margin-left:8px;color:var(--danger,#e74c3c)">Remove</button>
-      </div>`).join('');
+      <span class="mp-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+        <span class="mp-chip-name">${esc(a.filename)}</span>
+        <span class="mp-chip-size">${fmtSize(a.size)}</span>
+        <button class="mp-chip-x" data-remove="${i}" aria-label="Remove">&times;</button>
+      </span>`).join('') + `
+      <button class="mp-addfile" id="fAddFile" type="button">+ Add file</button>`;
+
     list.querySelectorAll('[data-remove]').forEach((btn) => {
       btn.addEventListener('click', () => {
         attachments.splice(Number(btn.dataset.remove), 1);
         renderAttachmentList();
+        updateDraftBits();
       });
     });
+    document.getElementById('fAddFile').addEventListener('click', () => {
+      document.getElementById('fMsgFile').click();
+    });
   }
+  renderAttachmentList();
 
-  document.getElementById('fAddFile').addEventListener('click', async () => {
+  document.getElementById('fMsgFile').addEventListener('change', async () => {
     const fileInput = document.getElementById('fMsgFile');
     if (!fileInput.files.length) return;
     const file = fileInput.files[0];
@@ -404,29 +483,35 @@ export function openMessagePlayersModal(league) {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    attachments.push({ filename: file.name, content: base64 });
+    attachments.push({ filename: file.name, content: base64, size: file.size });
     fileInput.value = '';
     renderAttachmentList();
+    updateDraftBits();
   });
 
-  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fCancel').addEventListener('click', () => modal.requestClose());
   document.getElementById('fSend').addEventListener('click', async () => {
     const subject = document.getElementById('fMsgSubject').value.trim();
-    const body = document.getElementById('fMsgBody').value.trim();
+    const text = quill.getText().trim();
     const errEl = document.getElementById('fMsgError');
-    if (!subject) { errEl.textContent = 'Subject is required.'; return; }
-    if (!body) { errEl.textContent = 'Message is required.'; return; }
+    if (!subject) { errEl.textContent = 'Subject is required.'; updateDraftBits(); return; }
+    if (!text) { errEl.textContent = 'Message is required.'; updateDraftBits(); return; }
     errEl.textContent = '';
     document.getElementById('fSend').disabled = true;
     document.getElementById('fSend').textContent = 'Sending…';
     try {
-      const data = await window.api.messageLeaguePlayers(league.id, { subject, body, attachments });
+      const data = await window.api.messageLeaguePlayers(league.id, {
+        subject,
+        body: text,
+        bodyHtml: quill.getSemanticHTML(),
+        attachments: attachments.map(({ filename, content }) => ({ filename, content })),
+      });
       modal.close();
       toast(`Email sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}`, 'success');
     } catch (e) {
       errEl.textContent = e.message;
       document.getElementById('fSend').disabled = false;
-      document.getElementById('fSend').textContent = 'Send Email';
+      document.getElementById('fSend').textContent = 'Send email';
     }
   });
 }

@@ -6,6 +6,7 @@ const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
 const { sendBatch, isConfigured: emailConfigured, appUrl } = require('../lib/email');
+const sanitizeHtml = require('sanitize-html');
 
 const router = express.Router();
 
@@ -86,9 +87,22 @@ router.put('/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) => 
   res.json({ ok: true, count });
 }));
 
+// The body arrives as editor HTML (bodyHtml) with a plain-text copy (body).
+// Admin-authored, but it lands in players' inboxes, so it goes through a
+// strict allowlist matching exactly what the editor can produce.
+function sanitizeMessageHtml(bodyHtml) {
+  return sanitizeHtml(bodyHtml, {
+    allowedTags: ['p', 'br', 'strong', 'em', 'u', 'b', 'i', 'ol', 'ul', 'li', 'a', 'h2', 'h3'],
+    allowedAttributes: { a: ['href', 'target', 'rel'] },
+    allowedSchemes: ['http', 'https', 'mailto'],
+    transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener' }) },
+  });
+}
+router.sanitizeMessageHtml = sanitizeMessageHtml;
+
 router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
-  const { subject, body, attachments } = req.body;
-  if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required' });
+  const { subject, body, bodyHtml, attachments } = req.body;
+  if (!subject || !(bodyHtml || body)) return res.status(400).json({ error: 'Subject and body are required' });
 
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
@@ -96,14 +110,17 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
   const recipients = players.filter((p) => p.player_email);
   if (recipients.length === 0) return res.json({ sent: 0 });
 
-  const htmlBody = body
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
+  const html = bodyHtml
+    ? sanitizeMessageHtml(bodyHtml)
+    : `<p>${body
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>')}</p>`;
 
   const { sent, failed } = await sendBatch(recipients.map((player) => ({
     to: [player.player_email],
     subject,
-    html: `<p>${htmlBody}</p>`,
+    html,
+    ...(body ? { text: body } : {}),
     ...(attachments && attachments.length ? { attachments } : {}),
   })));
 
