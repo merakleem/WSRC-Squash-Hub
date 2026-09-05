@@ -5253,7 +5253,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   height: 2px;
   background: #c0392b;
   pointer-events: none;
-  z-index: 3;
+  /* Above the booking overlay (5) so the moment reads across busy courts,
+     below the selection toolbar (14). */
+  z-index: 6;
 }
 /* ===== FORM ROW (two-column) ===== */
 .form-row {

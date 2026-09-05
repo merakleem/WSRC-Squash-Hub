@@ -58,6 +58,12 @@ ok('blocks are tinted toward their type colour', block('11').style.background!==
 ok('a 15-minute block lays out as a row', block('15').classList.contains('sch-block--short'));
 ok('repeating bookings show the glyph', $$('.sch-block-rep').length===3, $$('.sch-block-rep').length);
 ok('editable blocks carry four edge handles', block('11').querySelectorAll('.sch-h').length===4);
+{
+  // The now line must paint over the bookings, under the selection toolbar.
+  const z = (sel) => { const el=document.createElement('div'); el.className=sel; document.body.appendChild(el); const v=Number(getComputedStyle(el).zIndex)||0; el.remove(); return v; };
+  ok('the now line paints above the bookings', z('sch-now-line') > z('sch-overlay'), `line ${z('sch-now-line')} vs overlay ${z('sch-overlay')}`);
+  ok('but below the selection toolbar', z('sch-now-line') < z('sch-tb'), `line ${z('sch-now-line')} vs toolbar ${z('sch-tb')}`);
+}
 ok('help line carries the shortcuts', $('.sch-topbar-help').textContent.includes('pull its edges to resize'));
 ok('week strip is Monday-first', $$('.cb-day .cb-day-wd')[0].textContent==='M' && $$('.cb-day .cb-day-n')[0].textContent==='10');
 ok('legend lists the day’s types', $$('.sch-legend-item').length===5, $$('.sch-legend-item').length);
