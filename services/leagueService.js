@@ -56,7 +56,7 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
     const oneRound = generateModernRoundRobin(playerIds);
     const allRounds = [];
     for (let rep = 0; rep < numRounds; rep++) allRounds.push(...oneRound);
-    return { divisionId: divisionIds[d], rounds: allRounds };
+    return { divisionId: divisionIds[d], level: d + 1, rounds: allRounds };
   });
 
   const totalWeeks = Math.max(...divSchedules.map((d) => d.rounds.length));
@@ -74,7 +74,7 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
 
     const weekMatches = [];
 
-    for (const { divisionId, rounds } of divSchedules) {
+    for (const { divisionId, level, rounds } of divSchedules) {
       if (w >= rounds.length) continue;
       const round = rounds[w];
 
@@ -85,15 +85,20 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
         run('INSERT INTO week_byes (week_id, player_id, division_id) VALUES (?, ?, ?)', [weekId, playerId, divisionId]);
       }
       for (const [p1Id, p2Id] of round.matches) {
-        weekMatches.push({ matchupId, divId: divisionId, p1Id, p2Id });
+        weekMatches.push({ matchupId, divId: divisionId, level, p1Id, p2Id });
       }
     }
 
-    // Shuffle then assign courts/times
+    // Shuffle for fair time slots, then order by division: courts are dealt in
+    // club order below, so each time slot hands its lowest-numbered courts to
+    // the highest division playing in it (court 1 to Division 1). The sort is
+    // stable, so the shuffle still decides who plays early or late within a
+    // division.
     for (let i = weekMatches.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
     }
+    weekMatches.sort((a, b) => a.level - b.level);
     for (let i = 0; i < weekMatches.length; i++) {
       const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
         // Creating a league is creating scheduled matches. Each row carries its
@@ -232,17 +237,22 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
             [leagueId, matchup.team2, divId]
           );
           if (p1 && p2) {
-            weekMatches.push({ matchupId, divId, p1Id: p1.player_id, p2Id: p2.player_id });
+            weekMatches.push({ matchupId, divId, level: d + 1, p1Id: p1.player_id, p2Id: p2.player_id });
           }
         }
       }
     }
 
-    // Shuffle matches randomly so no team/player always gets the same time slot
+    // Shuffle so no team/player always gets the same time slot, then order by
+    // division: courts are dealt in club order below, so each time slot hands
+    // its lowest-numbered courts to the highest division playing in it
+    // (court 1 to Division 1). The sort is stable, so the shuffle still
+    // decides who plays early or late within a division.
     for (let i = weekMatches.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
     }
+    weekMatches.sort((a, b) => a.level - b.level);
 
     // Assign courts and times: stagger across courts
     for (let i = 0; i < weekMatches.length; i++) {
