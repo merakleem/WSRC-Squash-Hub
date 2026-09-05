@@ -626,7 +626,9 @@ export async function renderSchedule() {
         }
         openBookingPanel({
           mode,
-          host: content.querySelector('.sch-page'),
+          // The panel covers the whole main column, top bar included, so its
+          // scrim leaves no live buttons above the tint.
+          host: content.closest('.main-wrapper') || content.querySelector('.sch-page'),
           courts, slots: enriched, types: bookingTypes, players: _playersCache,
           ...extra,
           onRange: (courtIds, start, dur) => {
