@@ -91,7 +91,8 @@ function _onKey(e) {
  * start/dur pre-filled range       (new)
  * slot      the booking being edited (edit)
  * onRange   (courtIds,start,dur) => void — lets the grid draw the pending range
- * onDone    () => void — a write landed; the caller should re-render
+ * onDone    (selectId) => void — a write landed; re-render and select that block
+ * notify    (text, undoable) => void — the page's toast
  * onClose   () => void
  * pushUndo  (op) => void
  */
@@ -134,6 +135,7 @@ export async function openBookingPanel(opts) {
     busy: false,
     onRange: opts.onRange || null,
     onDone: opts.onDone || null,
+    notify: opts.notify || null,
     onClose: opts.onClose || null,
     pushUndo: opts.pushUndo || (() => {}),
   };
@@ -180,20 +182,39 @@ function clashCount() {
   return n;
 }
 
-// A multi-court booking is one block of court, not a scattering: the schedule
-// stores it as a group of adjacent rows and the server refuses anything else.
-// Said here as well, because chips make a scattered pick easy to make.
-function nonAdjacent() {
-  if (p.courtIds.length < 2) return false;
-  const idxs = p.courtIds
-    .map((id) => p.courts.findIndex((c) => c.id === id))
-    .filter((i) => i >= 0)
-    .sort((a, b) => a - b);
-  return idxs.some((v, i) => i > 0 && v !== idxs[i - 1] + 1);
+// Court picks are read as contiguous runs. Adjacent courts make one wide
+// booking; a scattered pick makes one booking per run when creating, and is
+// not saveable when editing - an existing booking is a single block of court.
+function courtIdx(id) {
+  return p.courts.findIndex((c) => c.id === id);
 }
-
-function blocked() {
-  return !p.courtIds.length || nonAdjacent();
+function sortedCourtIds() {
+  return [...p.courtIds].sort((a, b) => courtIdx(a) - courtIdx(b));
+}
+function contiguousRuns() {
+  const runs = [];
+  sortedCourtIds().forEach((id) => {
+    const last = runs[runs.length - 1];
+    if (last && courtIdx(last[last.length - 1]) + 1 === courtIdx(id)) last.push(id);
+    else runs.push([id]);
+  });
+  return runs;
+}
+function isContiguous() {
+  return contiguousRuns().length <= 1;
+}
+function canSave() {
+  return p.courtIds.length > 0 && !(p.mode === 'edit' && !isContiguous());
+}
+function courtsHint() {
+  if (!p.courtIds.length) return 'Pick at least one';
+  if (p.courtIds.length === 1) return '';
+  if (isContiguous()) return `One booking across ${p.courtIds.length} courts`;
+  return p.mode === 'edit' ? 'Courts must sit side by side' : 'Separate bookings for non-adjacent courts';
+}
+// What the block will be called: the label, else the first player, else the type.
+function savedTitle() {
+  return p.name.trim() || p.chosen[0]?.name || typeOf(p.typeId)?.name || 'Standard';
 }
 
 function searchResults() {
@@ -276,9 +297,11 @@ function detailsHTML() {
 
   return `
     <div class="sch-panel-section">
-      <span class="sch-panel-label">Courts</span>
+      <div class="sch-panel-labelrow">
+        <span class="sch-panel-label">Courts</span>
+        ${courtsHint() ? `<span class="sch-panel-courtshint">${esc(courtsHint())}</span>` : ''}
+      </div>
       <div class="sch-chiprow">${courtChips}</div>
-      ${nonAdjacent() ? '<div class="sch-panel-block">Courts in one booking have to be next to each other.</div>' : ''}
     </div>
 
     <div class="sch-panel-section">
@@ -388,7 +411,7 @@ function deleteHTML() {
     <div class="sch-del">
       <span class="sch-del-prompt">${repeats
         ? 'This is a repeating booking. Which events should be deleted?'
-        : 'Delete this booking and release the court? This cannot be undone.'}</span>
+        : 'Delete this booking and release the court? You can undo right after.'}</span>
       ${repeats ? `
         <div class="sch-del-scopes">
           <button class="sch-del-btn" data-del="this">This event</button>
@@ -418,7 +441,7 @@ function footHTML() {
       </div>
       <div class="sch-panel-btns">
         <button class="sch-panel-secondary" id="schPanelSecondary">${secondary}</button>
-        <button class="sch-panel-primary" id="schPanelPrimary"${p.busy || blocked() ? ' disabled' : ''}>${p.busy ? 'Saving…' : primary}</button>
+        <button class="sch-panel-primary" id="schPanelPrimary"${p.busy || !canSave() ? ' disabled' : ''}>${p.busy ? 'Saving…' : primary}</button>
       </div>
       ${isEdit && !p.askingDelete ? `<button class="sch-panel-del" id="schPanelDelete">Delete booking</button>` : ''}
     </div>`;
@@ -561,12 +584,10 @@ function bookingData() {
 }
 
 async function submit() {
-  if (!p || p.busy || blocked()) return;
+  if (!p || p.busy || !canSave()) return;
 
   // Everything this needs is read before the first await. closeBookingPanel()
-  // drops the panel state, so anything read after it would be reading null -
-  // and the throw would land in the catch below, leaving the caller thinking
-  // the write failed when it had already succeeded.
+  // drops the panel state, so anything read after it would be reading null.
   const mode = p.mode;
   const repeating = mode === 'new' && p.step === 2;
   if (repeating && !p.dows.length) {
@@ -574,9 +595,10 @@ async function submit() {
     return;
   }
 
-  const data = bookingData();
-  const courtCount = p.courtIds.length;
-  const editId = p.editSlot?.id;
+  const base = bookingData();
+  const runs = contiguousRuns();
+  const title = savedTitle();
+  const editSlot = p.editSlot;
   const repeat = {
     startDate: state.scheduleDate,
     daysOfWeek: [...p.dows],
@@ -584,32 +606,54 @@ async function submit() {
     conflictMode: p.conflict,
   };
   const onDone = p.onDone;
+  const notify = p.notify || ((text) => toast(text));
   const pushUndo = p.pushUndo;
+  const runData = (run) => ({ ...base, courtId: run[0], courtIds: run.length > 1 ? run : null });
 
   p.busy = true;
   repaintFoot();
 
   try {
     if (mode === 'edit') {
-      await window.api.updateBooking(editId, data);
+      // An edit is contiguous by canSave(), so runs[0] is the whole selection.
+      pushUndo({ type: 'update', id: editSlot.id, oldData: {
+        courtId: editSlot.courtId, courtIds: editSlot.courtIds || null,
+        date: editSlot.date || state.scheduleDate, startTime: editSlot.startTime,
+        durationMinutes: editSlot.durationMinutes, bookingTypeId: editSlot.bookingTypeId || null,
+        name: editSlot.name || null, info: editSlot.info || null,
+        playerIds: (editSlot.players || []).map((x) => x.id),
+      } });
+      await window.api.updateBooking(editSlot.id, runData(runs[0]));
       closeBookingPanel();
-      toast('Booking updated');
+      notify(`Saved ${title}`, false);
+      onDone?.(editSlot.id);
     } else if (repeating) {
-      const result = await window.api.addRepeatBookings({ ...data, repeat });
-      closeBookingPanel();
-      let msg = `${result.created} booking${result.created === 1 ? '' : 's'} created`;
-      if (result.skipped > 0) msg += `, ${result.skipped} skipped`;
-      toast(msg);
-      if (result.leagueConflicts?.length) {
-        toast(`${result.leagueConflicts.length} date(s) skipped — league match conflict`, 'error');
+      let created = 0, skipped = 0;
+      const ids = [];
+      for (const run of runs) {
+        const r = await window.api.addRepeatBookings({ ...runData(run), repeat });
+        created += r.created;
+        skipped += r.skipped;
+        if (Array.isArray(r.ids)) ids.push(...r.ids);
       }
-    } else {
-      const created = await window.api.addBooking(data);
-      if (created?.id) pushUndo({ type: 'delete-ids', ids: [created.id] });
+      if (ids.length) pushUndo({ type: 'delete-ids', ids });
       closeBookingPanel();
-      toast(courtCount > 1 ? `${courtCount} courts booked` : 'Booking added');
+      let msg = `Added ${created} booking${created === 1 ? '' : 's'}`;
+      if (skipped) msg += ` · ${skipped} skipped`;
+      notify(msg, ids.length > 0);
+      onDone?.(ids[0] ?? null);
+    } else {
+      // One booking per contiguous run of courts.
+      const madeIds = [];
+      for (const run of runs) {
+        const made = await window.api.addBooking(runData(run));
+        if (made?.id) madeIds.push(made.id);
+      }
+      if (madeIds.length) pushUndo({ type: 'delete-ids', ids: madeIds });
+      closeBookingPanel();
+      notify(runs.length > 1 ? `Added ${runs.length} bookings` : `Added ${title}`, madeIds.length > 0);
+      onDone?.(madeIds[0] ?? null);
     }
-    onDone?.();
   } catch (err) {
     toast(err.message, 'error');
     if (p) { p.busy = false; repaintFoot(); }
@@ -620,15 +664,34 @@ async function doDelete(scope) {
   if (!p || p.busy) return;
   const slot = p.editSlot;
   const onDone = p.onDone;
+  const notify = p.notify || ((text) => toast(text));
+  const pushUndo = p.pushUndo;
+  const title = slot.title || savedTitle();
   let opts;
   if (scope === 'future') opts = { scope: 'future', groupId: slot.repeatGroupId, date: slot.date || state.scheduleDate };
   else if (scope === 'all') opts = { scope: 'all', groupId: slot.repeatGroupId };
 
   try {
     await window.api.deleteBooking(slot.id, opts);
+    if (!opts) {
+      // A single event can be undone; a scope delete removes rows this page
+      // has never seen, so its toast makes no promise it cannot keep.
+      pushUndo({ type: 'recreate', bookings: [{
+        courtId: slot.courtId, courtIds: slot.courtIds || null,
+        date: slot.date || state.scheduleDate, startTime: slot.startTime,
+        durationMinutes: slot.durationMinutes, bookingTypeId: slot.bookingTypeId || null,
+        name: slot.name || null, info: slot.info || null,
+        players: slot.players || [],
+      }] });
+    }
     closeBookingPanel();
-    toast('Booking deleted');
-    onDone?.();
+    notify(
+      scope === 'future' ? 'Deleted this and all future events'
+        : scope === 'all' ? 'Deleted all events'
+        : `Deleted ${title}`,
+      !opts
+    );
+    onDone?.(null);
   } catch (err) {
     toast(err.message, 'error');
   }

@@ -4637,7 +4637,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .sch-grid-scroll {
   flex: 1;
   overflow: auto;
+  scrollbar-width: none;
 }
+.sch-grid-scroll::-webkit-scrollbar { width: 0; height: 0; }
 .sch-grid-sticky {
   position: sticky;
   top: 0;
@@ -4689,12 +4691,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .sch-courts-row--admin {
   cursor: pointer;
 }
-.sch-courts-row--admin .sch-booking:not(.sch-booking-league):not(.sch-booking-tournament) {
-  cursor: pointer;
-}
-.sch-courts-row--admin .sch-booking--selected:not(.sch-booking-league) {
-  cursor: grab;
-}
 .sch-court-col {
   flex: 1;
   min-width: var(--court-w, 200px);
@@ -4745,77 +4741,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   white-space: nowrap;
 }
 
-/* The marquee is a different gesture: it selects bookings rather than making one. */
-.sch-drag-overlay {
-  position: absolute;
-  background: rgba(96, 165, 250, 0.12);
-  border: 2px solid rgba(96, 165, 250, 0.55);
-  border-radius: 6px;
-  pointer-events: none;
-  z-index: 10;
-  box-sizing: border-box;
-}
-.sch-booking--selected {
-  outline: 2px solid #60a5fa;
-  outline-offset: -2px;
-  filter: brightness(1.1);
-  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.35), 0 0 12px rgba(96, 165, 250, 0.4);
-}
-.sch-context-menu {
-  position: fixed;
-  background: #fff;
-  border: 1px solid rgba(0,0,0,0.1);
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.14);
-  padding: 4px;
-  z-index: 2000;
-  min-width: 180px;
-}
-.sch-context-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  background: none;
-  border-radius: 5px;
-  font-size: 13px;
-  cursor: pointer;
-  color: var(--danger);
-  white-space: nowrap;
-}
-.sch-context-item:hover { background: rgba(192, 57, 43, 0.07); }
-.sch-context-item--neutral { color: var(--text); }
-.sch-context-item--neutral:hover { background: rgba(0,0,0,0.05); }
-.sch-booking--moving {
-  opacity: 0.25;
-  pointer-events: none;
-}
-.sch-move-preview {
-  position: absolute;
-  border-radius: 8px;
-  pointer-events: none;
-  z-index: 10;
-  opacity: 0.85;
-  box-sizing: border-box;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.22);
-}
-.sch-paste-ghost {
-  position: absolute;
-  border-radius: 8px;
-  pointer-events: none;
-  z-index: 10;
-  opacity: 0.6;
-  box-sizing: border-box;
-  border: 2px dashed rgba(255,255,255,0.7);
-  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
-}
-.sch-court-checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-}
 .sch-now-label {
   position: absolute;
   right: 8px;
@@ -4843,93 +4768,8 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   height: 2px;
   background: #c0392b;
   pointer-events: none;
-  z-index: 5;
+  z-index: 3;
 }
-/* A muted card with the type colour as a left bar. The admin's chosen colour is
-   an accent, never the fill - a wall of saturated blocks was the hardest thing
-   to read on the old grid. */
-.sch-booking {
-  position: absolute;
-  left: 6px;
-  right: 7px;
-  border-radius: 8px;
-  padding: 5px 10px;
-  overflow: hidden;
-  box-sizing: border-box;
-  background: #f4f6fa;
-  border-left: 3px solid var(--type-color, #3550c8);
-  cursor: default;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.sch-booking:hover { background: #eef2fa; }
-/* A quarter hour is too short for two stacked lines, so it reads across. */
-.sch-booking--short {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  border-radius: 5px;
-}
-.sch-booking--short .sch-booking-title { flex: 1; min-width: 0; }
-.sch-booking--short .sch-booking-time { order: 2; flex-shrink: 0; }
-.sch-booking-repeat {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  color: #aab4c5;
-  display: inline-flex;
-  pointer-events: none;
-}
-.sch-booking-repeat svg { width: 11px; height: 11px; }
-.sch-booking-time {
-  font-size: 10px;
-  font-weight: 600;
-  color: #93a2b5;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sch-booking-title {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.15;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sch-booking-info {
-  font-size: 11px;
-  color: #8793ab;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 1px;
-}
-.sch-booking-edit-btn {
-  position: absolute;
-  bottom: 4px;
-  right: 9px;
-  border: none;
-  background: none;
-  padding: 0;
-  font-family: inherit;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: #3550c8;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity .12s;
-  z-index: 4;
-}
-.sch-booking:hover .sch-booking-edit-btn { opacity: 1; }
-
 /* ===== FORM ROW (two-column) ===== */
 .form-row {
   display: flex;
@@ -7840,7 +7680,7 @@ body.is-viewing-as .app-container { height: 100%; }
   font-size: 14.5px;
 }
 .sch-panel-primary:hover:not(:disabled) { background: var(--primary-hover); }
-.sch-panel-primary:disabled { background: #e2e6ee; color: #93a2b5; cursor: default; }
+.sch-panel-primary:disabled { opacity: .4; cursor: default; }
 .sch-panel-del {
   padding: 12px 0;
   border-radius: 10px;
@@ -7854,14 +7694,221 @@ body.is-viewing-as .app-container { height: 100%; }
 }
 .sch-panel-del:hover { background: #fdf1ef; }
 
-/* Unlike the overlap warning, this one stops the save: the schedule cannot
-   store a booking whose courts are not next to each other. */
-.sch-panel-block {
-  padding: 9px 12px;
-  border-radius: 9px;
-  background: #fdf1ef;
-  border: 1px solid #f0d4d0;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #a5352a;
+
+/* ===== SCHEDULE EDITING SYSTEM =====
+   One overlay carries every block, so a booking across several courts is one
+   wide block. Colours come inline from the booking's type; the rules here are
+   the parts every block shares. */
+.sch-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
 }
+.sch-block {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border-left: 3px solid #3550c8;
+  padding: 5px 10px;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  transition: box-shadow .15s;
+}
+.sch-block--short {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 5px;
+}
+.sch-block--sel {
+  outline: 2px solid #5b7cf9;
+  outline-offset: -1px;
+  box-shadow: 0 4px 14px rgba(53, 80, 200, .18);
+  z-index: 6;
+}
+.sch-block--live {
+  outline: 2px solid #5b7cf9;
+  outline-offset: -1px;
+  box-shadow: 0 14px 30px rgba(28, 43, 58, .22);
+  opacity: .96;
+  z-index: 12;
+  cursor: grabbing;
+  transition: none;
+}
+.sch-block--bad { outline-color: #c0392b; }
+.sch-block--ghostcopy { opacity: .55; }
+.sch-block-time {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sch-block-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1c2b3a;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sch-block-info {
+  font-size: 11px;
+  color: #6b7e93;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sch-block-rep {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: inline-flex;
+  pointer-events: none;
+}
+.sch-block-rep svg { width: 11px; height: 11px; }
+
+/* Edge hit zones. No visible grips - the cursor change is the affordance. */
+.sch-h { position: absolute; z-index: 2; }
+.sch-h--top    { left: 10px; right: 10px; top: -2px;    height: 7px; cursor: ns-resize; }
+.sch-h--bottom { left: 10px; right: 10px; bottom: -2px; height: 7px; cursor: ns-resize; }
+.sch-h--left   { top: 8px; bottom: 8px; left: -1px;  width: 7px; cursor: ew-resize; }
+.sch-h--right  { top: 8px; bottom: 8px; right: -2px; width: 7px; cursor: ew-resize; }
+
+/* The veil dims what has already gone by; blocks still read through it. */
+.sch-veil {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  background: rgba(250, 251, 253, .72);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Floating toolbar on the selected booking. */
+.sch-tb {
+  position: absolute;
+  z-index: 14;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 9px;
+  box-shadow: 0 8px 22px rgba(28, 43, 58, .16);
+}
+.sch-tb[hidden] { display: none; }
+.sch-tb-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7e93;
+  cursor: pointer;
+}
+.sch-tb-btn svg { width: 14px; height: 14px; }
+.sch-tb-btn:hover { background: #f0f3f7; color: #1c2b3a; }
+.sch-tb-btn--danger { color: #a5352a; }
+.sch-tb-btn--danger:hover { background: #fdf1ef; color: #a5352a; }
+.sch-tb-rule { width: 1px; height: 16px; background: #e7ebf2; }
+
+/* Right-click menus, for a booking or an empty slot. */
+.sch-menu-back { position: fixed; inset: 0; z-index: 29; }
+.sch-menu {
+  position: fixed;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 10px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 210px;
+  box-shadow: 0 14px 30px rgba(28, 43, 58, .16);
+}
+.sch-menu-head {
+  padding: 6px 10px 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #93a2b5;
+  border-bottom: 1px solid #f0f3f7;
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.sch-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1c2b3a;
+  cursor: pointer;
+  text-align: left;
+}
+.sch-menu-item:hover:not(:disabled) { background: #f4f6fa; }
+.sch-menu-item:disabled { color: #c8d0dd; cursor: default; }
+.sch-menu-item--danger { color: #a5352a; }
+.sch-menu-key { margin-left: auto; font-size: 11px; font-weight: 500; color: #aab4c5; }
+
+/* The page's toast: dark, bottom-centre, with Undo when it applies. */
+.sch-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
+  border-radius: 10px;
+  background: #1c2b3a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 12px 30px rgba(28, 43, 58, .3);
+}
+.sch-toast-undo {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #9fb3ff;
+  cursor: pointer;
+}
+
+/* The Courts hint sits opposite the label: what this pick will make. */
+.sch-panel-courtshint { margin-left: auto; font-size: 12px; color: #93a2b5; }

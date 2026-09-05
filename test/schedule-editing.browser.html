@@ -1,0 +1,259 @@
+<!-- Drives the real schedule + panel modules in a browser and asserts the
+     editing-system handoff's behaviour. Serve the repo root and open
+     /test/schedule-editing.browser.html - the title becomes PASS or FAIL. -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../renderer/styles.css">
+<style>html,body{margin:0;height:100%}.app-container{display:flex;height:100%}.sidebar{width:230px;flex:none}
+.main-wrapper{flex:1;display:flex;flex-direction:column;min-width:0}.topbar{height:60px;display:flex;align-items:center;padding:0 26px;flex:none}
+.topbar-actions{margin-left:auto;display:flex;gap:12px}.content{flex:1;min-height:0;position:relative}</style></head>
+<body><div class="app-container"><aside class="sidebar"></aside><div class="main-wrapper">
+<header class="topbar"><h1 id="pageTitle"></h1><div class="topbar-actions" id="topbarActions"></div></header>
+<main class="content" id="mainContent"></main></div></div>
+<div id="modalOverlay" style="display:none"><div id="modal"><div id="modalTitle"></div><div id="modalBody"></div><button id="modalClose"></button></div></div>
+<div id="toastContainer"></div><pre id="log" style="position:fixed;inset:0;background:#fff;z-index:999;font:12px monospace;padding:12px;white-space:pre-wrap;overflow:auto"></pre>
+<script type="module">
+const out=[]; let fails=0;
+const ok=(name,cond,extra='')=>{ if(!cond) fails++; out.push((cond?'  PASS  ':'  FAIL  ')+name+(extra!==''?'  ['+extra+']':'')); };
+window.addEventListener('error',(e)=>{ fails++; out.push('  WINERR  '+e.message); });
+try {
+const payload = await (await fetch('schedule-payload.json')).json();
+payload.slots.push(
+  { id:'m_77', source:'league', courtId:4, startTime:'11:00', durationMinutes:45,
+    title:'League Match', info:'A vs B', color:'#6b7589', players:[], repeatGroupId:null,
+    date:'2026-08-12', bookingTypeId:null, name:null },
+  { id:'t_5', source:'tournament', courtId:5, startTime:'12:00', durationMinutes:60,
+    title:'Tournament', info:'C vs D', color:'#7c3aed', players:[], repeatGroupId:null,
+    date:'2026-08-12', bookingTypeId:null, name:null });
+const PLAYERS = ['Sofia Duarte','Marcus Lang','Priya Raman','Tom Beckett','Elena Sorokin','Dev Patel','Ruth Okonjo','Callum Reid','James Whitfield'].map((name,i)=>({id:i+1,name}));
+const calls=[];
+window.api = { getSchedule:async()=>payload, getCourts:async()=>payload.courts,
+  getBookingTypes:async()=>payload.types, getPlayers:async()=>PLAYERS,
+  addBooking:async(d)=>{calls.push(['addBooking',d]); return {id:900+calls.length};},
+  addRepeatBookings:async(d)=>{calls.push(['addRepeatBookings',d]); return {created:4,skipped:1,ids:[701,702,703,704]};},
+  updateBooking:async(id,d)=>{calls.push(['updateBooking',id,d]); return {};},
+  deleteBooking:async(id,o)=>{calls.push(['deleteBooking',id,o]); return {};},
+  updateMatchTiming:async(d)=>{calls.push(['updateMatchTiming',d]); return {};} };
+let cardOpened=null;
+window.openMatchCard=(id)=>{cardOpened=id;}; window.navigate=()=>{};
+const { state } = await import('../renderer/state.js');
+state.currentUser={role:'admin',playerId:null}; state.scheduleDate='2026-08-12';
+const sched = await import('../renderer/schedule.js');
+const panel = await import('../renderer/schedulePanel.js');
+await sched.renderSchedule();
+await new Promise(r=>setTimeout(r,100));
+
+const $=(s)=>document.querySelector(s), $$=(s)=>[...document.querySelectorAll(s)];
+const tick=(ms=40)=>new Promise(r=>setTimeout(r,ms));
+const row=()=>$('.sch-courts-row');
+const block=(id)=>document.querySelector(`.sch-block[data-slot="${id}"]`);
+const yFor=(m)=>row().getBoundingClientRect().top+((m-360)/30)*38;
+const me=(t,x,y,el,init={})=> (el||document).dispatchEvent(new MouseEvent(t,{bubbles:true,clientX:x,clientY:y,button:0,...init}));
+const key=(k,init={})=>document.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,...init}));
+const toastText=()=>$('#schToast span')?.textContent||'';
+
+// ---- rendering ----
+ok('one overlay holds every block', $$('.sch-overlay .sch-block').length===17, $$('.sch-overlay .sch-block').length);
+ok('a multi-court booking is one wide block', !!block('11') && block('11').style.width.includes('40%'), block('11')?.style.width);
+ok('its time line names the court span', block('11').querySelector('.sch-block-time').textContent.includes('· Court 3–4'));
+ok('blocks are tinted toward their type colour', block('11').style.background!=='' && block('11').style.background!=='rgb(244, 246, 250)', block('11').style.background);
+ok('a 15-minute block lays out as a row', block('15').classList.contains('sch-block--short'));
+ok('repeating bookings show the glyph', $$('.sch-block-rep').length===3, $$('.sch-block-rep').length);
+ok('editable blocks carry four edge handles', block('11').querySelectorAll('.sch-h').length===4);
+ok('help line carries the shortcuts', $('.sch-topbar-help').textContent.includes('pull its edges to resize'));
+ok('week strip is Monday-first', $$('.cb-day .cb-day-wd')[0].textContent==='M' && $$('.cb-day .cb-day-n')[0].textContent==='10');
+ok('legend lists the day’s types', $$('.sch-legend-item').length===5, $$('.sch-legend-item').length);
+
+// ---- select ----
+let r=block('11').getBoundingClientRect();
+me('mousedown', r.left+60, r.top+30, block('11')); me('mouseup', r.left+60, r.top+30);
+await tick();
+ok('click selects the block', block('11').classList.contains('sch-block--sel'));
+ok('the toolbar appears', !$('#schToolbar').hidden);
+ok('toolbar sits above the block', parseFloat($('#schToolbar').style.top) < parseFloat(block('11').style.top));
+key('Escape'); await tick();
+ok('Esc deselects', !block('11').classList.contains('sch-block--sel') && $('#schToolbar').hidden);
+
+// ---- copy / toast ----
+r=block('12').getBoundingClientRect();
+me('mousedown', r.left+40, r.top+10, block('12')); me('mouseup', r.left+40, r.top+10); await tick();
+ok('selection works on a plain booking', block('12').classList.contains('sch-block--sel'));
+document.getElementById('schTbCopy').click(); await tick();
+ok('copy stores a clipboard snapshot', state.scheduleClipboard?.title==='Ruth Okonjo', state.scheduleClipboard?.title);
+ok('copy raises the page toast', toastText().startsWith('Copied Ruth Okonjo'), toastText());
+
+// ---- move drag with conflict refusal ----
+r=block('11').getBoundingClientRect();
+me('mousedown', r.left+60, r.top+30, block('11'));
+me('mousemove', r.left+60, r.top+30+95);          // 75 min down -> overlaps Elena Sorokin
+await tick();
+ok('a live drag styles the block', block('11').classList.contains('sch-block--live'));
+ok('a conflicting position turns red', block('11').classList.contains('sch-block--bad'));
+me('mouseup', r.left+60, r.top+30+95); await tick();
+ok('the drop is refused with a toast', toastText()==='That spot overlaps an existing booking', toastText());
+ok('the block snapped back', block('11').style.top===`${((16*60-360)/30)*38+1}px`, block('11').style.top);
+ok('it stays selected after refusal', block('11').classList.contains('sch-block--sel'));
+ok('nothing was written', !calls.some(c=>c[0]==='updateBooking'));
+
+// ---- successful move commits ----
+r=block('1').getBoundingClientRect();   // Marcus Lang 7:00-8:00 court 1
+me('mousedown', r.left+40, r.top+30, block('1'));
+me('mousemove', r.left+40, r.top+30+76);          // +60 min, still free
+me('mouseup', r.left+40, r.top+30+76); await new Promise(rr=>setTimeout(rr,150));
+const upd=calls.find(c=>c[0]==='updateBooking');
+ok('a clean drop commits the move', upd && upd[1]===1 && upd[2].startTime==='08:00', upd&&JSON.stringify([upd[1],upd[2].startTime]));
+ok('the move pushed an undo op', state.scheduleUndoStack.some(o=>o.type==='update'&&o.id===1));
+
+// ---- resize bottom ----
+calls.length=0;
+await sched.renderSchedule(); await tick(100);
+r=block('4').getBoundingClientRect();   // Sofia Duarte 7:30-8:30 court 2
+const hBot=block('4').querySelector('.sch-h--bottom');
+me('mousedown', r.left+40, r.bottom-1, hBot);
+me('mousemove', r.left+40, r.bottom-1+38);        // +30 min
+me('mouseup', r.left+40, r.bottom-1+38); await new Promise(rr=>setTimeout(rr,150));
+const upd2=calls.find(c=>c[0]==='updateBooking');
+ok('bottom edge resizes duration', upd2 && upd2[1]===4 && upd2[2].durationMinutes===90, upd2&&JSON.stringify([upd2[1],upd2[2].durationMinutes]));
+
+// ---- alt-drag duplicates ----
+calls.length=0;
+await sched.renderSchedule(); await tick(100);
+r=block('12').getBoundingClientRect();  // Ruth Okonjo 8:30-9:30 Doubles
+me('mousedown', r.left+40, r.top+20, block('12'), {altKey:true});
+me('mousemove', r.left+40, r.top+20+152, null, {altKey:true});   // +2h -> free
+await tick();
+ok('alt-drag leaves the original in place', !block('12').classList.contains('sch-block--live'));
+ok('alt-drag moves a translucent copy', $$('.sch-block--ghostcopy').length===1);
+me('mouseup', r.left+40, r.top+20+152, null, {altKey:true}); await new Promise(rr=>setTimeout(rr,150));
+const dup=calls.find(c=>c[0]==='addBooking');
+ok('release creates the duplicate', dup && dup[1].startTime==='10:30' && dup[1].courtId===5, dup&&JSON.stringify([dup[1].startTime,dup[1].courtId]));
+ok('duplicate toast names the drop', toastText().startsWith('Duplicated to Doubles Court'), toastText());
+
+// ---- paste via keyboard at hover ----
+calls.length=0;
+await sched.renderSchedule(); await tick(100);
+const colsP=$$('.sch-court-col');
+const c4=colsP[3].getBoundingClientRect();
+me('mousemove', c4.left+40, yFor(12*60), colsP[3]); await tick();   // hover court 4 noon
+key('v',{metaKey:true}); await new Promise(rr=>setTimeout(rr,150));
+const pasted=calls.find(c=>c[0]==='addBooking');
+ok('paste lands at the hovered slot', pasted && pasted[1].courtId===4 && pasted[1].startTime==='12:00', pasted&&JSON.stringify([pasted[1].courtId,pasted[1].startTime]));
+ok('paste toast has Undo', !!$('#schToastUndo'));
+
+// ---- delete via keyboard ----
+calls.length=0;
+await sched.renderSchedule(); await tick(100);
+r=block('14').getBoundingClientRect();
+me('mousedown', r.left+40, r.top+20, block('14')); me('mouseup', r.left+40, r.top+20); await tick();
+key('Backspace'); await new Promise(rr=>setTimeout(rr,150));
+const del=calls.find(c=>c[0]==='deleteBooking');
+ok('delete removes without a confirm', del && del[1]===14, del&&del[1]);
+ok('delete toast offers Undo', toastText()==='Deleted Sofia Duarte' && !!$('#schToastUndo'), toastText());
+ok('delete pushed a recreate op', state.scheduleUndoStack.some(o=>o.type==='recreate'));
+
+// ---- context menus ----
+await sched.renderSchedule(); await tick(100);
+r=block('13').getBoundingClientRect();
+block('13').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.left+50,clientY:r.top+20}));
+await tick();
+ok('block menu opens with four items', $$('.sch-menu-item').length===4, $$('.sch-menu-item').length);
+ok('block menu selects the block', block('13').classList.contains('sch-block--sel'));
+ok('menu header names the booking', $('.sch-menu-head').textContent.includes('League · Div 1'));
+key('Escape'); await tick();
+ok('Esc closes the menu', !$('.sch-menu'));
+const colsNow=$$('.sch-court-col');
+const c2=colsNow[1].getBoundingClientRect();
+colsNow[1].dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:c2.left+50,clientY:yFor(14*60)}));
+await tick();
+ok('empty menu offers paste of the clipboard', $$('.sch-menu-item')[1].textContent.includes('Paste "Ruth Okonjo"'));
+ok('empty menu header names court and time', $('.sch-menu-head').textContent==='Court 2 · 2:00 PM', $('.sch-menu-head').textContent);
+$('#schMenuBack').dispatchEvent(new MouseEvent('mousedown',{bubbles:true})); await tick();
+
+// ---- match blocks keep their current behaviour ----
+await sched.renderSchedule(); await tick(100);
+ok('match-card hook untouched so far', cardOpened===null);
+ok('match blocks render in the overlay', !!block('m_77') && !!block('t_5'));
+ok('match blocks carry no resize handles', block('m_77').querySelectorAll('.sch-h').length===0 && block('t_5').querySelectorAll('.sch-h').length===0);
+// clicking opens the card, never a selection
+let lr=block('m_77').getBoundingClientRect();
+me('mousedown', lr.left+30, lr.top+10, block('m_77')); me('mouseup', lr.left+30, lr.top+10); await tick();
+ok('clicking a league match opens its card', cardOpened==='m_77', cardOpened);
+ok('a league match never selects', !block('m_77').classList.contains('sch-block--sel'));
+cardOpened=null;
+let tr=block('t_5').getBoundingClientRect();
+me('mousedown', tr.left+30, tr.top+10, block('t_5')); me('mouseup', tr.left+30, tr.top+10); await tick();
+ok('clicking a tournament match opens its card', cardOpened==='t_5', cardOpened);
+cardOpened=null;
+// league matches still drag to reschedule
+calls.length=0;
+lr=block('m_77').getBoundingClientRect();
+me('mousedown', lr.left+30, lr.top+10, block('m_77'));
+me('mousemove', lr.left+30, lr.top+10+76);
+me('mouseup', lr.left+30, lr.top+10+76); await new Promise(rr=>setTimeout(rr,150));
+const lm=calls.find(c=>c[0]==='updateMatchTiming');
+ok('dragging a league match reschedules it', lm && lm[1].matchId===77 && lm[1].matchTime==='12:00', lm&&JSON.stringify(lm[1]));
+ok('the drag did not open the card', cardOpened===null);
+// a tournament match refuses to drag at all
+calls.length=0;
+await sched.renderSchedule(); await tick(100);
+tr=block('t_5').getBoundingClientRect();
+me('mousedown', tr.left+30, tr.top+10, block('t_5'));
+me('mousemove', tr.left+30, tr.top+10+76);
+me('mouseup', tr.left+30, tr.top+10+76); await tick();
+ok('a tournament match cannot be dragged', !calls.length && block('t_5').style.top===`${((12*60-360)/30)*38+1}px`);
+cardOpened=null;
+
+// ---- panel: contiguous runs ----
+await panel.openBookingPanel({ mode:'new', host:$('.sch-page'), courts:payload.courts,
+  slots:[], types:payload.types, players:PLAYERS, courtIds:[1], start:14*60, dur:60,
+  notify:(t,u)=>{window.__note=[t,u];}, onDone:()=>{}, pushUndo:()=>{} });
+await tick();
+$$('.sch-panel [data-court]')[2].click(); await tick();       // add court 3 -> 1+3 non-adjacent
+ok('non-adjacent hint appears', $('.sch-panel-courtshint')?.textContent==='Separate bookings for non-adjacent courts', $('.sch-panel-courtshint')?.textContent);
+ok('new mode still saves non-adjacent picks', !$('#schPanelPrimary').disabled);
+calls.length=0;
+$('#schPanelPrimary').click(); await new Promise(rr=>setTimeout(rr,150));
+const adds=calls.filter(c=>c[0]==='addBooking');
+ok('save made one booking per run', adds.length===2 && adds[0][1].courtId===1 && adds[1][1].courtId===3, adds.length);
+ok('multi-run toast counts bookings', window.__note && window.__note[0]==='Added 2 bookings' && window.__note[1]===true, JSON.stringify(window.__note));
+
+await panel.openBookingPanel({ mode:'edit', host:$('.sch-page'), courts:payload.courts,
+  slots:[], types:payload.types, players:PLAYERS, slot:{id:2, courtId:1, courtIds:[1,2], startTime:'10:00', durationMinutes:90, bookingTypeId:3, name:'Junior training', info:'', players:[], title:'Junior training'},
+  notify:(t,u)=>{window.__note=[t,u];}, onDone:()=>{}, pushUndo:(op)=>{window.__op=op;} });
+await tick();
+$$('.sch-panel [data-court]')[3].click(); await tick();       // add court 4 -> 1,2,4
+ok('edit with a gap says side by side', $('.sch-panel-courtshint')?.textContent==='Courts must sit side by side');
+ok('edit with a gap cannot save', $('#schPanelPrimary').disabled);
+$$('.sch-panel [data-court]')[2].click(); await tick();       // add court 3 -> contiguous 1-4
+ok('contiguous edit reads the span', $('.sch-panel-courtshint')?.textContent==='One booking across 4 courts');
+calls.length=0;
+$('#schPanelPrimary').click(); await new Promise(rr=>setTimeout(rr,150));
+ok('edit saved one wide booking', calls[0] && calls[0][0]==='updateBooking' && JSON.stringify(calls[0][2].courtIds)==='[1,2,3,4]', calls[0]&&JSON.stringify(calls[0][2]?.courtIds));
+ok('edit pushed an undo op', window.__op?.type==='update' && window.__op.id===2);
+ok('edit toast reads Saved', window.__note[0]==='Saved Junior training');
+
+// ---- panel form details (steppers, players, repeat) ----
+await panel.openBookingPanel({ mode:'new', host:$('.sch-page'), courts:payload.courts,
+  slots:[], types:payload.types, players:PLAYERS, courtIds:[2], start:14*60, dur:60,
+  notify:(t,u)=>{window.__note=[t,u];}, onDone:()=>{}, pushUndo:(op)=>{window.__op=op;} });
+await tick();
+const stepVals=()=>$$('.sch-panel .sch-step-val').map(x=>x.textContent);
+$$('.sch-panel [data-act="dur+"]')[0].click(); await tick();
+ok('duration steps by 15 minutes', stepVals()[1]==='1h 15m', stepVals()[1]);
+$$('.sch-panel [data-act="start-"]')[0].click(); await tick();
+ok('start steps back by 15 minutes', stepVals()[0]==='1:45 PM', stepVals()[0]);
+$('#schPanelSearch').value='sof';
+$('#schPanelSearch').dispatchEvent(new Event('input',{bubbles:true})); await tick();
+$('.sch-search-row').dispatchEvent(new MouseEvent('mousedown',{bubbles:true})); await tick();
+ok('picking a player makes a chip', $$('.sch-pchip').length===1 && $('.sch-panel-room').textContent==='3 of 4 free');
+$$('.sch-panel-step')[1].click(); await tick();
+ok('step 2 shows seven day pills, today preselected', $$('.sch-dow').length===7 && $$('.sch-dow.is-on').length===1);
+calls.length=0;
+$('#schPanelPrimary').click(); await new Promise(rr=>setTimeout(rr,150));
+const rep=calls.find(c=>c[0]==='addRepeatBookings');
+ok('repeat posts with days, weeks and player', rep && rep[1].repeat.weeks===4 && rep[1].repeat.daysOfWeek.length===1 && rep[1].playerIds.length===1, rep&&JSON.stringify(rep[1].repeat));
+ok('repeat undo op holds the created ids', window.__op?.type==='delete-ids' && window.__op.ids.length===4);
+ok('repeat toast counts created and skipped', window.__note[0]==='Added 4 bookings · 1 skipped' && window.__note[1]===true, JSON.stringify(window.__note));
+
+} catch (e) { fails++; out.push('  THREW  '+e.message+'\n'+(e.stack||'').split('\n').slice(0,4).join('\n')); }
+document.getElementById('log').textContent = out.join('\n')+'\n\n'+(fails? fails+' FAILED':'ALL '+out.length+' PASSED');
+document.title = fails? 'FAIL':'PASS';
+</script></body></html>

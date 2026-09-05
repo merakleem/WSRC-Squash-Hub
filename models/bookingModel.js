@@ -274,10 +274,11 @@ function createRepeatBookings(baseData, repeatOptions) {
     if (daysSet.has(_dayOfWeek(d))) dates.push(d);
   }
 
-  if (dates.length === 0) return { created: 0, skipped: 0, leagueConflicts: [] };
+  if (dates.length === 0) return { created: 0, skipped: 0, leagueConflicts: [], ids: [] };
 
   let created = 0, skipped = 0;
   const leagueConflicts = [];
+  const createdIds = [];
   let repeatGroupId = null;
 
   const txn = db.transaction(() => {
@@ -325,6 +326,7 @@ function createRepeatBookings(baseData, repeatOptions) {
         if (repeatGroupId === null) repeatGroupId = newId;
         db.prepare('UPDATE bookings SET repeat_group_id = ? WHERE id = ?').run(repeatGroupId, newId);
         _setBookingPlayers(db, newId, playerIds);
+        createdIds.push(newId);
       } else {
         const r = db.prepare(
           'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -334,6 +336,7 @@ function createRepeatBookings(baseData, repeatOptions) {
         if (repeatGroupId === null) repeatGroupId = firstId;
         db.prepare('UPDATE bookings SET repeat_group_id = ? WHERE id = ?').run(repeatGroupId, firstId);
         _setBookingPlayers(db, firstId, playerIds);
+        createdIds.push(firstId);
         for (let i = 1; i < effectiveCourtIds.length; i++) {
           db.prepare(
             'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, group_id, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -345,7 +348,7 @@ function createRepeatBookings(baseData, repeatOptions) {
   });
   txn();
 
-  return { created, skipped, leagueConflicts };
+  return { created, skipped, leagueConflicts, ids: createdIds };
 }
 
 // ===== SCHEDULE =====
