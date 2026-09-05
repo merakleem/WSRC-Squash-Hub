@@ -2,10 +2,13 @@
 <html>
 <head>
 <meta charset="utf-8">
+<!-- The app's exact CSP: Quill must load under it, which is why it is vendored.
+     (The CDN build of this suite once passed while the real app blocked the CDN.) -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com">
 <title>RUNNING</title>
 <link rel="stylesheet" href="../renderer/styles.css">
-<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<link href="../renderer/vendor/quill/quill.snow.css" rel="stylesheet">
+<script src="../renderer/vendor/quill/quill.js"></script>
 <style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
 </head>
 <body>
@@ -46,6 +49,7 @@ const backdropClick = () => overlay.dispatchEvent(new MouseEvent('click', { bubb
 
 // =====================================================================
 log.textContent += '\nOPEN + LOOK\n';
+ok('Quill loaded under the app CSP', typeof window.Quill === 'function');
 openMessagePlayersModal(LEAGUE);
 await settle();
 ok('the modal opens', overlay.classList.contains('open'));
