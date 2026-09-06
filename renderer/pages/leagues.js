@@ -72,7 +72,7 @@ function leagueCardHTML(league) {
           </svg>
           ${league.setup_type === 'modern'
             ? `${league.num_divisions} Division${league.num_divisions !== 1 ? 's' : ''}`
-            : `${league.num_teams} teams &times; ${league.num_divisions} divisions &mdash; ${league.num_teams * league.num_divisions} players`}
+            : `${league.num_teams} teams &times; ${league.num_divisions} divisions &middot; ${league.num_teams * league.num_divisions} players`}
         </div>
       </div>
       <div class="league-card-footer">
@@ -150,7 +150,7 @@ export function printBoxes(league) {
 
     divisions.forEach((div) => {
       const players = div.players;
-      const roundLabel = numRounds > 1 ? ` &mdash; Round ${roundIdx + 1}` : '';
+      const roundLabel = numRounds > 1 ? ` &middot; Round ${roundIdx + 1}` : '';
 
       // Column headers
       const colHeaders = players.map((p) => `
@@ -207,7 +207,7 @@ export function printBoxes(league) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Box Sheets &mdash; ${esc(league.name)}</title>
+  <title>Box Sheets &middot; ${esc(league.name)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; }
@@ -543,7 +543,7 @@ export function openBulkInviteModal(league) {
       const data = await window.api.bulkInviteLeague(league.id);
       modal.close();
       if (data.sent === 0) {
-        toast('All players already have accounts — no invites sent.', 'info');
+        toast('All players already have accounts. No invites sent.', 'info');
       } else {
         toast(`Invites sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}.`, 'success');
       }
@@ -625,7 +625,7 @@ export function printSchedule(league) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Schedule — ${esc(league.name)}</title>
+  <title>Schedule &middot; ${esc(league.name)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; color: #000; font-size: 10pt; }

@@ -217,9 +217,9 @@ export async function renderClubSettings() {
           <h2 class="settings-section-title">Time zone</h2>
         </div>
         <p class="settings-section-desc">
-          The club's clock. Everything time-related — the schedule's Now line, what counts as
-          today, when a booking or event is in the past — follows this time zone for everyone,
-          no matter where their own device thinks it is.
+          The club's clock. Everything time-related follows this time zone for everyone, no
+          matter where their own device thinks it is: the schedule's Now line, what counts as
+          today, and when a booking or event is in the past.
         </p>
         <div class="season-settings">
           <div class="form-group">
@@ -910,10 +910,6 @@ export async function renderDashboard() {
       <div class="info-modal-section">
         <h4>Report League Match Score</h4>
         <p>Use this after playing a scheduled league match. It submits the result for your match in the current season.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Report Ladder Match Score</h4>
-        <p>Playing a casual game at the club? Record the result here and it counts toward your ladder ranking and appears in your match history. A simple way to add a little extra stakes to any friendly match.</p>
       </div>`);
   });
 }

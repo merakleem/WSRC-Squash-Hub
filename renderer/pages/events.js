@@ -216,7 +216,7 @@ function _listHTML() {
         <button class="tab${ev.tab === 'upcoming' ? ' tab--on' : ''}" data-tab="upcoming">Upcoming</button>
         <button class="tab${ev.tab === 'past' ? ' tab--on' : ''}" data-tab="past">Past</button>
       </div>
-      ${ev.events.length ? cards : `<div class="ev-empty">No ${ev.tab === 'past' ? 'past' : 'upcoming'} events${isAdmin() && ev.tab === 'upcoming' ? ' — create one with New event.' : '.'}</div>`}
+      ${ev.events.length ? cards : `<div class="ev-empty">No ${ev.tab === 'past' ? 'past' : 'upcoming'} events${isAdmin() && ev.tab === 'upcoming' ? '. Create one with New event.' : '.'}</div>`}
     </div>`;
 }
 

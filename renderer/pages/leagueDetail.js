@@ -570,7 +570,7 @@ function openTimingModal(btn) {
       <div class="form-group">
         <label>Court</label>
         <select class="form-control" id="timingCourt">
-          <option value="">— No court —</option>
+          <option value="">No court</option>
           ${leagueCourts.map((c) =>
             `<option value="${c.id}" ${currentCourtId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`
           ).join('')}
@@ -581,7 +581,7 @@ function openTimingModal(btn) {
       <div class="form-group">
         <label>Court</label>
         <select class="form-control" id="timingCourt">
-          <option value="">— No court —</option>
+          <option value="">No court</option>
           ${Array.from({ length: numCourts }, (_, i) => i + 1).map((n) =>
             `<option value="${n}" ${Number(currentCourtNumber) === n ? 'selected' : ''}>Court ${n}</option>`
           ).join('')}
@@ -959,7 +959,7 @@ async function saveMatchScore(btn) {
     && (s1 === 3 || s2 === 3)
     && s1 !== s2;
   if (!valid) {
-    toast('Invalid score — one player must win 3 games (e.g. 3-1, 2-3)', 'warning');
+    toast('Invalid score. One player must win 3 games (e.g. 3–1, 2–3)', 'warning');
     return;
   }
 
@@ -1193,7 +1193,7 @@ async function openBoxScoreModal(league) {
     });
   }
 
-  modal.open('Submit Scores — Box View', renderBody(), { wide: true });
+  modal.open('Submit Scores · Box View', renderBody(), { wide: true });
   attachHandlers();
 }
 
@@ -1226,7 +1226,7 @@ async function openSubModal(btn) {
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <select class="form-control sub-select" data-slot="${slot}" data-orig-id="${origId}" style="flex:1">
-          <option value="">— No sub (play original player) —</option>
+          <option value="">No sub (play original player)</option>
           ${playerOptions([origId])}
         </select>
       </div>

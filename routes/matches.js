@@ -90,7 +90,7 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   // Tournament results are entered by the club through the bracket.
   if (match.type === 'tournament') return res.status(403).json({ error: 'Tournament scores are entered by the club.' });
   if (match.skipped) return res.status(409).json({ error: 'This match was skipped.' });
-  if (match.league_status === 'completed') return res.status(403).json({ error: 'This league has ended — scores can no longer be reported.' });
+  if (match.league_status === 'completed') return res.status(403).json({ error: 'This league has ended. Scores can no longer be reported.' });
   if (match.player1_score !== null) return res.status(409).json({ error: 'Score has already been reported for this match' });
 
   const effP1 = match.p1_sub ?? match.player1_id;
@@ -107,7 +107,7 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
     && p1Score >= 0 && p1Score <= 3 && p2Score >= 0 && p2Score <= 3
     && (p1Score === 3 || p2Score === 3) && p1Score !== p2Score;
 
-  if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 games (e.g. 3–1, 3–2)' });
+  if (!valid) return res.status(400).json({ error: 'Invalid score. One player must win 3 games (e.g. 3–1, 3–2)' });
 
   // The winner is recorded as whoever actually played, so nothing downstream
   // has to guess which of the two conventions this row followed.
@@ -157,7 +157,7 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
     && player2Score >= 0 && player2Score <= 3
     && (player1Score === 3 || player2Score === 3)
     && player1Score !== player2Score;
-  if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 games (e.g. 3-1, 2-3).' });
+  if (!valid) return res.status(400).json({ error: 'Invalid score. One player must win 3 games (e.g. 3–1, 2–3).' });
 
   // When the match was played, as opposed to when it was reported. Everything
   // downstream already reads matches.played_at: which season the match

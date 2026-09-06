@@ -638,7 +638,7 @@ export async function renderCreateTournament() {
           <input type="text" class="form-control" id="trName" value="Tournament ${new Date().getFullYear()}">
         </div>
         <div class="form-group">
-          <label>Championship Day <span class="form-hint">(Sunday — Semis &amp; Final)</span></label>
+          <label>Championship Day <span class="form-hint">(Sunday &middot; Semis &amp; Final)</span></label>
           <input type="date" class="form-control" id="trChampDate" value="${defaultDate}">
           <div id="trConflictWarn" class="tr-conflict-warn" style="display:none"></div>
         </div>

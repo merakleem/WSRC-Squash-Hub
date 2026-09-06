@@ -392,7 +392,7 @@ async function renderStep2() {
       <div class="wz-head">
         <div>
           <div class="wz-title">Add players</div>
-          <div class="wz-sub">Seeding follows the ladder automatically &mdash; no dragging needed.</div>
+          <div class="wz-sub">Seeding follows the ladder automatically. No dragging needed.</div>
         </div>
         <span class="wz-selchip" id="wzSelChip">${state.wizard.rankedPlayers.length} selected</span>
       </div>
@@ -506,7 +506,7 @@ function _calcCardHTML(configs) {
     chips = _divSizes(c.n, c.divisions).map((sz, i) => `Div ${i + 1}: ${sz}`);
   } else {
     label = 'Too many divisions';
-    text = `Can't create ${w.modernNumDivisions} divisions with ${c.n} players &mdash; each division needs at least 2 players.`;
+    text = `Can't create ${w.modernNumDivisions} divisions with ${c.n} players. Each division needs at least 2 players.`;
   }
   return `
     <div class="wz-calc ${c.valid ? 'wz-calc--ok' : 'wz-calc--warn'}">
@@ -537,12 +537,12 @@ function _nightText(anyCourts) {
     const end = sh * 60 + sm + totalMins;
     if (end > 21 * 60) {
       return `With ${numCourts} court${numCourts === 1 ? '' : 's'}, the last match could finish around ` +
-        `${Math.floor(end / 60)}:${String(end % 60).padStart(2, '0')} — after 9:00 PM.`;
+        `${Math.floor(end / 60)}:${String(end % 60).padStart(2, '0')}, after 9:00 PM.`;
     }
     return '';
   }
   if (anyCourts && numCourts === 0) {
-    return 'No courts selected — matches will be scheduled without a court assigned.';
+    return 'No courts selected. Matches will be scheduled without a court assigned.';
   }
   return '';
 }
@@ -715,7 +715,7 @@ async function renderStep3Modern() {
   const c = _calc();
 
   document.getElementById('wizardCard').innerHTML = _step3CardHTML({
-    subtitle: `${c.n} players selected. Set the division count &mdash; at least 2 players each.`,
+    subtitle: `${c.n} players selected. Set the division count. Every division needs at least 2 players.`,
     groupLabel: 'Number of divisions',
     groupVal: w.modernNumDivisions,
     presets: [2, 3, 4],
@@ -733,7 +733,7 @@ async function renderStep3Traditional() {
   const [configs, allCourts] = await Promise.all([window.api.getValidConfigs(c.n), window.api.getCourts()]);
 
   document.getElementById('wizardCard').innerHTML = _step3CardHTML({
-    subtitle: `${c.n} players selected. Set the team count &mdash; divisions follow from it.`,
+    subtitle: `${c.n} players selected. Set the team count. Divisions follow from it.`,
     groupLabel: 'Number of teams',
     groupVal: w.numTeams,
     presets: [2, 3, 4, 6, 8],
@@ -951,7 +951,7 @@ function renderStep5Modern() {
       const round = rounds[w];
       const lines = [
         ...round.matches.map(([p1, p2]) => `<span class="wz-fixline">${esc(p1.name)} vs ${esc(p2.name)}</span>`),
-        ...round.byes.map((p) => `<span class="wz-fixline wz-fixline--bye">${esc(p.name)} &mdash; bye</span>`),
+        ...round.byes.map((p) => `<span class="wz-fixline wz-fixline--bye">${esc(p.name)} &middot; bye</span>`),
       ].join('');
       return `<div class="wz-fixgroup"><span class="wz-fixlabel">Division ${dIdx + 1}</span>${lines}</div>`;
     }).join('');
@@ -1094,7 +1094,7 @@ function renderStep5Traditional() {
       <div class="wz-fixgroup">
         <span class="wz-fixlabel">Fixtures</span>
         ${round.map((mu) => mu.bye != null
-          ? `<span class="wz-fixline wz-fixline--bye">${esc(teams[mu.bye].name)} &mdash; bye</span>`
+          ? `<span class="wz-fixline wz-fixline--bye">${esc(teams[mu.bye].name)} &middot; bye</span>`
           : `<span class="wz-fixline">${esc(teams[mu.team1].name)} vs ${esc(teams[mu.team2].name)}</span>`
         ).join('')}
       </div>

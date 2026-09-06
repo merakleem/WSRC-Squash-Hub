@@ -112,7 +112,7 @@ router.put('/tournament-matches/:id/player-score', requireAuth, wrap(async (req,
     && p1Score >= 0 && p1Score <= 3 && p2Score >= 0 && p2Score <= 3
     && (p1Score === 3 || p2Score === 3) && p1Score !== p2Score;
 
-  if (!valid) return res.status(400).json({ error: 'Invalid score — one player must win 3 sets (e.g. 3–1, 3–2)' });
+  if (!valid) return res.status(400).json({ error: 'Invalid score. One player must win 3 sets (e.g. 3–1, 3–2)' });
 
   const winnerId = p1Score > p2Score ? match.player1_id : match.player2_id;
   const updated = tournamentModel.updateTournamentMatchScore(matchId, { p1: p1Score, p2: p2Score }, winnerId);

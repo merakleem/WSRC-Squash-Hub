@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const change = (el) => el.dispatchEvent(new Event('change', { bubbles: true }));
+const settle = () => new Promise((r) => setTimeout(r, 25));
+
+// A player with a division, a tournament result and one played match.
+const PROFILE = (id, name) => ({
+  id, name, email: 'x@x.invalid', member_number: '1042',
+  division_name: 'Division 2', photo_path: null, accountStatus: 'verified',
+  ladder: { position: 4, ladder_size: 20, rating: 1500, system: 'elo', rank_change: 0 },
+  ladder_history: [],
+  history: [{ id: 1, result: 'W', my_score: 3, their_score: 1, opponent_name: 'Rival Rae', opponent_id: 99,
+              week_date: '2026-08-20', league_name: 'Autumn', division_name: 'Division 2', source: 'league' }],
+  upcoming: [],
+  tournamentResults: [{ id: 5, name: 'Club Championship', position: 1, played_at: '2026-07-01' }],
+});
+const EMPTY_PROFILE = (id, name) => ({ ...PROFILE(id, name), history: [], tournamentResults: [] });
+
+let CURRENT = PROFILE(7, 'Mona Member');
+const calls = [];
+window.api = {
+  getPlayerHistory: async (id) => CURRENT,
+  getPlayers: async () => [],
+  getSeasons: async () => [],
+  setPlayerPhoto: async (id, dataUrl) => { calls.push(['photo', id, dataUrl]); return { ok: true }; },
+  deletePlayerPhoto: async () => ({ ok: true }),
+};
+
+const { state } = await import('../renderer/state.js');
+const mod = await import('../renderer/pages/players.js');
+window.navigate = (page, params) => {
+  calls.push(['navigate', page]);
+  if (params?.player) state.currentPlayer = params.player;
+  state.page = page;
+  if (page === 'playerProfile') mod.renderPlayerProfile();
+};
+window.openPlayerProfile = mod.openPlayerProfile;
+
+const show = async (profile, currentUser) => {
+  CURRENT = profile;
+  state.currentUser = currentUser;
+  await mod.openPlayerProfile(profile.id);
+  await settle();
+};
+
+// =====================================================================
+log.textContent += '\nA MEMBER LOOKING AT ANOTHER MEMBER\n';
+await show(PROFILE(7, 'Mona Member'), { role: 'player', playerId: 99 });
+ok('the profile renders', /Mona Member/.test($('#pageTitle').textContent));
+ok('the division is not shown', !/Division 2/.test($('.pp-head, .pp-meta, .pp-header')?.textContent || $('#mainContent').textContent.split('Results')[0]), 'header');
+ok('the member number still is', /Member #1042/.test($('#mainContent').textContent));
+
+log.textContent += '\nAN ADMIN LOOKING AT THE SAME MEMBER\n';
+await show(PROFILE(7, 'Mona Member'), { role: 'admin' });
+ok('the admin still sees the division', /Division 2/.test($('#mainContent').textContent));
+
+log.textContent += '\nRESULTS FIGURES\n';
+await show(PROFILE(7, 'Mona Member'), { role: 'player', playerId: 99 });
+const strip = $('.pp-detail-strip');
+ok('the season figures render', !!strip);
+ok('games, game win rate and best rank are there',
+  ['Games', 'Game win rate', 'Best rank'].every((l) => strip.textContent.includes(l)), strip.textContent.trim());
+ok('the tournament count is gone from them', !/Tournaments/.test(strip.textContent));
+ok('but tournaments keep their own quick link', /Tournaments/.test($('.pp-quick')?.textContent || ''));
+
+log.textContent += '\nREPORTING A LADDER MATCH\n';
+await show(EMPTY_PROFILE(7, 'Mona Member'), { role: 'player', playerId: 99 });
+ok('an empty results panel says so', /No matches/.test($('#mainContent').textContent));
+ok('another member is not offered the report button', !$('[data-pp-action="report-ladder"]'));
+await show(EMPTY_PROFILE(99, 'Me Myself'), { role: 'player', playerId: 99 });
+ok('on my own profile it is offered', !!$('[data-pp-action="report-ladder"]'));
+ok('labelled to report a ladder match', /Report a ladder match/.test($('[data-pp-action="report-ladder"]').textContent));
+await show(EMPTY_PROFILE(7, 'Mona Member'), { role: 'admin' });
+ok('an admin browsing someone else is not offered it either', !$('[data-pp-action="report-ladder"]'));
+
+log.textContent += '\nPHOTOS ARE SHRUNK BEFORE UPLOAD\n';
+await show(PROFILE(7, 'Mona Member'), { role: 'admin' });
+// A 1600x1200 stand-in for a phone photo: smooth tones with a few shapes, the
+// kind of image a camera actually produces.
+const big = document.createElement('canvas');
+big.width = 1600; big.height = 1200;
+const bctx = big.getContext('2d');
+const grad = bctx.createLinearGradient(0, 0, 1600, 1200);
+grad.addColorStop(0, '#2b4a7a'); grad.addColorStop(0.5, '#c8a06a'); grad.addColorStop(1, '#123');
+bctx.fillStyle = grad;
+bctx.fillRect(0, 0, 1600, 1200);
+for (let i = 0; i < 40; i++) {
+  bctx.fillStyle = `rgba(255,255,255,${0.02 + (i % 5) * 0.01})`;
+  bctx.beginPath();
+  bctx.arc((i * 137) % 1600, (i * 211) % 1200, 40 + (i % 7) * 20, 0, Math.PI * 2);
+  bctx.fill();
+}
+const srcUrl = big.toDataURL('image/png');
+const srcBytes = atob(srcUrl.split(',')[1]).length;
+const blob = await (await fetch(srcUrl)).blob();
+const file = new File([blob], 'photo.png', { type: 'image/png' });
+
+click($('#btnEditPhoto'));
+await settle();
+ok('the photo modal opens', !!document.getElementById('fPhotoFile'));
+ok('and says the photo will be shrunk', /shrunk before they are saved/.test($('.photo-modal .form-hint').textContent));
+const dt = new DataTransfer();
+dt.items.add(file);
+const input = document.getElementById('fPhotoFile');
+input.files = dt.files;
+calls.length = 0;
+change(input);
+for (let i = 0; i < 80 && !calls.some((c) => c[0] === 'photo'); i++) await settle();
+const sent = calls.find((c) => c[0] === 'photo');
+ok('the upload happens', !!sent);
+const outUrl = sent ? sent[2] : '';
+const outBytes = outUrl ? atob(outUrl.split(',')[1]).length : 0;
+ok('it is re-encoded as JPEG', /^data:image\/jpeg;base64,/.test(outUrl), outUrl.slice(0, 24));
+ok('and is a fraction of the original', outBytes > 0 && outBytes < srcBytes / 5, `${srcBytes} -> ${outBytes} bytes`);
+ok('comfortably under 200 KB', outBytes < 200 * 1024, `${outBytes} bytes`);
+// It should be a 512px square regardless of the source aspect.
+const outImg = new Image();
+await new Promise((r) => { outImg.onload = r; outImg.src = outUrl; });
+ok('cropped to a 512px square', outImg.width === 512 && outImg.height === 512, `${outImg.width}x${outImg.height}`);
+
+log.textContent += '\nNO EM DASHES IN THE COPY\n';
+// Everything the profile renders, minus the "no value" placeholder cells.
+const proseNodes = $$('#mainContent *').filter((el) => !el.children.length);
+const withDash = proseNodes.filter((el) => el.textContent.includes('—') && el.textContent.trim() !== '—');
+ok('the profile page has none', withDash.length === 0, withDash.map((e) => e.textContent.trim()).join(' | '));
+
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+</script>
+</body>
+</html>

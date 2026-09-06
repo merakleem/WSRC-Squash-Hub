@@ -146,7 +146,7 @@ function _cardHTML(c) {
           ${h.total ? `
             <div class="mc-bar"><span class="mc-bar-fill" style="width:${barPct}%"></span></div>
             <div class="mc-meetings">${meetings}</div>
-          ` : '<div class="mc-h2h-empty">First meeting — these two have never played.</div>'}
+          ` : '<div class="mc-h2h-empty">First meeting. These two have never played.</div>'}
         </div>
       </div>
 

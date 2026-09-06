@@ -1631,7 +1631,7 @@ export function renderPlayerProfile() {
   // ===== HEADER =====
   const canEditPhoto = adminMode || state.currentUser?.playerId === p.id;
   const metaBits = [
-    p.division_name,
+    adminMode ? p.division_name : null,
     p.member_number ? `Member #${esc(p.member_number)}` : null,
     adminMode && p.email ? esc(p.email) : null,
   ].filter(Boolean);
@@ -1761,7 +1761,8 @@ export function renderPlayerProfile() {
       ${action ? `<button class="btn btn-outline btn-sm" data-pp-action="${action.id}">${esc(action.label)}</button>` : ''}
     </div>`;
 
-  const reportMatchAction = { id: 'report-ladder', label: 'Report a ladder match' };
+  const isSelf = state.currentUser?.playerId === p.id;
+  const reportMatchAction = isSelf ? { id: 'report-ladder', label: 'Report a ladder match' } : null;
 
   // -- Results panel --
   // Carries the season-detail figures that used to live on the Season tab, so
@@ -1771,7 +1772,6 @@ export function renderPlayerProfile() {
       <div><span class="pp-fig">${stats.gamesWon}–${stats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
       <div><span class="pp-fig">${stats.gameWinPct === null ? '—' : `${stats.gameWinPct}%`}</span><span class="pp-fig-label">Game win rate</span></div>
       <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
-      <div><span class="pp-fig">${tournamentResults.length}</span><span class="pp-fig-label">Tournaments</span></div>
     </div>`;
 
   const sourceFilters = [
@@ -2245,6 +2245,39 @@ function _ladderChartHTML(series, seasons, variant) {
     </svg>`;
 }
 // ===== PROFILE PHOTO =====
+// Avatars are only ever drawn as small circles, so the browser resizes and
+// re-encodes before upload: a phone photo goes from several megabytes to tens
+// of kilobytes, which keeps the volume small and every avatar quick to load.
+const PHOTO_MAX_PX = 512;
+const PHOTO_QUALITY = 0.82;
+
+function _shrinkPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('That file could not be read as an image.'));
+      img.onload = () => {
+        // Centre square crop, since every surface draws the photo in a circle.
+        const side = Math.min(img.width, img.height);
+        const out = Math.min(side, PHOTO_MAX_PX);
+        const canvas = document.createElement('canvas');
+        canvas.width = out;
+        canvas.height = out;
+        const ctx = canvas.getContext('2d');
+        // JPEG has no alpha; without this a transparent PNG turns black.
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, out, out);
+        ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, out, out);
+        resolve(canvas.toDataURL('image/jpeg', PHOTO_QUALITY));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function openPhotoModal(player) {
   modal.open('Profile Photo', `
     <div class="photo-modal">
@@ -2253,7 +2286,7 @@ function openPhotoModal(player) {
           ? `<img src="${esc(player.photo_path)}" alt="">`
           : `<span>${esc(playerInitials(player.name))}</span>`}
       </div>
-      <p class="form-hint">JPEG, PNG, WebP or GIF. Maximum 5 MB.</p>
+      <p class="form-hint">JPEG, PNG, WebP or GIF, up to 5 MB. Photos are cropped square and shrunk before they are saved.</p>
       <input type="file" id="fPhotoFile" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none">
       <div class="form-actions">
         ${player.photo_path ? `<button class="btn btn-danger" id="fPhotoRemove">Remove</button>` : ''}
@@ -2272,12 +2305,8 @@ function openPhotoModal(player) {
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) return toast('Image is too large. Maximum size is 5 MB.', 'error');
 
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload  = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Could not read that file.'));
-      reader.readAsDataURL(file);
-    }).catch((err) => { toast(err.message, 'error'); return null; });
+    const dataUrl = await _shrinkPhoto(file)
+      .catch((err) => { toast(err.message, 'error'); return null; });
     if (!dataUrl) return;
 
     try {
@@ -2725,7 +2754,7 @@ export async function openReportScoreModal() {
         && (myScore === 3 || theirScore === 3) && myScore !== theirScore;
 
       if (!valid) {
-        toast('Invalid score — one player must win 3 games (e.g. 3–1, 3–2)', 'warning');
+        toast('Invalid score. One player must win 3 games (e.g. 3–1, 3–2)', 'warning');
         return;
       }
 

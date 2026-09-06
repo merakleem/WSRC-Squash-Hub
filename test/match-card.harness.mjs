@@ -171,6 +171,7 @@ ok('a player off the ladder is stated plainly', $$('.mc-meta')[1]?.textContent =
 ok('first meeting replaces the bar and list', !$('.mc-bar') && !$('.mc-meetings') && !!$('.mc-h2h-empty'));
 ok('the toggle still shows with no history', !!$('#mcH2hToggle'));
 ok('and says so', /never played/.test($('.mc-h2h-empty')?.textContent || ''));
+ok('without an em dash in the copy', !($('.mc-h2h-empty')?.textContent || '').includes('\u2014'), $('.mc-h2h-empty')?.textContent);
 ok('a tournament never offers submit', !$('#mcSubmit'));
 
 console.log('\nMATCH CARD — ladder');
