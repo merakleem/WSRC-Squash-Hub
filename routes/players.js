@@ -13,18 +13,19 @@ const { buildTournamentTiers } = require('../utils/tournamentHelpers');
 
 const router = express.Router();
 
-// What a non-admin may see of another player. Contact details, and the
-// account flags — who is a member (or tester) is the club's business, not
-// something any signed-in player can enumerate.
+// What a non-admin may see of another player. Contact details, account
+// status and the account flags — who is a member (or tester) is the club's
+// business, not something any signed-in player can enumerate. Tester rows
+// are left out of the list entirely.
 function _stripContact(player) {
-  const { email, phone, member_number, is_member, is_tester, ...rest } = player;
+  const { email, phone, member_number, is_member, is_tester, account_status, ...rest } = player;
   return rest;
 }
 
 router.get('/players', wrap(async (req, res) => {
   const players = await playerService.getAllPlayers();
   const isAdmin = req.session?.role === 'admin';
-  res.json(isAdmin ? players : players.map(_stripContact));
+  res.json(isAdmin ? players : players.filter((p) => !p.is_tester).map(_stripContact));
 }));
 
 // /records and /verified-count must be registered before /:id to avoid Express matching them as an id
@@ -154,12 +155,53 @@ router.put('/players/:id', requireAdmin, wrap(async (req, res) => {
   res.json(player);
 }));
 
-// Bulk membership toggle from the players page. Admin-only — membership is
-// both an access switch (court booking) and private information.
+// Bulk field patch from the players page (flags and rating only). Admin-only —
+// membership is both an access switch (court booking) and private information.
+router.post('/players/bulk', requireAdmin, wrap(async (req, res) => {
+  const { ids, patch } = req.body;
+  const changed = await playerService.patchPlayers(ids, patch || {});
+  res.json({ changed });
+}));
+
+// Kept as an alias of /players/bulk for older clients.
 router.post('/players/membership', requireAdmin, wrap(async (req, res) => {
   const { ids, is_member } = req.body;
   const changed = await playerService.setMembership(ids, !!is_member);
   res.json({ changed });
+}));
+
+// Bulk invites: every selected player who has an email and no working
+// password gets a fresh invite. The rest are counted, not failed.
+router.post('/players/send-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'Select at least one player' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+
+  const db = getDB();
+  let sent = 0, skipped = 0, failed = 0;
+  for (const id of ids.map(Number)) {
+    const player = db.prepare('SELECT id, name, email FROM players WHERE id = ?').get(id);
+    const account = player && db.prepare('SELECT password_hash FROM user_accounts WHERE player_id = ?').get(id);
+    if (!player || !player.email || account?.password_hash) { skipped++; continue; }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    db.prepare(`INSERT INTO user_accounts (player_id, invite_token, invite_expires)
+      VALUES (?, ?, ?)
+      ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`
+    ).run(id, token, expires);
+
+    const result = await sendEmail({
+      to: player.email,
+      subject: 'Activate your Play WSRC account',
+      html: `<p>Hi ${player.name},</p>
+<p>You've been invited to create an account on Play WSRC.</p>
+<p><a href="${appUrl(req)}/invite/${token}">Click here to activate your account</a></p>
+<p>This link expires in 72 hours.</p>`,
+    });
+    if (result.ok) sent++; else failed++;
+  }
+  res.json({ sent, skipped, failed });
 }));
 
 router.delete('/players/:id', requireAdmin, wrap(async (req, res) => {

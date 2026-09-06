@@ -27,19 +27,30 @@ function addPlayer(data) {
 }
 
 function updatePlayer(data) {
-  if (!data.name || !data.name.trim()) throw _validationError('Player name is required');
-  _checkEmailUnique(data.email, data.id);
+  // Partial update: keys that weren't sent stay as they are. Name may be
+  // omitted, but if sent it can't be blanked.
+  if ('name' in data) {
+    if (!data.name || !data.name.trim()) throw _validationError('Player name is required');
+    data = { ...data, name: data.name.trim() };
+  }
+  if ('email' in data) _checkEmailUnique(data.email, data.id);
   const db = getDB();
   const before = db.prepare('SELECT email FROM players WHERE id = ?').get(data.id);
-  const result = playerModel.updatePlayer({ ...data, name: data.name.trim() });
-  const emailRemoved = before?.email && !data.email?.trim();
+  const result = playerModel.updatePlayer(data);
+  // Removing a player's email also removes their account — but only when the
+  // caller actually sent an (empty) email, never when the key was absent.
+  const emailRemoved = 'email' in data && before?.email && !data.email?.trim();
   if (emailRemoved) db.prepare('DELETE FROM user_accounts WHERE player_id = ?').run(data.id);
   return result;
 }
 
 function setMembership(ids, isMember) {
+  return patchPlayers(ids, { is_member: !!isMember });
+}
+
+function patchPlayers(ids, patch) {
   if (!Array.isArray(ids) || ids.length === 0) throw _validationError('Select at least one player');
-  return playerModel.setMembership(ids, isMember);
+  return playerModel.patchPlayers(ids, patch);
 }
 
 function deletePlayer(id) {
@@ -67,6 +78,6 @@ function getAllPlayerRecords() {
 }
 
 module.exports = {
-  getAllPlayers, addPlayer, updatePlayer, deletePlayer, setMembership,
+  getAllPlayers, addPlayer, updatePlayer, deletePlayer, setMembership, patchPlayers,
   getPlayerById, getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
 };

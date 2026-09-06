@@ -2,43 +2,76 @@ const { getDB } = require('../database/db');
 const matchModel = require('./matchModel');
 
 function getAllPlayers() {
-  return getDB().prepare('SELECT * FROM players ORDER BY name ASC').all();
+  // account_status is derived, never stored: verified once a password is set,
+  // pending while an invite row exists, none otherwise. The route strips it
+  // (with the other private fields) before a non-admin sees the list.
+  return getDB().prepare(`
+    SELECT p.*,
+      CASE WHEN ua.password_hash IS NOT NULL THEN 'verified'
+           WHEN ua.player_id IS NOT NULL THEN 'pending'
+           ELSE 'none' END AS account_status
+    FROM players p
+    LEFT JOIN user_accounts ua ON ua.player_id = p.id
+    ORDER BY p.name ASC`).all();
 }
 
 function getPlayerById(id) {
   return getDB().prepare('SELECT * FROM players WHERE id = ?').get(Number(id));
 }
 
-function addPlayer({ name, email, phone, club_locker_rating, exclude_from_ladder }) {
+function addPlayer({ name, email, phone, member_number, club_locker_rating, exclude_from_ladder, is_member, is_tester }) {
   const db = getDB();
   const result = db.prepare(
-    'INSERT INTO players (name, email, phone, club_locker_rating, exclude_from_ladder) VALUES (?, ?, ?, ?, ?)'
-  ).run(name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0);
+    `INSERT INTO players (name, email, phone, member_number, club_locker_rating, exclude_from_ladder, is_member, is_tester)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(name, email || null, phone || null, member_number || null, club_locker_rating ?? null,
+    exclude_from_ladder ? 1 : 0, is_member ? 1 : 0, is_tester ? 1 : 0);
   return getPlayerById(result.lastInsertRowid);
 }
 
-function updatePlayer({ id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester, is_member }) {
-  // The account flags update only when the caller actually sent them —
-  // callers that edit other fields (bulk edit, profile forms) must not
-  // silently strip a player's membership or tester status.
-  getDB().prepare(
-    `UPDATE players SET name = ?, email = ?, phone = ?, club_locker_rating = ?, exclude_from_ladder = ?,
-       is_tester = COALESCE(?, is_tester), is_member = COALESCE(?, is_member)
-     WHERE id = ?`
-  ).run(
-    name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0,
-    is_tester === undefined ? null : (is_tester ? 1 : 0),
-    is_member === undefined ? null : (is_member ? 1 : 0),
-    Number(id)
-  );
-  return getPlayerById(id);
+// Partial update: only the keys the caller actually sent change. A CSV import
+// updating just ratings, a bulk edit sending no flags, or a form that predates
+// a column must never blank out what it didn't mention.
+const _UPDATABLE = ['name', 'email', 'phone', 'member_number', 'club_locker_rating', 'exclude_from_ladder', 'is_member', 'is_tester'];
+
+function updatePlayer(data) {
+  const sets = [];
+  const vals = [];
+  for (const key of _UPDATABLE) {
+    if (!(key in data)) continue;
+    const v = data[key];
+    sets.push(`${key} = ?`);
+    if (key === 'name') vals.push(v);
+    else if (key === 'club_locker_rating') vals.push(v ?? null);
+    else if (key === 'exclude_from_ladder' || key === 'is_member' || key === 'is_tester') vals.push(v ? 1 : 0);
+    else vals.push(v || null);
+  }
+  if (sets.length) {
+    getDB().prepare(`UPDATE players SET ${sets.join(', ')} WHERE id = ?`).run(...vals, Number(data.id));
+  }
+  return getPlayerById(data.id);
 }
 
-// Bulk membership toggle for the players page: one statement, all-or-nothing.
-function setMembership(ids, isMember) {
+// Bulk field patch for the players page: one statement, all-or-nothing.
+// Only the flag columns and the rating may be patched this way.
+const _BULK_PATCHABLE = ['is_member', 'exclude_from_ladder', 'is_tester', 'club_locker_rating'];
+
+function patchPlayers(ids, patch) {
+  const sets = [];
+  const vals = [];
+  for (const key of _BULK_PATCHABLE) {
+    if (!(key in patch)) continue;
+    sets.push(`${key} = ?`);
+    vals.push(key === 'club_locker_rating' ? (patch[key] ?? null) : (patch[key] ? 1 : 0));
+  }
+  if (!sets.length) return 0;
   const list = ids.map(() => '?').join(',');
-  return getDB().prepare(`UPDATE players SET is_member = ? WHERE id IN (${list})`)
-    .run(isMember ? 1 : 0, ...ids.map(Number)).changes;
+  return getDB().prepare(`UPDATE players SET ${sets.join(', ')} WHERE id IN (${list})`)
+    .run(...vals, ...ids.map(Number)).changes;
+}
+
+function setMembership(ids, isMember) {
+  return patchPlayers(ids, { is_member: !!isMember });
 }
 
 function deletePlayer(id) {
@@ -251,6 +284,6 @@ function getPlayerUpcomingMatches(id) {
 }
 
 module.exports = {
-  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, setPlayerPhoto, setMembership,
+  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, setPlayerPhoto, setMembership, patchPlayers,
   getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
 };

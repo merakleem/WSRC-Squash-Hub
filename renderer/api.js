@@ -34,6 +34,8 @@ if (typeof window !== 'undefined' && !window.api) {
     updatePlayer:     (d) => _apiFetch('PUT',    `/api/players/${d.id}`, d),
     deletePlayer:     (id)=> _apiFetch('DELETE', `/api/players/${id}`),
     setPlayersMembership: (d) => _apiFetch('POST', '/api/players/membership', d),
+    bulkPatchPlayers: (d) => _apiFetch('POST', '/api/players/bulk', d),
+    bulkSendInvites:  (d) => _apiFetch('POST', '/api/players/send-invite', d),
 
     getLeagues:       ()  => _apiFetch('GET',    '/api/leagues'),
     getLeague:        (id)=> _apiFetch('GET',    `/api/leagues/${id}`),
