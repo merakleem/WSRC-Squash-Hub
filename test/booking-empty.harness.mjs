@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import { parseHTML } from 'linkedom';
 const REPO = '/Users/meraklee/Desktop/Codebases/Squash Management System';
-const HERE = new URL('.', import.meta.url).pathname;
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 const { window } = parseHTML(`<!doctype html><html><body>
   <div id="pageTitle"></div><div id="topbarActions"></div><main class="content"></main>
   <div id="modalOverlay"><div id="modal"><div id="modalTitle"></div><div id="modalBody"></div><button id="modalClose"></button></div></div>

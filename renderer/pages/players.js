@@ -1625,8 +1625,6 @@ export function renderPlayerProfile() {
   const stats = _profileStats(history);
 
   const ladder = p.ladder || {};
-  const ladderSeries = p.ladder_history || [];
-  const bestRankInSeason = _bestRankInWindow(ladderSeries, seasonsById[activeSeason]);
 
   // ===== HEADER =====
   const canEditPhoto = adminMode || state.currentUser?.playerId === p.id;
@@ -1708,7 +1706,6 @@ export function renderPlayerProfile() {
     { key: 'results', label: 'Results' },
     { key: 'upcoming', label: 'Upcoming' },
     { key: 'tournaments', label: 'Tournaments' },
-    { key: 'ladder', label: 'Ladder history' },
   ];
   // Normalised back onto the module state so the arrow-key handler and the
   // filter rebuild can't read a tab key the DOM never rendered.
@@ -1771,7 +1768,6 @@ export function renderPlayerProfile() {
     <div class="pp-detail-strip">
       <div><span class="pp-fig">${stats.gamesWon}–${stats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
       <div><span class="pp-fig">${stats.gameWinPct === null ? '—' : `${stats.gameWinPct}%`}</span><span class="pp-fig-label">Game win rate</span></div>
-      <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
     </div>`;
 
   const sourceFilters = [
@@ -1852,43 +1848,24 @@ export function renderPlayerProfile() {
         </div>`).join('') : emptyBlock('No tournaments played yet')}
     </div>`;
 
-  // -- Career ladder panel (all-time, independent of the season selector) --
-  // The chart is an all-time positional replay, so the overlay reads the same
-  // series rather than the header's season rank. Pairing the two put a rating
-  // rank above a positional chart that legitimately disagreed with it.
-  const careerLast = ladderSeries[ladderSeries.length - 1] || null;
-  const careerBest = _bestRankInWindow(ladderSeries, null);
-
-  // The summary sits above the chart rather than floating over it: as an
-  // overlay it covered the plot and blocked the points underneath it.
-  const ladderPanelHTML = careerLast == null ? '' : `
-    <div class="pp-ladder-card">
-      <span class="pp-card-label pp-on-navy">Career ladder position · all seasons</span>
-      <div class="pp-ladder-summary">
-        <div class="pp-ladder-now">#${careerLast.position}</div>
-        <div class="pp-ladder-of">of ${careerLast.ladder_size} players</div>
-        <div class="pp-ladder-rule"></div>
-        <div class="pp-ladder-best">#${careerBest}<span>Best ever</span></div>
-      </div>
-      ${_ladderChartHTML(ladderSeries, seasons, 'desktop')}
-    </div>`;
-
+  // The career ladder chart lived here. It plotted an all-time positional
+  // replay while the header reported the season's own standing, so the two
+  // numbers on one page disagreed by design. Pulled until ladder history is
+  // stored rather than re-simulated; the header rank is the reliable one.
   const panelFor = (tabKey) => {
     switch (tabKey) {
       case 'upcoming':    return upcomingPanelHTML;
       case 'tournaments': return tournPanelHTML;
-      case 'ladder':      return ladderPanelHTML || emptyBlock('Not on the ladder yet', reportMatchAction);
       default:            return buildResultsPanel(_profileResultFilter);
     }
   };
 
   // ===== MOBILE =====
-  // A single scrolling column rather than tabs: record, recent results, then an
-  // "all time" divider that signals the ladder card ignores the season filter.
+  // A single scrolling column rather than tabs: record, then recent results.
   // Tapping a quick link opens that panel over the column, with a way back.
   // Without this the link set a desktop tab that mobile never renders, so
   // nothing happened.
-  const MOBILE_TITLES = { results: 'Results', upcoming: 'Upcoming matches', tournaments: 'Tournaments', ladder: 'Ladder history' };
+  const MOBILE_TITLES = { results: 'Results', upcoming: 'Upcoming matches', tournaments: 'Tournaments' };
   const mobileHTML = _profileMobileView ? `
     <div class="pp-mobile">
       <button class="pp-back" id="ppMobileBack">
@@ -1920,7 +1897,7 @@ export function renderPlayerProfile() {
           <div class="pp-bar pp-bar-lg"><span style="width:${stats.winPct || 0}%"></span></div>
           <div class="pp-figures">
             <div><span class="pp-fig">${stats.gamesWon}–${stats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
-                  <div><span class="pp-fig">${bestRankInSeason ? `#${bestRankInSeason}` : '—'}</span><span class="pp-fig-label">Best rank</span></div>
+            <div><span class="pp-fig">${stats.gameWinPct === null ? '—' : `${stats.gameWinPct}%`}</span><span class="pp-fig-label">Game win rate</span></div>
           </div>`}
       </div>
 
@@ -1932,13 +1909,6 @@ export function renderPlayerProfile() {
           </div>
           ${history.slice(0, 3).map((m) => resultRow(m)).join('')}
         </div>` : ''}
-
-      ${careerLast == null ? '' : `
-        <div class="pp-divider"><span>All time</span></div>
-        <div class="pp-ladder-card pp-ladder-card-sm">
-          <span class="pp-card-label pp-on-navy">Career ladder position</span>
-          ${_ladderChartHTML(ladderSeries, seasons, 'mobile')}
-        </div>`}
 
       ${_quickLinksHTML(upcoming.length, tournamentResults.length)}
     </div>`;
@@ -1966,33 +1936,12 @@ export function renderPlayerProfile() {
 
   document.getElementById('btnEditPhoto')?.addEventListener('click', () => openPhotoModal(p));
 
-  // Chart points: hover shows the label on a pointer device via CSS. Touch has
-  // no hover, so a tap opens one and closes any other, and a tap anywhere else
-  // dismisses it.
-  content.querySelectorAll('.pp-chart').forEach((chart) => {
-    chart.addEventListener('click', (e) => {
-      const pt = e.target.closest('.pp-chart-pt');
-      chart.querySelectorAll('.pp-chart-pt.is-open').forEach((el) => {
-        if (el !== pt) el.classList.remove('is-open');
-      });
-      if (pt) {
-        pt.classList.toggle('is-open');
-        e.stopPropagation();
-      }
-    });
-  });
-
-  content.addEventListener('click', (e) => {
-    if (e.target.closest('.pp-chart-pt')) return;
-    content.querySelectorAll('.pp-chart-pt.is-open').forEach((el) => el.classList.remove('is-open'));
-  });
-
   const panelEl = document.getElementById('ppPanel');
   const tabEls = [...content.querySelectorAll('.pp-tab[data-pp-tab]')];
 
   // Only the panel's contents depend on the tab and the filter, so only they are
   // rebuilt. A full renderPlayerProfile() re-fetched the profile, replayed the
-  // ladder and replaced the header and chart, which lost the scroll position.
+  // ladder and replaced the header, which lost the scroll position.
   const wirePanel = () => {
     wireOpponentLinks(panelEl);
     panelEl.querySelectorAll('[data-pp-action="report-ladder"]').forEach((el) => {
@@ -2089,16 +2038,6 @@ function _profileStats(rows) {
   };
 }
 
-/** Best (lowest) ladder position reached inside a season's date window. */
-function _bestRankInWindow(series, season) {
-  if (!series?.length) return null;
-  const within = season
-    ? series.filter((pt) => pt.date >= season.start_date && pt.date <= season.end_date)
-    : series;
-  if (!within.length) return null;
-  return Math.min(...within.map((pt) => pt.position));
-}
-
 function _quickLinksHTML(upcomingCount, tournCount) {
   const chev = `<svg class="pp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>`;
   return `
@@ -2114,136 +2053,6 @@ function _quickLinksHTML(upcomingCount, tournCount) {
     </div>`;
 }
 
-/**
- * Ladder position over time as inline SVG.
- *
- * The viewBox aspect is kept equal to the rendered box aspect (2:1) so the
- * default preserveAspectRatio doesn't letterbox the plot inside the card.
- * The rank axis is inverted; a better rank sits higher.
- */
-function _ladderChartHTML(series, seasons, variant) {
-  if (!series || series.length < 2) {
-    return `<div class="pp-chart-empty">Not enough history to chart yet</div>`;
-  }
-
-  // A wide viewBox with width:100%/height:auto fills the card edge to edge; the
-  // default preserveAspectRatio would otherwise letterbox a fixed-height chart.
-  const W = variant === 'mobile' ? 640 : 1000;
-  const H = variant === 'mobile' ? 300 : 340;
-  const X0 = 40, X1 = W - 16, Y0 = 30, Y1 = H - 56;
-
-  const positions = series.map((pt) => pt.position);
-  let best = Math.min(...positions);
-  let worst = Math.max(...positions);
-  if (best === worst) { best = Math.max(1, best - 1); worst = worst + 1; }
-
-  const ms = (d) => new Date(`${String(d).slice(0, 10)}T00:00:00Z`).getTime();
-  const t0 = ms(series[0].date);
-  const t1 = ms(series[series.length - 1].date);
-  const span = t1 - t0 || 1;
-
-  const x = (d) => X0 + ((ms(d) - t0) / span) * (X1 - X0);
-  const y = (pos) => Y0 + ((pos - best) / (worst - best)) * (Y1 - Y0);
-
-  const pts = series.map((pt) => `${x(pt.date).toFixed(1)},${y(pt.position).toFixed(1)}`);
-  const area = `M${pts.join(' L')} L${X1.toFixed(1)},${Y1} L${X0},${Y1} Z`;
-
-  // Y gridlines at the best, middle and worst rank reached.
-  const mid = Math.round((best + worst) / 2);
-  const gridRows = [best, mid, worst].map((pos, i) => {
-    const gy = Y0 + (i / 2) * (Y1 - Y0);
-    return `<line x1="${X0}" y1="${gy}" x2="${X1}" y2="${gy}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
-            <text x="${X0 - 10}" y="${gy + 4}" text-anchor="end" font-size="12" fill="rgba(255,255,255,.5)">#${pos}</text>`;
-  }).join('');
-
-  // X axis is dated rather than labelled by season: evenly spaced ticks across
-  // the range, showing the year only when the span crosses one.
-  const tickCount = variant === 'mobile' ? 4 : 7;
-  const multiYear = new Date(t0).getUTCFullYear() !== new Date(t1).getUTCFullYear();
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const xTicks = Array.from({ length: tickCount }, (_, i) => {
-    const t = t0 + (span * i) / (tickCount - 1);
-    const d = new Date(t);
-    const px = X0 + ((t - t0) / span) * (X1 - X0);
-    const label = multiYear
-      ? `${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`
-      : `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
-    const anchor = i === 0 ? 'start' : i === tickCount - 1 ? 'end' : 'middle';
-    return `<line x1="${px.toFixed(1)}" y1="${Y1}" x2="${px.toFixed(1)}" y2="${Y1 + 6}" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
-            <text x="${px.toFixed(1)}" y="${Y1 + 24}" text-anchor="${anchor}" font-size="12" fill="rgba(255,255,255,.55)">${label}</text>`;
-  }).join('');
-
-  // Season boundaries, so the dated axis still shows where one season ends.
-  const boundaries = (seasons || [])
-    .map((sn) => sn.start_date)
-    .filter((d) => d && ms(d) > t0 && ms(d) < t1)
-    .map((d) => {
-      const px = x(d).toFixed(1);
-      const label = (seasons.find((sn) => sn.start_date === d) || {}).name || '';
-      return `<line x1="${px}" y1="${Y0 - 10}" x2="${px}" y2="${Y1}" stroke="rgba(255,255,255,.22)" stroke-width="1" stroke-dasharray="3 3"/>
-              <text x="${px}" y="${Y0 - 14}" text-anchor="middle" font-size="11" fill="rgba(255,255,255,.55)">${esc(label)}</text>`;
-    }).join('');
-
-  const fmt = (d) => {
-    const dt = new Date(`${String(d).slice(0, 10)}T00:00:00Z`);
-    return `${MONTHS[dt.getUTCMonth()]} ${dt.getUTCDate()}, ${dt.getUTCFullYear()}`;
-  };
-
-  // Every point in the series is a real position change, so every one gets a
-  // marker. The label sits in the markup rather than in a <title>, so it shows
-  // the instant the pointer arrives instead of after the browser's tooltip
-  // delay, and so it can be opened by tapping on a touch screen.
-  const last = series.length - 1;
-  const shortDate = (d) => {
-    const dt = new Date(`${String(d).slice(0, 10)}T00:00:00Z`);
-    return `${MONTHS[dt.getUTCMonth()]} ${dt.getUTCDate()}`;
-  };
-  const markers = series.map((pt, i) => {
-    const cx = x(pt.date);
-    const cy = y(pt.position);
-    const dot = i === last
-      ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6" fill="#fff"/>`
-      : `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="#1a2150" stroke="#8fa8ff" stroke-width="2.5"/>`;
-
-    const label = `#${pt.position} · ${shortDate(pt.date)}`;
-    // SVG can't measure text before paint, so the pill is sized from the label
-    // length and then kept inside the plot so it can't run off an edge.
-    const w = label.length * 7 + 18;
-    const cxClamped = Math.min(X1 - w / 2, Math.max(X0 + w / 2, cx));
-    // Flip below the dot near the top, where there is no room above it.
-    const above = cy > Y0 + 40;
-    const ty = above ? cy - 14 : cy + 14;
-
-    return `
-      <g class="pp-chart-pt" data-pt="${i}">
-        ${dot}
-        <circle class="pp-chart-hit" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="16" fill="transparent"/>
-        <g class="pp-chart-tip" transform="translate(${cxClamped.toFixed(1)}, ${ty.toFixed(1)})">
-          <rect x="${(-w / 2).toFixed(1)}" y="${above ? -22 : 0}" width="${w}" height="22" rx="6"
-            fill="#0d1330" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
-          <text x="0" y="${above ? -7 : 15}" text-anchor="middle" font-family="Barlow, sans-serif"
-            font-size="12.5" font-weight="700" fill="#fff">${label}</text>
-        </g>
-      </g>`;
-  }).join('');
-
-  const lastPt = series[last];
-  const lastX = x(lastPt.date);
-  const lastY = y(lastPt.position);
-
-  return `
-    <svg class="pp-chart pp-chart-${variant}" viewBox="0 0 ${W} ${H}" role="img"
-      aria-label="Ladder position over time, currently ranked ${lastPt.position} of ${lastPt.ladder_size}">
-      ${gridRows}
-      ${boundaries}
-      <path d="${area}" fill="#8fa8ff" fill-opacity="0.14"/>
-      <polyline points="${pts.join(' ')}" fill="none" stroke="#8fa8ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
-      ${xTicks}
-      ${markers}
-      <text x="${Math.min(X1 - 10, Math.max(X0 + 10, lastX)).toFixed(1)}" y="${(lastY - 16).toFixed(1)}"
-        text-anchor="middle" font-family="Barlow, sans-serif" font-size="17" font-weight="700" fill="#fff">#${lastPt.position}</text>
-    </svg>`;
-}
 // ===== PROFILE PHOTO =====
 // Avatars are only ever drawn as small circles, so the browser resizes and
 // re-encodes before upload: a phone photo goes from several megabytes to tens

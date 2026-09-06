@@ -55,7 +55,6 @@ for (const id of ids) {
     tournHistory: tourns.getPlayerTournamentHistory(id),
     tournUpcoming: tourns.getPlayerTournamentUpcoming(id),
     ladderStats: ladder.getPlayerLadderStats(id),
-    ladderHistory: ladder.getPlayerLadderHistory(id),
     ratingDeltas: ladder.getPlayerMatchRatingDeltas(id),
   };
 }

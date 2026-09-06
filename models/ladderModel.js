@@ -491,95 +491,6 @@ function getSeasonRecords(seasonKey) {
 }
 
 /**
- * A player's ladder position over time, for the profile's history chart.
- *
- * Nothing persists historical standings, so the series is reconstructed from
- * the same chronological replay that produces the live ladder; one pass,
- * recording the player's position whenever it changes. Deliberately all-time
- * and leapfrog-based: the chart shows a career arc, not a season's ratings.
- */
-function getPlayerLadderHistory(playerId) {
-  const db = getDB();
-  const id = Number(playerId);
-
-  const players = db.prepare(PLAYER_SELECT).all();
-  const playerIds = new Set(players.map((p) => p.id));
-  if (!playerIds.has(id)) return [];
-
-  const matches = getCompletedMatches();
-  const playerMap = Object.fromEntries(players.map((p) => [p.id, p]));
-  const timeline = _ladderTimeline(players, matches);
-
-  // Same replay as the live ladder, including arrivals: the line has to start
-  // where the player joined, and the ladder it is measured against grows as
-  // other members arrive.
-  const ranking = [];
-  const series = [];
-  let position = null;
-  // How big the ladder was at the end of each day. A point is only recorded
-  // when the player moves, so the size captured at that instant is stale by the
-  // end of a day that added more members - the bulk import put 68 on the ladder
-  // in one go, which would otherwise chart as "23rd of 23".
-  const sizeByDay = {};
-  const record = (date) => {
-    const next = ranking.indexOf(id) + 1;
-    if (next === 0 || next === position) return;
-    position = next;
-    series.push({ date, position, ladder_size: ranking.length });
-  };
-
-  for (const event of timeline) {
-    if (event.kind === 'join') {
-      if (ranking.includes(event.player.id)) continue;
-      ranking.splice(_joinIndex(ranking, event.player, playerMap), 0, event.player.id);
-      // Another arrival can push this player down a place, which is a real
-      // move on their chart, so every join is a candidate point.
-      record(event.day);
-      sizeByDay[event.day] = ranking.length;
-      continue;
-    }
-
-    const match = event.match;
-    const winnerId = match.eff_winner_id;
-    const loserId = match.eff_loser_id;
-    if (!playerIds.has(winnerId) || !playerIds.has(loserId)) continue;
-
-    const wi = ranking.indexOf(winnerId);
-    const li = ranking.indexOf(loserId);
-    if (wi === -1 || li === -1 || wi <= li) continue;
-
-    ranking.splice(wi, 1);
-    ranking.splice(li, 0, winnerId);
-
-    // Record only when this player actually moved. A full indexOf per match is
-    // a few thousand operations over the club's whole history; not worth
-    // optimising into range arithmetic that would be easy to get subtly wrong.
-    const day = String(match.sort_key || '').slice(0, 10);
-    record(day);
-    sizeByDay[day] = ranking.length;
-  }
-  const size = ranking.length;
-
-  // One point per day: several matches can land on the same date, and plotting
-  // each of them stacks dots vertically on the same x. Matches are replayed in
-  // order, so the last entry for a date is where the player finished that day,
-  // which is the only one worth charting.
-  const byDay = new Map();
-  for (const point of series) byDay.set(point.date, point);
-  const daily = [...byDay.values()].map((point) => ({
-    ...point,
-    ladder_size: sizeByDay[point.date] ?? point.ladder_size,
-  }));
-
-  // Always end at today's standing so the line reaches the right edge.
-  const today = new Date().toISOString().slice(0, 10);
-  const last = daily[daily.length - 1];
-  if (!last || last.date !== today) daily.push({ date: today, position, ladder_size: size });
-
-  return daily;
-}
-
-/**
  * Rating change per match for one player, keyed `source:matchId`.
  *
  * Only rated seasons produce deltas; a positional season has no rating to
@@ -659,7 +570,7 @@ function getPlayerLadderStats(playerId) {
 }
 
 module.exports = {
-  getLadder, getPlayerLadderStats, getPlayerLadderHistory, getPlayerMatchRatingDeltas,
+  getLadder, getPlayerLadderStats, getPlayerMatchRatingDeltas,
   getLadderForSeason, computeEloLadder, getSeasonRecords,
   getCompletedMatches, getLastMatchDates,
 };

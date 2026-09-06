@@ -32,7 +32,6 @@ const PROFILE = (id, name) => ({
   id, name, email: 'x@x.invalid', member_number: '1042',
   division_name: 'Division 2', photo_path: null, accountStatus: 'verified',
   ladder: { position: 4, ladder_size: 20, rating: 1500, system: 'elo', rank_change: 0 },
-  ladder_history: [],
   history: [{ id: 1, result: 'W', my_score: 3, their_score: 1, opponent_name: 'Rival Rae', opponent_id: 99,
               week_date: '2026-08-20', league_name: 'Autumn', division_name: 'Division 2', source: 'league' }],
   upcoming: [],
@@ -82,10 +81,18 @@ log.textContent += '\nRESULTS FIGURES\n';
 await show(PROFILE(7, 'Mona Member'), { role: 'player', playerId: 99 });
 const strip = $('.pp-detail-strip');
 ok('the season figures render', !!strip);
-ok('games, game win rate and best rank are there',
-  ['Games', 'Game win rate', 'Best rank'].every((l) => strip.textContent.includes(l)), strip.textContent.trim());
+ok('games and game win rate are there',
+  ['Games', 'Game win rate'].every((l) => strip.textContent.includes(l)), strip.textContent.trim());
 ok('the tournament count is gone from them', !/Tournaments/.test(strip.textContent));
 ok('but tournaments keep their own quick link', /Tournaments/.test($('.pp-quick')?.textContent || ''));
+ok('best rank went with the ladder history', !/Best rank/.test(strip.textContent));
+
+log.textContent += '\nLADDER HISTORY IS GONE\n';
+ok('there is no Ladder history tab', !$$('.pp-tab').some((t) => /Ladder history/.test(t.textContent)),
+  $$('.pp-tab').map((t) => t.textContent.trim()).join(', '));
+ok('and no career chart anywhere', !$('.pp-chart') && !$('.pp-ladder-card'));
+ok('the header rank still stands', /#4/.test($('.pp-hstat-val')?.textContent || ''), $('.pp-hstat-val')?.textContent.trim());
+ok('naming the ladder it came from', /Rating ladder/.test($('.pp-hstat-label')?.textContent || ''));
 
 log.textContent += '\nREPORTING A LADDER MATCH\n';
 await show(EMPTY_PROFILE(7, 'Mona Member'), { role: 'player', playerId: 99 });

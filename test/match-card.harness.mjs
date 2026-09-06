@@ -2,11 +2,11 @@
 // against realistic API payloads. Run from a directory that has linkedom:
 //   mkdir -p /tmp/h && cd /tmp/h && npm i linkedom && node <repo>/test/match-card.harness.mjs
 import { readFileSync, writeFileSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import { parseHTML } from 'linkedom';
 
 const REPO = '/Users/meraklee/Desktop/Codebases/Squash Management System';
-const HERE = new URL('.', import.meta.url).pathname;
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 
 const { window } = parseHTML(`<!doctype html><html><body>
   <div id="pageTitle"></div><div id="topbarActions"></div>

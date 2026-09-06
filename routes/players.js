@@ -140,7 +140,6 @@ router.get('/players/:id/history', wrap(async (req, res) => {
     wins: rec.wins || 0, losses: rec.losses || 0,
     history, upcoming, accountStatus, tournamentResults, seasons,
     ladder: ladderStats,
-    ladder_history: ladderModel.getPlayerLadderHistory(id),
     division_name: division?.name || null,
   });
 }));

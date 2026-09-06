@@ -2,10 +2,10 @@
 // markup to a static page so Chrome can show the pixels.
 // Usage: node harness.mjs <payload.json> <out.html> <YYYY-MM-DD> [panel:new|panel:edit]
 import { readFileSync, writeFileSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import { parseHTML } from 'linkedom';
 const REPO='/Users/meraklee/Desktop/Codebases/Squash Management System';
-const HERE=new URL('.', import.meta.url).pathname;
+const HERE=fileURLToPath(new URL('.', import.meta.url));
 const OUT=process.argv[3];
 const MODE=process.argv[5]||'';
 const payload=JSON.parse(readFileSync(process.argv[2],'utf8'));
