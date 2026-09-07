@@ -42,12 +42,14 @@ async function main() {
     const login = get('/login');
     ok('the court photo is the backdrop', /class="shot" src="\/assets\/court-racquets\.jpg"/.test(login));
     ok('under the navy gradient', /linear-gradient\(120deg, rgba\(15,21,51,\.9\)/.test(login));
-    ok('the crest and headline lead the left column', /class="crest"/.test(login) && /Your club,<br>on your schedule\./.test(login));
-    ok('the blurb names what the app is for', /Court bookings, ladder standings and league results for WSRC members\./.test(login));
+    ok('the crest and headline lead the left column', /class="crest"/.test(login) && /<h2 class="headline">Welcome Back\.<\/h2>/.test(login));
+    ok('the blurb names what the app is for', /Court booking, leagues, ladder, and events for WSRC members\./.test(login));
     ok('the panel is frosted glass', /backdrop-filter: blur\(18px\)/.test(login) && /-webkit-backdrop-filter: blur\(18px\)/.test(login));
     ok('with a fallback where that is unsupported', /@supports not/.test(login) && /rgba\(30,39,88,\.55\)/.test(login));
     ok('titled Sign in', /<h1>Sign in<\/h1>/.test(login));
-    ok('and welcoming them back', /Welcome back to Play WSRC\./.test(login));
+    // The headline beside the panel already says welcome back; a second one in
+    // the card was saying it twice.
+    ok('with no subtitle under it', !/class="panel-sub"/.test(login));
     ok('the form still posts to \/login', /<form method="POST" action="\/login">/.test(login));
     ok('the email field keeps its name and autocomplete', /name="email"[^>]*autocomplete="email"/.test(login));
     ok('the password field keeps its name, autofocus and autocomplete', /name="password"[^>]*autofocus autocomplete="current-password"/.test(login));

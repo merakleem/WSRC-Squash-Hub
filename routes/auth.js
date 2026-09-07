@@ -190,8 +190,8 @@ function authPage({ title, heading, sub, body, error, info, link, variant }) {
   <div class="row">
     <div class="intro">
       <img class="crest" src="/assets/WSRC_Logo_Grey%203.png" alt="WSRC">
-      <h2 class="headline">Your club,<br>on your schedule.</h2>
-      <p class="blurb">Court bookings, ladder standings and league results for WSRC members.</p>
+      <h2 class="headline">Welcome Back.</h2>
+      <p class="blurb">Court booking, leagues, ladder, and events for WSRC members.</p>
     </div>
     <div class="panel">
       <div class="panel-head">
@@ -258,7 +258,7 @@ function loginPage(extra = {}) {
   return authPage({
     title: 'Sign In',
     heading: 'Sign in',
-    sub: 'Welcome back to Play WSRC.',
+    // No subtitle: the headline beside it already welcomes them back.
     body: loginFormBody(),
     link: { href: '/forgot-password', text: 'Forgot password?' },
     variant: 'login',
