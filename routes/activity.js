@@ -2,6 +2,7 @@ const express = require('express');
 const { getDB } = require('../database/db');
 const seasonModel = require('../models/seasonModel');
 const matchModel = require('../models/matchModel');
+const ladderModel = require('../models/ladderModel');
 const { wrap } = require('../middleware');
 
 const router = express.Router();
@@ -58,11 +59,32 @@ router.get('/activity', wrap(async (req, res) => {
     return { ...m, player1_score: sc.p1, player2_score: sc.p2, scores: undefined };
   }).sort((a, b) => (a.confirmed_at || '').localeCompare(b.confirmed_at || '') || 0);
 
-  // The replay below reproduces positional ladder places. Only label matches
-  // with them while the current season is actually played that way; under a
-  // rating ladder those positions would be invented.
+  // The replay below reproduces positional ladder places, which are a leapfrog
+  // concept: under a rating ladder they would be invented. A rating ladder has
+  // real positions of its own, so the labels come from it instead - the rank
+  // each player held on the day, which is what the ladder page would have shown
+  // then. Cached by date, since a night of league play shares one.
   const currentSeason = seasonModel.getCurrentSeason();
-  const showPositions = !currentSeason || currentSeason.ladder_system !== 'elo';
+  const isElo = !!currentSeason && currentSeason.ladder_system === 'elo';
+  const showPositions = !isElo;
+
+  const ladderSettings = seasonModel.getSettings();
+  const _ranksByDate = new Map();
+  function eloRanksOn(day) {
+    if (!day) return null;
+    if (!_ranksByDate.has(day)) {
+      const map = new Map();
+      try {
+        const rows = ladderModel.computeEloLadder(currentSeason.key, ladderSettings, day);
+        rows.forEach((r, i) => map.set(r.id, i + 1));
+      } catch (_) {
+        // A date outside the season has no ladder to read; the row simply goes
+        // unlabelled rather than carrying a rank from the wrong season.
+      }
+      _ranksByDate.set(day, map);
+    }
+    return _ranksByDate.get(day);
+  }
 
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 3650);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -80,6 +102,7 @@ router.get('/activity', wrap(async (req, res) => {
     const loserIdx  = ranking.indexOf(effLoserId);
 
     if ((match.confirmed_at || '') >= cutoff) {
+      const day = (match.confirmed_at || '').slice(0, 10);
       const placesWon = (winnerIdx !== -1 && loserIdx !== -1 && winnerIdx > loserIdx)
         ? winnerIdx - loserIdx : 0;
       activity.push({
@@ -87,8 +110,12 @@ router.get('/activity', wrap(async (req, res) => {
         // Positions and "moved up N places" are leapfrog concepts. Under a
         // rating ladder they would be fabricated, so they are omitted rather
         // than shown as something the ladder never did.
-        p1_pos: showPositions && p1Idx !== -1 ? p1Idx + 1 : null,
-        p2_pos: showPositions && p2Idx !== -1 ? p2Idx + 1 : null,
+        p1_pos: showPositions
+          ? (p1Idx !== -1 ? p1Idx + 1 : null)
+          : (eloRanksOn(day)?.get(effP1Id) ?? null),
+        p2_pos: showPositions
+          ? (p2Idx !== -1 ? p2Idx + 1 : null)
+          : (eloRanksOn(day)?.get(effP2Id) ?? null),
         places_moved: showPositions ? placesWon : 0,
       });
     }

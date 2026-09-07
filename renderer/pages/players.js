@@ -2392,7 +2392,6 @@ export async function openPickupGameModal() {
 
   document.getElementById('modalBody').innerHTML = `
     <div class="em-modal">
-      <div class="em-sheet-handle" aria-hidden="true"></div>
       ${playersSectionHTML}
 
       <div class="em-section">
