@@ -348,7 +348,10 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
       const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
-      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
+      // The scoreline scales the whole exchange, so it stays zero-sum: a 3-0
+      // pays the winner more and costs the loser exactly that much more.
+      const k = cfg.elo_k_factor * elo.marginMultiplier(match.winner_games, match.loser_games, cfg);
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], k);
       ratings[winnerId] = r.winner;
       ratings[loserId] = r.loser;
 
@@ -579,7 +582,8 @@ function getPlayerMatchRatingDeltas(playerId) {
       const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
-      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
+      const k = cfg.elo_k_factor * elo.marginMultiplier(match.winner_games, match.loser_games, cfg);
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], k);
       ratings[winnerId] = r.winner;
       ratings[loserId] = r.loser;
 

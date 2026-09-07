@@ -85,6 +85,11 @@ function getCompletedMatches(range = null) {
       ${WON_SIDE} AS won_side,
       CASE WHEN ${WON_SIDE} = 1 THEN ${EFF_P1} ELSE ${EFF_P2} END AS eff_winner_id,
       CASE WHEN ${WON_SIDE} = 1 THEN ${EFF_P2} ELSE ${EFF_P1} END AS eff_loser_id,
+      -- Games each side took, so the ladder can weigh a 3-0 differently from a
+      -- 3-2. Follows the winning side rather than player1, and a substitution
+      -- swaps who played, never what the score was.
+      CASE WHEN ${WON_SIDE} = 1 THEN m.player1_score ELSE m.player2_score END AS winner_games,
+      CASE WHEN ${WON_SIDE} = 1 THEN m.player2_score ELSE m.player1_score END AS loser_games,
       m.played_at AS sort_key
     FROM matches m
     ${EFF_JOIN}
@@ -97,11 +102,12 @@ function getCompletedMatches(range = null) {
 }
 
 /**
- * Each player's most recent match day, for the ladder's inactivity rule.
+ * Each player's most recent match day, which is how the ladder knows who has
+ * played at all and so who is on it.
  *
  * `asOf` (YYYY-MM-DD) ignores anything played after that date, so a past
- * season's ladder judges activity by what had happened at the time rather than
- * by what has happened since.
+ * season's ladder is judged by what had happened at the time rather than by
+ * what has happened since.
  */
 function getLastMatchDates(asOf = null) {
   const rows = getDB().prepare(`

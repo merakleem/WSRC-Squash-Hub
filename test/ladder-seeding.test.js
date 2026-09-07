@@ -144,6 +144,73 @@ const sum = Object.values(ladder.getPlayerMatchRatingDeltas(5)).reduce((a, b) =>
 ok('match deltas add up to the rating change', Math.abs(sum - (row.rating - row.seed_rating)) <= 2,
   `shown ${sum}, actual ${row.rating - row.seed_rating}`);
 
+console.log('\nRATINGS DECIDE THE POINTS, NOT LADDER POSITIONS');
+// The gap that matters is in rating. Two players 200 apart trade the same
+// points whether they sit at #2 and #12 or #40 and #55.
+ok('the same rating gap pays the same wherever it sits on the ladder',
+  elo.ratingDelta(1000, 1200, cfg.elo_k_factor) === elo.ratingDelta(1300, 1500, cfg.elo_k_factor),
+  elo.ratingDelta(1000, 1200, cfg.elo_k_factor).toFixed(2));
+ok('and a bigger rating gap pays more',
+  elo.ratingDelta(1000, 1400, cfg.elo_k_factor) > elo.ratingDelta(1000, 1100, cfg.elo_k_factor));
+ok('expected score is a function of the difference alone',
+  elo.expectedScore(1000, 1200) === elo.expectedScore(1800, 2000));
+
+console.log('\nTHE SCORELINE COUNTS');
+const M0 = (w, l) => elo.marginMultiplier(w, l, cfg);
+ok('a 3-1 is the middle result and scores at face value', M0(3, 1) === 1);
+ok('a 3-0 is worth more than a 3-1', M0(3, 0) > M0(3, 1), `x${M0(3, 0).toFixed(2)}`);
+ok('and a 3-2 is worth less', M0(3, 2) < M0(3, 1), `x${M0(3, 2).toFixed(2)}`);
+ok('so a 3-0 beats a 3-2 by twice the weight',
+  Math.abs((M0(3, 0) - M0(3, 2)) - 2 * cfg.elo_margin_weight) < 1e-9);
+ok('a match with no games recorded still counts at face value',
+  M0(null, null) === 1 && M0('', '') === 1 && M0(undefined, undefined) === 1);
+ok('the weight is a setting', elo.config({ elo_margin_weight: '0.3' }).elo_margin_weight === 0.3);
+ok('at zero the scoreline is ignored entirely', (() => {
+  const flat = elo.config({ elo_margin_weight: 0 });
+  return elo.marginMultiplier(3, 0, flat) === 1 && elo.marginMultiplier(3, 2, flat) === 1;
+})());
+ok('and a huge weight cannot make a win worth nothing',
+  elo.marginMultiplier(3, 2, elo.config({ elo_margin_weight: 5 })) >= 0.2,
+  String(elo.marginMultiplier(3, 2, elo.config({ elo_margin_weight: 5 }))));
+
+// And the same, played out on a ladder: the loser gives up exactly what the
+// winner takes, at every scoreline.
+db.prepare('DELETE FROM matches').run();
+db.prepare('DELETE FROM players').run();
+// Seven players, so the seed range spreads them about 100 apart rather than the
+// full 600 two players would be. Two evenly matched opponents are what makes a
+// scoreline's worth visible; between a 1400 and an 800 every result rounds to
+// the same point.
+for (let i = 0; i < 7; i++) add(20 + i, `Rung ${i + 1}`, 4.6 - i * 0.1, '2025-09-02');
+const seedSeason = () => {
+  // One match each in the season before, won by the higher-rated player, so
+  // everybody is ranked and nobody is reordered.
+  for (let i = 0; i < 6; i += 2) {
+    db.prepare(`INSERT INTO matches (type,status,player1_id,player2_id,player1_score,player2_score,winner_id,played_at)
+                VALUES ('ladder','played',?,?,3,1,?,'2025-10-02 19:00:00')`).run(20 + i, 21 + i, 20 + i);
+  }
+};
+const swing = (w, l) => {
+  db.prepare('DELETE FROM matches').run();
+  seedSeason();
+  // Rung 4 beats Rung 5, its nearest neighbour on the ladder.
+  db.prepare(`INSERT INTO matches (type,status,player1_id,player2_id,player1_score,player2_score,winner_id,played_at)
+              VALUES ('ladder','played',23,24,?,?,23,'2026-09-05 19:00:00')`).run(w, l);
+  const rows = ladder.computeEloLadder(seasonModel.getCurrentSeasonKey(), seasonModel.getSettings());
+  const a = rows.find((r) => r.id === 23);
+  const b = rows.find((r) => r.id === 24);
+  return { won: a.rating - a.seed_rating, lost: b.seed_rating - b.rating };
+};
+const s30 = swing(3, 0);
+const s31 = swing(3, 1);
+const s32 = swing(3, 2);
+ok('winning 3-0 pays more than 3-1, which pays more than 3-2',
+  s30.won > s31.won && s31.won > s32.won, `${s30.won} > ${s31.won} > ${s32.won}`);
+ok('losing 2-3 costs less than losing 0-3',
+  s32.lost < s30.lost, `${s32.lost} vs ${s30.lost}`);
+ok('and every scoreline is still an even exchange',
+  s30.won === s30.lost && s31.won === s31.lost && s32.won === s32.lost);
+
 console.log('\nWHERE A NEWCOMER SLOTS IN');
 // The positional ladder, which seeds the ratings. Once matches have been
 // played, position no longer tracks rating, and that is where the old rule

@@ -277,6 +277,31 @@ export async function renderClubSettings() {
 
       <div class="settings-section">
         <div class="settings-section-header">
+          <h2 class="settings-section-title">Winning margin</h2>
+        </div>
+        <p class="settings-section-desc">
+          How much the scoreline counts. A 3-1 is the middle result and scores at face value; a 3-0
+          pays more and a 3-2 pays less. The exchange stays even either way, so a narrow defeat costs
+          exactly as much less as a narrow win pays less.
+        </p>
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fMarginWeight">Weight per game</label>
+            <input class="form-control" id="fMarginWeight" type="number" min="0" max="0.5" step="0.05"
+              value="${esc(String(ladderCfg.elo_margin_weight))}">
+            <p class="form-hint">
+              How much each game of margin is worth, either side of a 3-1. Zero ignores the
+              scoreline: a win is a win. <span id="marginHint"></span>
+            </p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveMargin">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header">
           <h2 class="settings-section-title">Courts</h2>
           <button class="btn btn-primary btn-sm" id="btnAddCourt">+ Add Court</button>
         </div>
@@ -378,6 +403,28 @@ export async function renderClubSettings() {
         elo_club_locker_scale: bonusInput.value,
       });
       toast('Ladder settings saved');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  // Worked through on an evenly matched game, where the difference is clearest.
+  const marginInput = document.getElementById('fMarginWeight');
+  const marginHint = document.getElementById('marginHint');
+  const showMargin = () => {
+    const k = Number(ladderCfg.elo_k_factor);
+    const w = Number(marginInput.value || 0);
+    const at = (games) => (k / 2 * Math.max(0.2, 1 + (games - 2) * w)).toFixed(1);
+    marginHint.textContent =
+      `Between evenly matched players: 3-0 pays ${at(3)}, 3-1 pays ${at(2)}, 3-2 pays ${at(1)}.`;
+  };
+  showMargin();
+  marginInput?.addEventListener('input', showMargin);
+
+  document.getElementById('btnSaveMargin')?.addEventListener('click', async () => {
+    try {
+      await window.api.updateSettings({ elo_margin_weight: marginInput.value });
+      toast('Winning margin saved');
     } catch (err) {
       toast(err.message, 'error');
     }

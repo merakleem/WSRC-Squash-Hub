@@ -9,6 +9,7 @@ const { wrap, requireAdmin } = require('../middleware');
 const LADDER_LIMITS = {
   elo_club_locker_pivot: [0, 10],
   elo_club_locker_scale: [0, 600],
+  elo_margin_weight: [0, 0.5],
 };
 
 const router = express.Router();
@@ -31,7 +32,7 @@ router.put('/settings', requireAdmin, wrap(async (req, res) => {
     if (!(key in updates)) continue;
     const n = Number(updates[key]);
     if (!Number.isFinite(n) || n < lo || n > hi) {
-      const label = key === 'elo_club_locker_pivot' ? 'Mid-ladder rating' : 'Points per rating point';
+      const label = { elo_club_locker_pivot: 'Mid-ladder rating', elo_margin_weight: 'Weight per game' }[key] || 'Points per rating point';
       return res.status(400).json({ error: `${label} must be a number between ${lo} and ${hi}.` });
     }
     updates[key] = String(n);
