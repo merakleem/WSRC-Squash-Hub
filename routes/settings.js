@@ -7,7 +7,7 @@ const { wrap, requireAdmin } = require('../middleware');
 // the maths so much as make the ladder nonsense, and it is easier to refuse
 // here than to explain the standings afterwards.
 const LADDER_LIMITS = {
-  elo_unplayed_rating_bonus: [0, 600],
+  elo_unplayed_rating_multiplier: [0, 200],
 };
 
 const router = express.Router();
@@ -30,7 +30,7 @@ router.put('/settings', requireAdmin, wrap(async (req, res) => {
     if (!(key in updates)) continue;
     const n = Number(updates[key]);
     if (!Number.isFinite(n) || n < lo || n > hi) {
-      return res.status(400).json({ error: `Club Locker head start must be a number between ${lo} and ${hi}.` });
+      return res.status(400).json({ error: `Club Locker multiplier must be a number between ${lo} and ${hi}.` });
     }
     updates[key] = String(n);
   }

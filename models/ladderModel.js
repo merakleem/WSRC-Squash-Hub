@@ -314,24 +314,13 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   const playedOrder = priorOrder.filter((r) => !isUnplayed(r.id));
   const playedRank = Object.fromEntries(playedOrder.map((r, i) => [r.id, i + 1]));
 
-  // Where each Club Locker rating sits in the club's range, 0 to 1. Used only
-  // to order the players who have no results against each other.
-  const rated = players.map((p) => Number(p.club_locker_rating)).filter(Number.isFinite);
-  const lo = rated.length ? Math.min(...rated) : 0;
-  const hi = rated.length ? Math.max(...rated) : 0;
-  const shareOf = (p) => {
-    const r = Number(p.club_locker_rating);
-    if (!Number.isFinite(r) || hi <= lo) return 0;
-    return (r - lo) / (hi - lo);
-  };
-
   const ratings = {};
   for (const p of players) {
     ratings[p.id] = elo.seedRating({
       previousRating: null,
       previousPosition: playedRank[p.id] ?? null,
       ladderSize: playedOrder.length,
-      ratingShare: shareOf(p),
+      clubLockerRating: p.club_locker_rating,
       unplayed: isUnplayed(p.id),
     }, cfg);
   }
@@ -577,18 +566,14 @@ function getPlayerMatchRatingDeltas(playerId) {
   const isUnplayed = (pid) => !firstMatch[pid] || firstMatch[pid] >= firstRange.start;
   const playedOrder = priorOrder.filter((r) => !isUnplayed(r.id));
   const playedRank = Object.fromEntries(playedOrder.map((r, i) => [r.id, i + 1]));
-  const rated = players.map((p) => Number(p.club_locker_rating)).filter(Number.isFinite);
-  const lo = rated.length ? Math.min(...rated) : 0;
-  const hi = rated.length ? Math.max(...rated) : 0;
 
   const ratings = {};
   for (const p of players) {
-    const r = Number(p.club_locker_rating);
     ratings[p.id] = elo.seedRating({
       previousRating: null,
       previousPosition: playedRank[p.id] ?? null,
       ladderSize: playedOrder.length,
-      ratingShare: Number.isFinite(r) && hi > lo ? (r - lo) / (hi - lo) : 0,
+      clubLockerRating: p.club_locker_rating,
       unplayed: isUnplayed(p.id),
     }, cfg);
   }
