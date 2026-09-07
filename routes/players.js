@@ -15,8 +15,8 @@ const router = express.Router();
 
 // What a non-admin may see of another player. Contact details, account
 // status and the account flags — who is a member (or tester) is the club's
-// business, not something any signed-in player can enumerate. Tester rows
-// are left out of the list entirely.
+// business, not something any signed-in player can enumerate. The people
+// themselves are never left out: only these fields are.
 function _stripContact(player) {
   const { email, phone, member_number, is_member, is_tester, account_status, ...rest } = player;
   return rest;
@@ -25,7 +25,10 @@ function _stripContact(player) {
 router.get('/players', wrap(async (req, res) => {
   const players = await playerService.getAllPlayers();
   const isAdmin = req.session?.role === 'admin';
-  res.json(isAdmin ? players : players.filter((p) => !p.is_tester).map(_stripContact));
+  // Testers are listed like anyone else: the flag marks who gets features early,
+  // it does not make a person private. What non-admins still never receive is
+  // the flag itself, alongside contact details and membership - see _stripContact.
+  res.json(isAdmin ? players : players.map(_stripContact));
 }));
 
 // /records and /verified-count must be registered before /:id to avoid Express matching them as an id
