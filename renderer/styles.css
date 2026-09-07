@@ -32,7 +32,7 @@
   --border:        #dce3ed;
   --text:          #1c2b3a;
   --text-muted:    #6b7e93;
-  --sidebar-w:     220px;
+  --sidebar-w:     240px;
   --topbar-h:      60px;
   --page-pad:      24px;
   --radius:        8px;
@@ -70,7 +70,7 @@ body {
 h1, h2, h3, h4, h5, h6,
 .topbar-title,
 .section-title,
-.sidebar-logo-text,
+.sb-wordmark,
 .league-header-card h2,
 .roster-team-title,
 .box-division,
@@ -97,84 +97,222 @@ h1, h2, h3, h4, h5, h6,
 }
 
 /* ===== SIDEBAR ===== */
+/* One shell for both roles: a class on .sidebar decides which footer card and
+   which mobile drawer header are on show, so nothing role-specific is left to
+   a JS toggle that could be missed. */
 .sidebar {
   width: var(--sidebar-w);
   background: var(--primary);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  position: relative; /* the account popover is positioned inside it */
 }
 
+/* ── Wordmark ── */
 .sidebar-logo {
   display: flex;
-  flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 16px 16px 14px;
-  border-bottom: 1px solid rgba(255,255,255,.1);
+  gap: 12px;
+  padding: 18px 18px 16px;
 }
-
-.sidebar-logo-img {
-  width: 36px;
-  height: 36px;
-  object-fit: contain;
+.sb-crest {
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
+  border-radius: 11px;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-
-.sidebar-logo-text {
-  color: #fff;
-  font-size: 13px;
+.sb-crest img { width: 28px; height: 28px; object-fit: contain; }
+.sb-wordmark { display: flex; flex-direction: column; line-height: 1; flex: 1; min-width: 0; }
+.sb-word-play {
+  font-size: 10.5px;
   font-weight: 700;
-  line-height: 1.3;
-  letter-spacing: 0.04em;
+  letter-spacing: .18em;
   text-transform: uppercase;
-  text-align: left;
+  color: rgba(255,255,255,.55);
 }
+.sb-word-club {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  color: #fff;
+  margin-top: 2px;
+}
+/* Only ever seen in the mobile drawer, and only by admins. */
+.sb-admin-pill { display: none; }
 
+/* ── Mobile drawer header, players ── */
+.sb-drawer-profile { display: none; }
+
+/* ── Nav ── */
 .sidebar-nav {
-  padding: 12px 10px;
+  padding: 6px 12px;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  overflow: auto;
 }
+.sb-group { display: flex; flex-direction: column; gap: 2px; }
+.sb-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.35);
+  padding: 16px 10px 6px;
+}
+.sb-group:first-child .sb-group-label { padding-top: 8px; }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border-radius: var(--radius);
-  color: rgba(255,255,255,.7);
+  gap: 11px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: rgba(255,255,255,.72);
   text-decoration: none;
   font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
   transition: background .15s, color .15s;
 }
-.nav-icon {
-  width: 17px;
-  height: 17px;
-  flex-shrink: 0;
-  object-fit: contain; /* kept for any remaining <img> icons */
-}
+.nav-icon { width: 17px; height: 17px; flex-shrink: 0; }
 .nav-item:hover { background: rgba(255,255,255,.08); color: #fff; }
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(91,124,249,.22) 0%, rgba(91,124,249,.05) 100%);
-  border-left: 3px solid var(--accent);
-  padding-left: 9px; /* 12px - 3px border */
+  background: rgba(91,124,249,.28);
   color: #fff;
+  font-weight: 600;
 }
-.nav-item-logout { opacity: 0.7; }
-.nav-item-logout:hover { opacity: 1; }
 
-.sidebar-bottom {
-  padding: 8px 10px 16px;
+/* ── Account popover (players) ── */
+.sb-menu {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 78px;
+  z-index: 10;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(10,16,40,.35);
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  border-top: 1px solid rgba(255,255,255,0.12);
+  gap: 1px;
 }
+.sb-menu[hidden] { display: none; }
+.sb-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.sb-menu-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+.sb-menu-item:hover { background: #f0f2f7; }
+.sb-menu-item--danger { color: #b42318; }
+.sb-menu-item--danger:hover { background: #fdf1f0; }
+.sb-menu-divider { height: 1px; background: var(--border-soft); margin: 3px 6px; }
+
+/* ── Footer cards. Same shell, one per role. ── */
+.sb-profile,
+.sb-admin {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 12px 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+  text-align: left;
+}
+.sidebar.sb-role-player .sb-profile,
+.sidebar.sb-role-admin .sb-admin { display: flex; }
+
+.sb-profile {
+  padding: 8px 10px 8px 8px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.sb-profile:hover { background: rgba(255,255,255,.11); }
+.sb-profile-avatar,
+.sb-drawer-avatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--avatar-bg, rgba(255,255,255,.18));
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.15);
+}
+.sb-profile-avatar img,
+.sb-drawer-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.sb-profile-text { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
+.sb-profile-name {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-profile-role { color: rgba(255,255,255,.5); font-size: 11.5px; }
+.sb-profile-chev { width: 14px; height: 14px; flex-shrink: 0; color: rgba(255,255,255,.5); }
+
+.sb-admin { padding: 8px; }
+.sb-admin-badge {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(91,124,249,.22);
+  color: #aab9ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sb-admin-badge svg { width: 17px; height: 17px; }
+.sb-admin-text { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
+.sb-admin-name { color: #fff; font-size: 13px; font-weight: 600; }
+.sb-admin-sub { color: rgba(255,255,255,.5); font-size: 11.5px; }
+.sb-admin-logout {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,.55);
+  transition: background .15s, color .15s;
+}
+.sb-admin-logout svg { width: 16px; height: 16px; }
+.sb-admin-logout:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+/* ── Drawer footer: mobile only, both roles ── */
+.sb-drawer-foot { display: none; }
 .hamburger-btn {
   display: none;
   position: fixed;
@@ -210,7 +348,7 @@ h1, h2, h3, h4, h5, h6,
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.45);
+  background: rgba(12,18,45,.5);
   z-index: 250;
 }
 .sidebar-overlay.open { display: block; }
@@ -3156,11 +3294,95 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
     position: fixed;
     top: 0; right: 0; bottom: 0;
     left: auto;
+    width: 300px;
     z-index: 260;
+    box-shadow: -10px 0 40px rgba(0,0,0,.3);
     transform: translateX(100%);
     transition: transform 0.28s ease;
   }
   .sidebar.mobile-open { transform: translateX(0); }
+
+  /* Drawer headers. Players get their profile; admins keep the wordmark and
+     gain an Admin pill. The top padding clears the status bar and topbar. */
+  .sidebar-logo,
+  .sb-drawer-profile {
+    padding: calc(env(safe-area-inset-top) + 46px) 18px 18px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .sidebar.sb-role-player .sidebar-logo { display: none; }
+  .sidebar.sb-role-player .sb-drawer-profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .sb-crest { width: 44px; height: 44px; border-radius: 12px; }
+  .sb-crest img { width: 30px; height: 30px; }
+  .sb-wordmark { line-height: 1.1; }
+  .sidebar.sb-role-admin .sb-admin-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: rgba(91,124,249,.22);
+    color: #aab9ff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .sb-admin-pill svg { width: 12px; height: 12px; }
+
+  .sb-drawer-avatar { width: 44px; height: 44px; font-size: 16px; }
+  .sb-drawer-text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.25; }
+  .sb-drawer-name {
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sb-drawer-sub { color: rgba(255,255,255,.5); font-size: 12px; }
+  .sb-drawer-chev { width: 16px; height: 16px; flex-shrink: 0; color: rgba(255,255,255,.5); }
+
+  /* Bigger touch targets down the nav. */
+  .sidebar-nav { padding: 10px 12px; }
+  .nav-item { padding: 11px 10px; border-radius: 9px; font-size: 15px; gap: 12px; }
+  .nav-icon { width: 19px; height: 19px; }
+
+  /* The drawer exposes logout directly, so neither footer card nor the popover
+     is used here. */
+  .sidebar.sb-role-player .sb-profile,
+  .sidebar.sb-role-admin .sb-admin,
+  .sb-menu { display: none; }
+  .sb-drawer-foot {
+    display: block;
+    padding: 10px 12px calc(env(safe-area-inset-bottom) + 24px);
+    border-top: 1px solid rgba(255,255,255,.08);
+  }
+  .sb-drawer-logout {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 10px;
+    border-radius: 9px;
+    color: rgba(255,255,255,.55);
+    text-decoration: none;
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .sb-drawer-logout svg { width: 19px; height: 19px; flex-shrink: 0; }
+  .sb-drawer-logout:hover { background: rgba(255,255,255,.08); color: #fff; }
 
   .main-wrapper { width: 100%; }
 

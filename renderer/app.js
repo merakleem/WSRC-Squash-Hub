@@ -1,6 +1,6 @@
 import './api.js';
-import { state, isMember, _setConflictCursor } from './state.js';
-import { modal, toast } from './utils.js';
+import { state, isAdmin, isMember, _setConflictCursor } from './state.js';
+import { modal, toast, avatarHTML } from './utils.js';
 import { renderSchedule } from './schedule.js';
 
 import { renderClubActivity, renderClubSettings, renderDashboard } from './pages/dashboard.js';
@@ -113,21 +113,26 @@ function renderPage() {
     case 'tournaments':      renderTournaments(); break;
     case 'tournamentDetail': renderTournamentDetail(); break;
     case 'createTournament': renderCreateTournament(); break;
-    case 'courtBooking':     if (!isMember()) { navigate('dashboard'); return; } renderCourtBooking(); break;
+    // Members only, and admins are not players: the tab is hidden for them, so
+    // a stale restored page must not be a way back onto it either.
+    case 'courtBooking':     if (isAdmin() || !isMember()) { navigate('dashboard'); return; } renderCourtBooking(); break;
   }
 }
 
 // ===== HAMBURGER MENU =====
+// Module-scoped so the account popover and the drawer's profile header can
+// close the drawer after they navigate.
+function closeSidebar() {
+  document.getElementById('hamburgerBtn')?.classList.remove('open');
+  document.querySelector('.sidebar')?.classList.remove('mobile-open');
+  document.getElementById('sidebarOverlay')?.classList.remove('open');
+}
+
 (function() {
   const btn = document.getElementById('hamburgerBtn');
   const sidebar = document.querySelector('.sidebar');
   const overlay = document.getElementById('sidebarOverlay');
   if (!btn) return;
-  function closeSidebar() {
-    btn.classList.remove('open');
-    sidebar.classList.remove('mobile-open');
-    overlay.classList.remove('open');
-  }
   btn.addEventListener('click', () => {
     const opening = !sidebar.classList.contains('mobile-open');
     btn.classList.toggle('open', opening);
@@ -139,7 +144,42 @@ function renderPage() {
   document.querySelectorAll('.nav-item').forEach((el) => {
     el.addEventListener('click', closeSidebar);
   });
-  document.getElementById('navMyProfile')?.addEventListener('click', closeSidebar);
+})();
+
+// ===== ACCOUNT POPOVER =====
+// The profile card at the foot of the sidebar opens My Profile / Logout. It is
+// a desktop affordance only: the mobile drawer puts both actions on the surface
+// (its header opens the profile, its footer logs out), so nothing here runs
+// there - the card itself is display:none below 768px.
+(function() {
+  const card = document.getElementById('sbProfile');
+  const menu = document.getElementById('sbMenu');
+  if (!card || !menu) return;
+
+  const setOpen = (open) => {
+    menu.hidden = !open;
+    card.setAttribute('aria-expanded', String(open));
+  };
+
+  card.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setOpen(menu.hidden);
+  });
+  document.addEventListener('click', (e) => {
+    if (!menu.hidden && !menu.contains(e.target)) setOpen(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.hidden) setOpen(false);
+  });
+
+  const openMine = () => {
+    setOpen(false);
+    closeSidebar();
+    if (state.currentUser?.playerId) openPlayerProfile(state.currentUser.playerId);
+  };
+  document.getElementById('sbMenuProfile')?.addEventListener('click', openMine);
+  // The drawer header is the same action, without a popover in the way.
+  document.getElementById('sbDrawerProfile')?.addEventListener('click', openMine);
 })();
 
 // Expose to window for onclick attributes in dynamically generated HTML
@@ -194,23 +234,33 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Show "My Profile" nav item for players
-  if (state.currentUser?.role === 'player' && state.currentUser?.playerId) {
-    const navMyProfile = document.getElementById('navMyProfile');
-    navMyProfile.style.display = '';
-    navMyProfile.addEventListener('click', () => openPlayerProfile(state.currentUser.playerId));
+  // The sidebar's footer card and its mobile drawer header are chosen by this
+  // class, so a role only has to be decided once.
+  const sidebar = document.querySelector('.sidebar');
+  sidebar.classList.toggle('sb-role-admin', isAdmin());
+  sidebar.classList.toggle('sb-role-player', !isAdmin());
+
+  if (!isAdmin() && state.currentUser?.playerId) {
+    const who = { name: state.currentUser.name, photo_path: state.currentUser.photo_path };
+    document.getElementById('sbProfileAvatar').outerHTML = avatarHTML(who, 'sb-profile-avatar');
+    document.getElementById('sbDrawerAvatar').outerHTML = avatarHTML(who, 'sb-drawer-avatar');
+    document.getElementById('sbProfileName').textContent = who.name || 'My account';
+    document.getElementById('sbDrawerName').textContent = who.name || 'My account';
   }
 
-  // Court booking is members-only (admins always see it, to test the flow)
-  if (isMember()) {
+  // Court booking is for members, and only for them: an admin account is not a
+  // player, so it never gets the tab even though requireMember lets admins
+  // through the API.
+  if (!isAdmin() && isMember()) {
     document.getElementById('navCourtBooking').style.display = '';
   }
 
-  // Show admin-only nav items
-  if (state.currentUser?.role === 'admin') {
+  // Show admin-only nav items, and the group heading that labels them.
+  if (isAdmin()) {
     document.getElementById('navTournaments').style.display = '';
     document.getElementById('navSchedule').style.display = '';
     document.getElementById('navClubSettings').style.display = '';
+    document.getElementById('sbGroupAdmin').style.display = '';
   }
 
   state.players = await window.api.getPlayers();
