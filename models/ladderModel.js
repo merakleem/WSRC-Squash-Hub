@@ -289,6 +289,13 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   const priorSize = priorOrder.length;
   const priorByIdMap = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
+  // Unproven: nothing played by the time ratings began. Judged at that fixed
+  // moment rather than "have they played yet", so the dock cannot evaporate the
+  // instant someone plays their first match and hand them a jump up before the
+  // result is even applied.
+  const ratingEraStart = firstRatedRange.start;
+  const isUnproven = (id) => !firstMatch[id] || firstMatch[id] >= ratingEraStart;
+
   const ratings = {};
   for (const p of players) {
     ratings[p.id] = elo.seedRating({
@@ -297,7 +304,18 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
       ladderSize: priorSize,
       clubLockerRating: p.club_locker_rating,
     }, cfg);
+    if (isUnproven(p.id)) ratings[p.id] -= cfg.elo_unproven_dock;
   }
+
+  // How many amplified matches each unproven player has left. Established
+  // players never had any, so they always score at the plain K factor.
+  const provisionalLeft = {};
+  for (const p of players) {
+    provisionalLeft[p.id] = isUnproven(p.id) ? cfg.elo_provisional_matches : 0;
+  }
+  const mult = (id, kind) => (provisionalLeft[id] > 0
+    ? (kind === 'gain' ? cfg.elo_provisional_gain : cfg.elo_provisional_loss)
+    : 1);
 
   // Replay each rated season up to and including the requested one.
   let played = {}, wins = {}, losses = {}, seedsForTarget = { ...ratings };
@@ -319,9 +337,16 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
       const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
-      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor, {
+        winnerGain: mult(winnerId, 'gain'),
+        loserLoss: mult(loserId, 'loss'),
+      });
       ratings[winnerId] = r.winner;
       ratings[loserId] = r.loser;
+      // Spent whether it was won or lost: the adjustment is about settling at
+      // the right level, not about collecting free wins.
+      if (provisionalLeft[winnerId] > 0) provisionalLeft[winnerId] -= 1;
+      if (provisionalLeft[loserId] > 0) provisionalLeft[loserId] -= 1;
 
       if (isTarget) {
         played[winnerId] = (played[winnerId] || 0) + 1;
@@ -530,7 +555,13 @@ function getPlayerMatchRatingDeltas(playerId) {
   const priorOrder = getLadder(_dayBefore(firstRange.start));
   const priorById = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
+  // Same dock and adjustment period the ladder itself applies, so the number
+  // shown against a match on a profile is the one that moved the standings.
+  const firstMatch = getFirstMatchDates();
+  const isUnproven = (pid) => !firstMatch[pid] || firstMatch[pid] >= firstRange.start;
+
   const ratings = {};
+  const provisionalLeft = {};
   for (const p of players) {
     ratings[p.id] = elo.seedRating({
       previousRating: null,
@@ -538,7 +569,12 @@ function getPlayerMatchRatingDeltas(playerId) {
       ladderSize: priorOrder.length,
       clubLockerRating: p.club_locker_rating,
     }, cfg);
+    if (isUnproven(p.id)) ratings[p.id] -= cfg.elo_unproven_dock;
+    provisionalLeft[p.id] = isUnproven(p.id) ? cfg.elo_provisional_matches : 0;
   }
+  const mult = (pid, kind) => (provisionalLeft[pid] > 0
+    ? (kind === 'gain' ? cfg.elo_provisional_gain : cfg.elo_provisional_loss)
+    : 1);
 
   for (let year = cutoverYear; year <= latestYear; year++) {
     const key = monthDay === '01-01'
@@ -549,12 +585,20 @@ function getPlayerMatchRatingDeltas(playerId) {
       const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
-      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
+      const gain = mult(winnerId, 'gain');
+      const loss = mult(loserId, 'loss');
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor,
+        { winnerGain: gain, loserLoss: loss });
       ratings[winnerId] = r.winner;
       ratings[loserId] = r.loser;
+      if (provisionalLeft[winnerId] > 0) provisionalLeft[winnerId] -= 1;
+      if (provisionalLeft[loserId] > 0) provisionalLeft[loserId] -= 1;
 
       if (winnerId === id || loserId === id) {
-        deltas[`${match.source}:${match.match_id}`] = Math.round(winnerId === id ? r.delta : -r.delta);
+        // The player's own move, not the notional exchange: an amplified win
+        // shows the points they actually gained.
+        deltas[`${match.source}:${match.match_id}`] = Math.round(
+          winnerId === id ? r.delta * gain : -r.delta * loss);
       }
     }
   }

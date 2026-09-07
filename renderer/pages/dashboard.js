@@ -162,6 +162,10 @@ export async function renderClubSettings() {
     window.api.getSettings(),
   ]);
 
+  // The API resolves these through the ladder's own defaults, so a setting that
+  // has never been saved still shows the value actually in force.
+  const ladderCfg = clubSettings.ladder || {};
+
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
   const [startMonth, startDay] = String(settings.season_start_md || '09-01').split('-');
@@ -229,6 +233,53 @@ export async function renderClubSettings() {
           </div>
           <div class="form-actions" style="justify-content:flex-start">
             <button class="btn btn-primary" id="btnSaveClubTimezone">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">New players on the ladder</h2>
+        </div>
+        <p class="settings-section-desc">
+          A Club Locker rating is an estimate; a place on the ladder is a result. Someone who had
+          played nothing when ratings began starts below their estimate and plays their way back,
+          so the members who turn up are the ones holding the top spots. Change these and the
+          ladder recalculates: nothing is stored, so you can try a number and try another.
+        </p>
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fUnprovenDock">Starting penalty</label>
+            <input class="form-control" id="fUnprovenDock" type="number" min="0" max="400" step="5"
+              value="${esc(String(ladderCfg.elo_unproven_dock))}">
+            <p class="form-hint">
+              Rating points taken off a player who has never played. 0 turns it off.
+              <span id="dockHint"></span>
+            </p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fProvMatches">Adjustment period</label>
+            <input class="form-control" id="fProvMatches" type="number" min="0" max="30" step="1"
+              value="${esc(String(ladderCfg.elo_provisional_matches))}">
+            <p class="form-hint">How many of their first matches count for more. 0 turns it off.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fProvGain">A win counts</label>
+            <input class="form-control" id="fProvGain" type="number" min="1" max="10" step="0.5"
+              value="${esc(String(ladderCfg.elo_provisional_gain))}">
+            <p class="form-hint">Times normal, during the adjustment period.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fProvLoss">A loss counts</label>
+            <input class="form-control" id="fProvLoss" type="number" min="0" max="1" step="0.01"
+              value="${esc(String(ladderCfg.elo_provisional_loss))}">
+            <p class="form-hint">
+              Times normal. Below 1 softens an early loss; losing to someone far above you already
+              costs little.
+            </p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveLadderSettings">Save</button>
           </div>
         </div>
       </div>
@@ -309,6 +360,32 @@ export async function renderClubSettings() {
       // The running session follows the new clock immediately.
       if (state.currentUser) state.currentUser.club_timezone = tzSelect.value;
       toast('Time zone saved');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  // A live sense of what the penalty costs, in places rather than points.
+  const dockInput = document.getElementById('fUnprovenDock');
+  const dockHint = document.getElementById('dockHint');
+  const showDock = () => {
+    const n = Number(dockInput.value);
+    dockHint.textContent = n > 0
+      ? `About ${Math.max(1, Math.round(n / 6))} places at the moment.`
+      : '';
+  };
+  showDock();
+  dockInput?.addEventListener('input', showDock);
+
+  document.getElementById('btnSaveLadderSettings')?.addEventListener('click', async () => {
+    try {
+      await window.api.updateSettings({
+        elo_unproven_dock: dockInput.value,
+        elo_provisional_matches: document.getElementById('fProvMatches').value,
+        elo_provisional_gain: document.getElementById('fProvGain').value,
+        elo_provisional_loss: document.getElementById('fProvLoss').value,
+      });
+      toast('Ladder settings saved');
     } catch (err) {
       toast(err.message, 'error');
     }
