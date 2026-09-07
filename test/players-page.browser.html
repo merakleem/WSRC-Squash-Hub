@@ -58,6 +58,8 @@ window.api = {
   sendReset: async (id) => { calls.push(['reset1', id]); return { emailSent: true }; },
   viewAsPlayer: async (id) => { calls.push(['viewas', id]); return { ok: true }; },
   deletePlayerPhoto: async (id) => ({ ok: true }),
+  getSeasons: async () => [{ key: '2026/27', name: '2026/27', is_current: true, start_date: '2026-09-07', end_date: '2027-09-06' }],
+  logPickupGame: async (d) => { calls.push(['pickup', d]); return { ok: true }; },
 };
 window.navigate = (p) => calls.push(['navigate', p]);
 
@@ -275,6 +277,38 @@ ok('with no admin chrome', !$('#plAddBtn') && !$('.pl-grid'));
 ok('and no contact details anywhere', !/@x\.invalid/.test($('#mainContent').textContent));
 type($('#plPublicSearch'), 'zoe');
 ok('search narrows the list', $$('.pl-public-row').length === 1);
+
+log.textContent += '\nLADDER MATCH MODAL, AS A TESTER\n';
+// The server hides testers from non-admins, so a tester is absent from the very
+// list this modal searched for her own name. That produced "Me's games first".
+state.players = PLAYERS.filter((p) => !p.is_tester).map((p) => ({ ...p }));
+state.currentUser = { role: 'player', playerId: 5, name: 'Test Tessa', photo_path: null };
+await mod.openPickupGameModal();
+await settle();
+ok('the self card names you, not a placeholder', $('.em-self-name')?.textContent === 'Test Tessa', $('.em-self-name')?.textContent);
+
+$('#puP2Search').dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+await settle();
+const oppOpt = $$('.pu-search-option').find((o) => o.dataset.name === 'Sofia Duarte');
+ok('the opponent list offers other players', !!oppOpt);
+oppOpt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+await settle();
+ok('choosing an opponent enables the winner cards', !$('.em-winner-card[data-slot="1"]')?.disabled);
+ok('your winner card carries your name', $('.em-winner-card[data-slot="1"] .em-winner-name')?.textContent === 'Test Tessa', $('.em-winner-card[data-slot="1"] .em-winner-name')?.textContent);
+
+click($('.em-winner-card[data-slot="1"]'));
+await settle();
+ok('winning it yourself reads "Your games first"', $('#emGamesHint').textContent === 'Your games first', $('#emGamesHint').textContent);
+ok('and never bends a pronoun into a possessive', !/^(Me|You)'s /.test($('#emGamesHint').textContent), $('#emGamesHint').textContent);
+
+click($('.em-winner-card[data-slot="2"]'));
+await settle();
+ok('an opponent still takes a possessive first name', $('#emGamesHint').textContent === "Sofia's games first", $('#emGamesHint').textContent);
+
+click($('.em-winner-card[data-slot="1"]'));
+click($('.em-games-card[data-games="1"]'));
+await settle();
+ok('the confirm line names you properly', /Test Tessa beat Sofia Duarte 3.1/.test($('.em-confirm-text')?.textContent || ''), $('.em-confirm-text')?.textContent);
 
 document.title = failed ? `FAIL ${failed}` : 'PASS';
 log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';

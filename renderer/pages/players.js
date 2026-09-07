@@ -2183,8 +2183,17 @@ export async function openPickupGameModal() {
   modal.open('Enter a match', '<div class="modal-loading">Loading players…</div>', { medium: true });
 
   const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
-  const me = allPlayers.find((p) => p.id === myId);
-  const myName = adminMode ? '' : (me?.name || 'Me');
+  // Your own row comes from the session when the list does not carry it:
+  // GET /players hides testers from non-admins, so a tester searching that list
+  // for themselves finds nothing and every name here falls back to a
+  // placeholder. /api/me always answers for the session's own player.
+  const me = allPlayers.find((p) => p.id === myId)
+    || (myId && state.currentUser?.name
+      ? { id: myId, name: state.currentUser.name, photo_path: state.currentUser.photo_path }
+      : null);
+  // "You", like the report-score and court-booking sheets, so a name that never
+  // arrives still reads as a person rather than as the word "Me".
+  const myName = adminMode ? '' : (me?.name || 'You');
 
   // The scoreline is asked as two questions — who won, then how many games the
   // loser took — and folded back into the player1/player2 pair the API has
@@ -2263,10 +2272,18 @@ export async function openPickupGameModal() {
   const p1Id = () => (adminMode ? Number(document.getElementById('puP1')?.value) || null : myId || null);
   const p2Id = () => Number(document.getElementById('puP2')?.value) || null;
   const bothChosen = () => !!(p1Id() && p2Id());
+  // Slot 1 is the player themselves whenever an admin is not filling both
+  // sides. Declared above its first use, not beside the other helpers: a const
+  // arrow is not hoisted, so a later declaration only survives because these
+  // run at render time.
+  const isSelf = (slot) => !adminMode && slot === 1;
 
   function playerFor(slot) {
     const id = slot === 1 ? p1Id() : p2Id();
-    return id ? allPlayers.find((p) => p.id === id) || null : null;
+    if (!id) return null;
+    // Same reason as `me` above: your own row may not be in the list, and
+    // without this the winner card falls back to initials over your photo.
+    return allPlayers.find((p) => p.id === id) || (isSelf(slot) ? me : null);
   }
   function nameFor(slot) {
     const p = playerFor(slot);
@@ -2275,6 +2292,9 @@ export async function openPickupGameModal() {
     return adminMode ? 'Player 2' : 'Opponent';
   }
   const firstName = (n) => String(n || '').split(' ')[0];
+  // You take "Your", never a possessive name: a pronoun bent into one reads as
+  // broken English however the name was resolved.
+  const possessive = (slot) => (isSelf(slot) ? 'Your' : `${firstName(nameFor(slot))}'s`);
 
   const CHECK_SVG = `<svg class="em-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
     stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>`;
@@ -2309,7 +2329,7 @@ export async function openPickupGameModal() {
     section.hidden = winner === null;
     if (winner === null) return;
 
-    document.getElementById('emGamesHint').textContent = `${firstName(nameFor(winner))}'s games first`;
+    document.getElementById('emGamesHint').textContent = `${possessive(winner)} games first`;
     document.getElementById('emGamesGrid').innerHTML = GAME_OPTIONS.map((o) => {
       const sel = games === o.games;
       return `<button type="button" class="em-games-card${sel ? ' em-games-card--selected' : ''}" data-games="${o.games}">
