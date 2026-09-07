@@ -1,6 +1,7 @@
-// The ladder's inactivity rule: you drop off only after a full year with no
-// activity, counted from your last match or, if you have never played, from the
-// day you joined. Run: node test/ladder-inactivity.test.js
+// The ladder's inactivity rule: once you have played, you drop off only after a
+// full year with no activity. Never having played keeps you off the ladder in
+// the first place, which is ladder-seeding.test.js's business.
+// Run: node test/ladder-inactivity.test.js
 const fs = require('fs');
 const path = '/tmp/ladder-inactivity-test.db';
 try { fs.unlinkSync(path); } catch (_) {}
@@ -69,7 +70,11 @@ const names = () => shown.map((r) => r.name).join(', ');
 
 console.log('WHO STAYS ON THE LADDER');
 ok('someone who played recently', on(recent), names());
-ok('someone who joined recently and has never played', on(neverPlayed));
+// Never having played keeps you off the ladder in its own right, whatever the
+// inactivity rule says; that rule is only about players who used to play.
+ok('someone who has never played is not on it, however recently they joined',
+  !on(neverPlayed) && flagged(neverPlayed) === false,
+  'unranked, not inactive');
 ok('someone back after two years away', on(returnee));
 ok('someone whose last match was a year less two days ago', on(justUnder));
 
@@ -77,7 +82,7 @@ console.log('\nWHO DROPS OFF');
 ok('nobody who is on the ladder is also flagged',
   shown.every((r) => !r.hidden_for_inactivity));
 ok('a player last seen fourteen months ago', !on(goneAway) && flagged(goneAway) === true);
-ok('a player who joined two years ago and never played', !on(lapsedNew) && flagged(lapsedNew) === true);
+ok('a player who joined two years ago and never played is off it too', !on(lapsedNew));
 ok('a full year of inactivity is enough, to the day', !on(exactlyYear) && flagged(exactlyYear) === true);
 
 console.log('\nWHAT THE DATE IS MEASURED FROM');

@@ -2783,6 +2783,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   white-space: nowrap;
 }
 .pp-hstat-move .mv-tri { width: 9px; height: 9px; }
+.pp-hstat-unranked .pp-hstat-val { font-size: 20px; color: rgba(255,255,255,.72); }
 .pp-hstat-label {
   font-size: 10px;
   font-weight: 600;
@@ -3117,6 +3118,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
      wrap rather than overflow the block. */
   .pp-hstat-val { font-size: 26px; flex-wrap: wrap; gap: 6px; row-gap: 3px; }
   .pp-hstat-label-extra { display: none; }
+  .pp-hstat-unranked .pp-hstat-val { font-size: 17px; }
   .pp-hstat-label { font-size: 9.5px; }
 
   .pp-card-pad { padding: 16px; }

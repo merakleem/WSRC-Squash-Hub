@@ -1625,9 +1625,10 @@ export function renderPlayerProfile() {
   const stats = _profileStats(history);
 
   const ladder = p.ladder || {};
+  const isSelf = state.currentUser?.playerId === p.id;
 
   // ===== HEADER =====
-  const canEditPhoto = adminMode || state.currentUser?.playerId === p.id;
+  const canEditPhoto = adminMode || isSelf;
   const metaBits = [
     adminMode ? p.division_name : null,
     p.member_number ? `Member #${esc(p.member_number)}` : null,
@@ -1649,12 +1650,22 @@ export function renderPlayerProfile() {
   const rankMoveHTML = !ladder.rank_change ? ''
     : `<span class="pp-hstat-move ${ladder.rank_change > 0 ? 'pp-pos' : 'pp-neg'}" title="Places moved in the last 7 days"><svg class="mv-tri" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 3 L10.2 8.6 L1.8 8.6 Z" fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>${Math.abs(ladder.rank_change)}</span>`;
 
-  const headerStatsHTML = `
-    ${ladder.position == null ? '' : `
+  // Nobody is on the ladder until they have played, so a member with no matches
+  // gets told what to do about it rather than a gap where a rank would be.
+  const rankBlockHTML = ladder.position != null ? `
       <div class="pp-hstat">
         <div class="pp-hstat-val">#${ladder.position}<span class="pp-hstat-sub">of ${ladder.ladder_size}</span>${rankMoveHTML}</div>
         <div class="pp-hstat-label">${rankLabelHTML}</div>
-      </div>`}
+      </div>`
+    : ladder.unranked ? `
+      <div class="pp-hstat pp-hstat-unranked">
+        <div class="pp-hstat-val">Unranked</div>
+        <div class="pp-hstat-label">${isSelf ? 'Play a match to join the ladder' : 'No matches played yet'}</div>
+      </div>`
+    : '';
+
+  const headerStatsHTML = `
+    ${rankBlockHTML}
     <div class="pp-hstat pp-hstat-wide">
       <div class="pp-hstat-val">${stats.wins}–${stats.losses}<span class="pp-hstat-sub">${stats.winPct === null ? '' : `${stats.winPct}%`}</span></div>
       <div class="pp-hbar"><span style="width:${stats.winPct || 0}%"></span></div>
@@ -1758,7 +1769,6 @@ export function renderPlayerProfile() {
       ${action ? `<button class="btn btn-outline btn-sm" data-pp-action="${action.id}">${esc(action.label)}</button>` : ''}
     </div>`;
 
-  const isSelf = state.currentUser?.playerId === p.id;
   const reportMatchAction = isSelf ? { id: 'report-ladder', label: 'Report a ladder match' } : null;
 
   // -- Results panel --

@@ -1,5 +1,5 @@
-// How the rating ladder is seeded: results rank you, and a Club Locker rating
-// only orders the players who have no results yet.
+// How the rating ladder is seeded: you are on it once you have played, and a
+// Club Locker rating only decides where you come in when you do.
 // Run: node test/ladder-seeding.test.js
 const fs = require('fs');
 const path = '/tmp/ladder-seeding-test.db';
@@ -25,6 +25,8 @@ const set = (o) => {
 console.log('SEEDING RULES');
 const cfg = elo.config({});
 const seed = (o) => elo.seedRating({ previousRating: null, previousPosition: null, ladderSize: 0, ...o }, cfg);
+const P = cfg.elo_club_locker_pivot;
+const S = cfg.elo_club_locker_scale;
 
 ok('a rating carried from a rated season is used as is',
   seed({ previousRating: 1234, previousPosition: 3, ladderSize: 10 }) === 1234);
@@ -32,72 +34,33 @@ ok('a finisher is spread across the seed range: first gets the top',
   seed({ previousPosition: 1, ladderSize: 10 }) === cfg.elo_seed_top);
 ok('and last gets the bottom',
   seed({ previousPosition: 10, ladderSize: 10 }) === cfg.elo_seed_bottom);
-const M = cfg.elo_unplayed_rating_multiplier;
-const F = cfg.elo_unplayed_rating_floor;
-ok('an unrated newcomer starts at the foot of the ladder',
-  seed({ unplayed: true, clubLockerRating: null }) === cfg.elo_seed_bottom,
-  String(seed({ unplayed: true, clubLockerRating: null })));
-ok('only the rating above the floor is worth anything',
-  seed({ unplayed: true, clubLockerRating: 4 }) === cfg.elo_seed_bottom + (4 - F) * M,
-  String(seed({ unplayed: true, clubLockerRating: 4 })));
-ok('a rating at the floor is worth nothing',
-  seed({ unplayed: true, clubLockerRating: F }) === cfg.elo_seed_bottom);
-ok('and one below it is worth nothing rather than a penalty',
-  seed({ unplayed: true, clubLockerRating: F - 2 }) === cfg.elo_seed_bottom,
-  String(seed({ unplayed: true, clubLockerRating: F - 2 })));
-ok('twice as far above the floor is twice the lift',
-  seed({ unplayed: true, clubLockerRating: F + 2 }) - cfg.elo_seed_bottom
-    === 2 * (seed({ unplayed: true, clubLockerRating: F + 1 }) - cfg.elo_seed_bottom));
-// The point of the floor: the multiplier can be turned up for the strong
-// players without dragging the weak ones off the bottom with it.
-ok('raising the multiplier cannot move anyone at or below the floor', (() => {
-  const steep = elo.config({ elo_unplayed_rating_multiplier: '600' });
-  return elo.seedRating({ unplayed: true, clubLockerRating: F - 1 }, steep) === steep.elo_seed_bottom
-    && elo.seedRating({ unplayed: true, clubLockerRating: F + 2 }, steep) > cfg.elo_seed_bottom + 1000;
-})());
-ok('a nonsense rating is worth nothing',
-  seed({ unplayed: true, clubLockerRating: 'abc' }) === cfg.elo_seed_bottom);
-ok('and a negative one cannot push anyone below the foot',
-  seed({ unplayed: true, clubLockerRating: -3 }) === cfg.elo_seed_bottom,
-  String(seed({ unplayed: true, clubLockerRating: -3 })));
-ok('a position cannot lift someone who has not played',
-  seed({ previousPosition: 1, ladderSize: 10, unplayed: true, clubLockerRating: null }) === cfg.elo_seed_bottom);
-// The foot of the ladder is one number used by both: a player who finished last
-// and an unrated player who never played start level.
-ok('finishing last and never playing both start at the foot',
-  seed({ previousPosition: 10, ladderSize: 10 }) === seed({ unplayed: true, clubLockerRating: null }),
-  `${seed({ previousPosition: 10, ladderSize: 10 })} vs ${seed({ unplayed: true, clubLockerRating: null })}`);
-// Ratings start around 2.5, not 0, so every rated newcomer clears the foot.
-ok('so the weakest newcomers sit at the foot however steep the curve gets',
-  seed({ unplayed: true, clubLockerRating: 2.5 }) === cfg.elo_seed_bottom,
-  String(seed({ unplayed: true, clubLockerRating: 2.5 })));
+ok('a player with no finish comes in on their Club Locker rating',
+  seed({ unplayed: true, clubLockerRating: 4.5 }) === cfg.elo_base_rating + (4.5 - P) * S,
+  String(seed({ unplayed: true, clubLockerRating: 4.5 })));
+ok('the pivot rating comes in at the middle of the ladder',
+  seed({ unplayed: true, clubLockerRating: P }) === cfg.elo_base_rating);
+ok('a rating below the pivot comes in below the middle',
+  seed({ unplayed: true, clubLockerRating: P - 1 }) === cfg.elo_base_rating - S);
+ok('an unrated player comes in at the middle, having nothing to estimate from',
+  seed({ unplayed: true, clubLockerRating: null }) === cfg.elo_base_rating);
+ok('a nonsense rating is treated as unrated',
+  seed({ unplayed: true, clubLockerRating: 'abc' }) === cfg.elo_base_rating);
+ok('a position cannot seed someone who has not played',
+  seed({ previousPosition: 1, ladderSize: 10, unplayed: true, clubLockerRating: null }) === cfg.elo_base_rating);
 
-console.log('\nNO ADJUSTMENT PERIOD LEFT');
-ok('a match is a plain zero-sum exchange', (() => {
-  const r = elo.applyMatch(1000, 1000, cfg.elo_k_factor);
-  return Math.abs((r.winner - 1000) - (1000 - r.loser)) < 1e-9;
-})());
-ok('beating someone far above you still pays more than beating an equal',
-  elo.ratingDelta(1000, 1300, cfg.elo_k_factor) > elo.ratingDelta(1000, 1000, cfg.elo_k_factor),
-  `${elo.ratingDelta(1000, 1300, cfg.elo_k_factor).toFixed(1)} vs ${elo.ratingDelta(1000, 1000, cfg.elo_k_factor).toFixed(1)}`);
-ok('and losing to them still costs less',
-  elo.ratingDelta(1300, 1000, cfg.elo_k_factor) < elo.ratingDelta(1000, 1000, cfg.elo_k_factor));
-
-console.log('\nONE NUMBER, AND IT IS A SETTING');
-ok('the multiplier is overridable',
-  elo.config({ elo_unplayed_rating_multiplier: '30' }).elo_unplayed_rating_multiplier === 30);
-ok('the floor is overridable',
-  elo.config({ elo_unplayed_rating_floor: '4' }).elo_unplayed_rating_floor === 4);
-ok('a blank falls back to the default',
-  elo.config({ elo_unplayed_rating_multiplier: '' }).elo_unplayed_rating_multiplier === 150);
-ok('every setting this replaced is gone', (() => {
+console.log('\nBOTH NUMBERS ARE SETTINGS');
+ok('the pivot is overridable', elo.config({ elo_club_locker_pivot: '4' }).elo_club_locker_pivot === 4);
+ok('the scale is overridable', elo.config({ elo_club_locker_scale: '200' }).elo_club_locker_scale === 200);
+ok('a blank falls back to the default', elo.config({ elo_club_locker_scale: '' }).elo_club_locker_scale === 160);
+ok('every setting the earlier attempts added is gone', (() => {
   const c = elo.config({});
-  return ['elo_unplayed_base', 'elo_unplayed_rating_bonus', 'elo_unproven_dock', 'elo_unproven_handicap',
+  return ['elo_unplayed_base', 'elo_unplayed_rating_bonus', 'elo_unplayed_rating_floor',
+    'elo_unplayed_rating_multiplier', 'elo_unproven_dock', 'elo_unproven_handicap',
     'elo_provisional_matches', 'elo_provisional_gain', 'elo_provisional_loss']
     .every((k) => !(k in c));
 })());
 
-console.log('\nON A LADDER');
+console.log('\nNOBODY IS RANKED UNTIL THEY PLAY');
 set({ season_start_md: '09-01' });
 const add = (id, name, rating, created) =>
   db.prepare('INSERT INTO players (id,name,club_locker_rating,created_at) VALUES (?,?,?,?)')
@@ -106,8 +69,6 @@ const match = (w, l, on) =>
   db.prepare(`INSERT INTO matches (type,status,player1_id,player2_id,player1_score,player2_score,winner_id,played_at)
               VALUES ('ladder','played',?,?,3,1,?,?)`).run(w, l, w, `${on} 19:00:00`);
 
-// Three who play a season, and three who never have - including one rated well
-// above everybody.
 add(1, 'Ann Anchor', 4.5, '2025-09-02');
 add(2, 'Ben Battler', 4.2, '2025-09-02');
 add(3, 'Cal Climber', 4.0, '2025-09-02');
@@ -115,88 +76,64 @@ for (const day of ['10-02', '10-09', '10-16', '11-06', '11-13']) {
   match(1, 2, `2025-${day}`);
   match(3, 2, `2025-${day}`);
 }
+// Two members who have never hit a ball, one rated above the entire club.
 add(4, 'Nia Newcomer', 4.3, '2026-08-20');
-add(5, 'Hugh Highrated', 5.2, '2026-08-20');
+add(5, 'Hugh Highrated', 5.9, '2026-08-20');
 add(6, 'Una Unrated', null, '2026-08-20');
 
 const board = () => ladder.computeEloLadder(seasonModel.getCurrentSeasonKey(), seasonModel.getSettings());
-const ratingOf = (n) => board().find((r) => r.name === n)?.rating;
+const withHidden = () => ladder.computeEloLadder(
+  seasonModel.getCurrentSeasonKey(), seasonModel.getSettings(), null, { includeHidden: true });
+const on = (n) => board().some((r) => r.name === n);
+const ratingOf = (n) => withHidden().find((r) => r.name === n)?.rating;
 const posOf = (n) => board().findIndex((r) => r.name === n) + 1;
 const names = () => board().map((r) => r.name).join(' > ');
 
-// With the multiplier off, results are the only thing on the list and the
-// separation is absolute. Turning it up is what buys a strong newcomer a
-// starting place among the ranked players - that is the knob's whole job.
-ok('with no head start, everyone who played is above everyone who has not', (() => {
-  set({ elo_unplayed_rating_multiplier: 0 });
-  const clean = Math.max(posOf('Ann Anchor'), posOf('Cal Climber'))
-    < Math.min(...['Nia Newcomer', 'Hugh Highrated', 'Una Unrated'].map(posOf));
-  set({ elo_unplayed_rating_multiplier: 150 });
-  return clean;
-})());
-ok('at the default a strong newcomer does start among them',
-  posOf('Hugh Highrated') < posOf('Cal Climber'), names());
-ok('but a newcomer at the floor never does, however steep it gets', (() => {
-  set({ elo_unplayed_rating_multiplier: 600 });
-  const stuck = posOf('Una Unrated') > Math.max(posOf('Ann Anchor'), posOf('Cal Climber'));
-  set({ elo_unplayed_rating_multiplier: 150 });
-  return stuck;
-})());
-// Worth stating out loud: a player who lost every match finishes last and so
-// starts at the foot, level with someone who never played - and the head start
-// then puts the rated newcomer ahead of them. Turning it off levels them again.
-ok('a player who lost every match can fall below a rated newcomer',
-  posOf('Ben Battler') > posOf('Hugh Highrated'), names());
-ok('with the multiplier at zero they start on the same rating', (() => {
-  set({ elo_unplayed_rating_multiplier: 0 });
-  const level = ratingOf('Ben Battler') === ratingOf('Hugh Highrated');
-  set({ elo_unplayed_rating_multiplier: 150 });
-  return level;
-})());
-ok('among those who have not played, rating decides',
-  posOf('Hugh Highrated') < posOf('Nia Newcomer'), names());
-ok('and an unrated newcomer sits below a rated one',
-  posOf('Una Unrated') > posOf('Nia Newcomer'), names());
-ok('the unrated newcomer starts exactly at the foot',
-  ratingOf('Una Unrated') === cfg.elo_seed_bottom, String(ratingOf('Una Unrated')));
-ok('a rated newcomer starts at the foot plus what they clear the floor by',
-  ratingOf('Hugh Highrated') === Math.round(cfg.elo_seed_bottom + (5.2 - F) * M),
+ok('the ladder is exactly the players who have played', names() === 'Ann Anchor > Cal Climber > Ben Battler', names());
+ok('a newcomer is not on it, however high their rating', !on('Hugh Highrated'), names());
+ok('nor an unrated one', !on('Una Unrated'));
+ok('and they are marked unranked rather than merely missing',
+  withHidden().find((r) => r.name === 'Hugh Highrated').unranked === true);
+ok('a player who has played is never marked unranked',
+  withHidden().find((r) => r.name === 'Ann Anchor').unranked === false);
+
+console.log('\nONE MATCH PUTS YOU ON IT');
+ok('the club\'s best rating is worth nothing until then',
+  ratingOf('Hugh Highrated') === cfg.elo_base_rating + (5.9 - P) * S && !on('Hugh Highrated'),
   String(ratingOf('Hugh Highrated')));
+match(5, 3, '2026-09-10');
+ok('after one match they are on the ladder', on('Hugh Highrated'), names());
+ok('entering near where their rating said, adjusted by the result',
+  ratingOf('Hugh Highrated') > cfg.elo_base_rating + (5.9 - P) * S,
+  String(ratingOf('Hugh Highrated')));
+ok('and a strong newcomer enters near the top, as the rating implied',
+  posOf('Hugh Highrated') <= 2, names());
 
-console.log('\nTHE SETTINGS MOVE THE LADDER');
-set({ elo_unplayed_rating_multiplier: 0 });
-ok('at zero every newcomer starts level, rating or not',
-  ratingOf('Hugh Highrated') === ratingOf('Nia Newcomer')
-    && ratingOf('Hugh Highrated') === ratingOf('Una Unrated'), String(ratingOf('Hugh Highrated')));
-set({ elo_unplayed_rating_multiplier: 400 });
-ok('a steep enough curve lifts the strong newcomer among the ranked players',
-  posOf('Hugh Highrated') < Math.max(...['Ann Anchor', 'Ben Battler', 'Cal Climber'].map(posOf)), names());
-ok('and the unrated one stays at the foot while it does',
-  ratingOf('Una Unrated') === cfg.elo_seed_bottom, String(ratingOf('Una Unrated')));
-ok('raising the floor pulls the newcomers back down', (() => {
-  const before = posOf('Hugh Highrated');
-  set({ elo_unplayed_rating_floor: 5 });
-  const after = posOf('Hugh Highrated');
-  set({ elo_unplayed_rating_floor: 3, elo_unplayed_rating_multiplier: 150 });
-  return after > before;
-})());
+console.log('\nTHE SETTINGS MOVE THE ENTRY POINT');
+set({ elo_club_locker_scale: 0 });
+ok('with no scale every rating enters at the middle',
+  ratingOf('Nia Newcomer') === cfg.elo_base_rating, String(ratingOf('Nia Newcomer')));
+set({ elo_club_locker_scale: 400 });
+ok('a bigger scale spreads new players further apart',
+  ratingOf('Nia Newcomer') === cfg.elo_base_rating + (4.3 - P) * 400, String(ratingOf('Nia Newcomer')));
+set({ elo_club_locker_pivot: 4.3, elo_club_locker_scale: 160 });
+ok('and moving the pivot moves who counts as mid-ladder',
+  ratingOf('Nia Newcomer') === cfg.elo_base_rating, String(ratingOf('Nia Newcomer')));
+set({ elo_club_locker_pivot: 3.5 });
 ok('nothing is stored: the ladder recomputes from the settings each time',
-  ratingOf('Hugh Highrated') === Math.round(cfg.elo_seed_bottom + (5.2 - 3) * 150));
+  ratingOf('Nia Newcomer') === cfg.elo_base_rating + (4.3 - P) * S);
 
-console.log('\nONE WIN JOINS THE RANKED LADDER');
-const beforeWin = ratingOf('Nia Newcomer');
-match(4, 3, '2026-09-10');
-const afterWin = ratingOf('Nia Newcomer');
-ok('a first win is a plain rating gain, no multiplier', afterWin > beforeWin,
-  `${beforeWin} -> ${afterWin}`);
-ok('beating a much stronger player is worth more than beating an equal',
-  afterWin - beforeWin > elo.ratingDelta(1000, 1000, cfg.elo_k_factor),
-  `+${afterWin - beforeWin} vs +${elo.ratingDelta(1000, 1000, cfg.elo_k_factor).toFixed(0)} against an equal`);
-
-console.log('\nPROFILE NUMBERS RECONCILE WITH THE LADDER');
-const row = board().find((r) => r.name === 'Nia Newcomer');
-const sum = Object.values(ladder.getPlayerMatchRatingDeltas(4)).reduce((a, b) => a + b, 0);
-ok('her match deltas add up to her rating change', Math.abs(sum - (row.rating - row.seed_rating)) <= 2,
+console.log('\nPROFILE NUMBERS');
+const stats = ladder.getPlayerLadderStats(4);
+ok('a member who has not played is reported unranked', stats.unranked === true && stats.position === null,
+  JSON.stringify(stats));
+ok('and one who has is not', (() => {
+  const s2 = ladder.getPlayerLadderStats(1);
+  return s2.unranked === false && s2.position != null;
+})());
+const row = withHidden().find((r) => r.name === 'Hugh Highrated');
+const sum = Object.values(ladder.getPlayerMatchRatingDeltas(5)).reduce((a, b) => a + b, 0);
+ok('match deltas add up to the rating change', Math.abs(sum - (row.rating - row.seed_rating)) <= 2,
   `shown ${sum}, actual ${row.rating - row.seed_rating}`);
 
 console.log('\nWHERE A NEWCOMER SLOTS IN');

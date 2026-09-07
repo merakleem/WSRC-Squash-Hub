@@ -378,7 +378,11 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   // Measured against the later of the two dates, because a player row can be
   // created after a result has already been entered for them.
   const cutoff = _yearBefore(measuredAt);
-  const lastMatch = getLastMatchDates(measuredAt);
+  // Read over the same window the replay just used, not up to today: a match
+  // dated later in this season has already moved the ratings, so it has to
+  // count as having played too, or a player's rating moves while they stay off
+  // the ladder.
+  const lastMatch = getLastMatchDates(asOfDate || targetRange.end);
   const lastActive = {};
   for (const p of players) {
     const joined = _joinDay(p, firstMatch);
@@ -388,14 +392,19 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
 
   const rows = [];
   for (const p of players) {
+    // You are on the ladder once you have played, and not before. An estimate
+    // of how good someone is decides where they come in, never what rank they
+    // hold: a place has to be won from somebody.
+    const unranked = !lastMatch[p.id];
     // No date at all on either side means nothing is known about them; that is
     // not evidence of a year away, so they stay on.
     const seen = lastActive[p.id];
     const hidden = !!seen && seen <= cutoff;
-    if (hidden && !includeHidden) continue;
+    if ((unranked || hidden) && !includeHidden) continue;
 
     rows.push({
       ...p,
+      unranked,
       hidden_for_inactivity: hidden,
       last_active: seen || null,
       rating: Math.round(ratings[p.id]),
@@ -493,14 +502,19 @@ function getLadderForSeason(seasonKey = null) {
   // always cut off at the season's end so a match belonging to a later season
   // can't leak in. For the current season that only excludes future-dated
   // results, which is what you want anyway.
-  const rows = getLadder(range.end);
+  // Same rule as the rating ladder: played or you are not on it. The positional
+  // replay still places everyone, because a member arriving shifts the people
+  // below them whether or not they ever play; they are just not shown.
+  const lastMatch = getLastMatchDates(range.end);
+  const rows = getLadder(range.end).filter((r) => lastMatch[r.id]);
   const seasonRecords = getSeasonRecords(season.key);
   return {
     season,
     system: 'leapfrog',
     frozen: isPast,
-    rows: rows.map((r) => ({
+    rows: rows.map((r, i) => ({
       ...r,
+      position: i + 1,
       season_wins: seasonRecords[r.id]?.wins || 0,
       season_losses: seasonRecords[r.id]?.losses || 0,
     })),
@@ -603,12 +617,17 @@ function getPlayerMatchRatingDeltas(playerId) {
 function getPlayerLadderStats(playerId) {
   const { season, system, frozen, rows } = getLadderForSeason();
   const row = rows.find((p) => p.id === Number(playerId)) || null;
+  // A player off the ladder for want of a match is a different thing from one
+  // whose ladder cannot be worked out, and the profile says so rather than
+  // leaving a blank where a rank should be.
+  const played = !!getLastMatchDates()[Number(playerId)];
   return {
     system,
     frozen,
     season_name: season?.name || null,
     ladder_size: rows.length,
     position: row?.position ?? null,
+    unranked: !row && !played,
     rank_change: frozen ? 0 : (row?.rank_change ?? 0),
     rating: row?.rating ?? null,
     best_position: row?.best_position ?? null,
