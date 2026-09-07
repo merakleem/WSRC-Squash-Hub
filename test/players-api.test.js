@@ -58,7 +58,10 @@ async function main() {
     ok('no account row reads none', by('Nora None').account_status === 'none');
     const playerList = get('p', '/api/players');
     ok('players never see account_status', playerList.every((p) => !('account_status' in p)));
-    ok('and never see tester rows at all', !playerList.some((p) => p.name === 'Test Tessa'), JSON.stringify(playerList.map((p) => p.name)));
+    // A tester is a normal member of the club who gets features early, not a
+    // hidden account: they appear in everyone's list. Only the flag is private.
+    ok('but do see testers, who are ordinary players', playerList.some((p) => p.name === 'Test Tessa'), JSON.stringify(playerList.map((p) => p.name)));
+    ok('without the tester flag on them', playerList.every((p) => !('is_tester' in p)));
 
     console.log('WRITABLE FIELDS');
     const created = JSON.parse(send('a', 'POST', '/api/players', { name: 'Full Fanny', email: 'fanny@x.invalid', phone: '1', member_number: 'M-9', club_locker_rating: 3.25, is_member: true, is_tester: true, exclude_from_ladder: true }));

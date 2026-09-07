@@ -870,7 +870,7 @@ function _formHTML() {
         ${[
           ['is_member', 'Club member', 'Can book courts and see member-only events.'],
           ['exclude_from_ladder', 'Exclude from ladder', 'Still plays leagues; not ranked on the club ladder.'],
-          ['is_tester', 'Tester account', 'Hidden from public lists; used for trying features.'],
+          ['is_tester', 'Tester account', 'Gets new features early, to try them out.'],
         ].map(([k, t, hint]) => `
           <label class="pl-toggle">
             <input type="checkbox" data-f="${k}" ${f[k] ? 'checked' : ''}>
@@ -1263,7 +1263,7 @@ async function _runImport() {
 const BULK_DEFS = [
   ['is_member', 'Club membership', 'Controls court booking and member-only events.', 'Member', 'Non-member'],
   ['exclude_from_ladder', 'Ladder', 'Whether they appear in ladder rankings.', 'Excluded from ladder', 'On the ladder'],
-  ['is_tester', 'Tester account', 'Hidden from public lists.', 'Tester', 'Not a tester'],
+  ['is_tester', 'Tester account', 'Gets new features early.', 'Tester', 'Not a tester'],
   ['club_locker_rating', 'Club Locker rating', 'Set the same rating on everyone selected.', '', ''],
 ];
 
@@ -2183,10 +2183,10 @@ export async function openPickupGameModal() {
   modal.open('Enter a match', '<div class="modal-loading">Loading players…</div>', { medium: true });
 
   const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
-  // Your own row comes from the session when the list does not carry it:
-  // GET /players hides testers from non-admins, so a tester searching that list
-  // for themselves finds nothing and every name here falls back to a
-  // placeholder. /api/me always answers for the session's own player.
+  // Your own row comes from the session when the list does not carry it, rather
+  // than depending on finding yourself in a list someone may one day filter:
+  // when that lookup failed, every name here fell back to a placeholder and the
+  // hint below read it as a noun. /api/me always answers for its own player.
   const me = allPlayers.find((p) => p.id === myId)
     || (myId && state.currentUser?.name
       ? { id: myId, name: state.currentUser.name, photo_path: state.currentUser.photo_path }
