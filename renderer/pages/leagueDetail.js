@@ -230,7 +230,7 @@ export function renderLeagueDetail() {
       <div class="lg-tabs" id="lgTabs">
         <button class="lg-tab" data-lg-tab="standings">Standings</button>
         <button class="lg-tab" data-lg-tab="schedule">Schedule</button>
-        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">Players</button>` : ''}
+        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">Players<span class="lg-admin-chip">ADMIN</span></button>` : ''}
       </div>
       ${pillsHTML}
     </div>`;
@@ -870,7 +870,7 @@ function renderMatchRow(match, league, adminMode = true) {
   let scoreSection;
   if (hasScore) {
     scoreSection = `<div class="match-score">
-         <span class="score-display">${match.player1_score} – ${match.player2_score}</span>
+         <span class="score-display">${match.player1_score}–${match.player2_score}</span>
          ${adminMode ? `<button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
            data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="false">Edit</button>` : ''}
        </div>`;
@@ -976,7 +976,7 @@ async function saveMatchScore(btn) {
   row.classList.add('lg-match-scored');
 
   row.querySelector('.match-score').innerHTML = `
-    <span class="score-display">${s1} – ${s2}</span>
+    <span class="score-display">${s1}–${s2}</span>
     <button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
       data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="false">Edit</button>`;
   row.querySelector('.score-save-btn').addEventListener('click', () =>

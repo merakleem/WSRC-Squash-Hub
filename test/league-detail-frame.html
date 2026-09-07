@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>league detail frame</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<script type="module">
+// Renders the real league detail page so the parent suite can measure it at a
+// width of its choosing. A frame, not a div: media queries answer to the
+// frame's own viewport, so one runner can check mobile and desktop at once
+// without resizing the browser.
+import { state } from '../renderer/state.js';
+import { LEAGUE } from './league-detail-fixture.js';
+
+const params = new URLSearchParams(location.search);
+const asAdmin = params.get('as') === 'admin';
+
+state.currentUser = asAdmin
+  ? { role: 'admin', playerId: null }
+  : { role: 'player', playerId: LEAGUE.players[0].id, name: LEAGUE.players[0].name };
+state.currentLeague = LEAGUE;
+state.players = LEAGUE.players;
+window.navigate = () => {};
+window.api = {
+  getLeagueCourts: async () => [],
+  updateMatchScore: async () => ({ ok: true }),
+};
+
+const mod = await import('../renderer/pages/leagueDetail.js');
+mod.renderLeagueDetail();
+
+// Land on the schedule with a week open: the tab that carries every defect the
+// visual pass was about.
+document.querySelector('[data-lg-tab="schedule"]')?.click();
+await new Promise((r) => setTimeout(r, 30));
+document.querySelector('.lg-week .week-header')?.click();
+await new Promise((r) => setTimeout(r, 30));
+
+window.__ready = true;
+</script>
+</body>
+</html>
