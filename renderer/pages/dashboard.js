@@ -239,43 +239,34 @@ export async function renderClubSettings() {
 
       <div class="settings-section">
         <div class="settings-section-header">
-          <h2 class="settings-section-title">New players on the ladder</h2>
+          <h2 class="settings-section-title">Players with no matches</h2>
         </div>
         <p class="settings-section-desc">
-          A Club Locker rating is an estimate; a place on the ladder is a result. Someone who had
-          played nothing when ratings began starts below their estimate and plays their way back,
-          so the members who turn up are the ones holding the top spots. Change these and the
-          ladder recalculates: nothing is stored, so you can try a number and try another.
+          The ladder is decided by results. Players who have played are ranked by where they
+          finished; players who have not yet played start at the foot of it, ordered among
+          themselves by their Club Locker rating. One win moves them into the ranked ladder
+          properly. Change these and the ladder recalculates: nothing is stored, so you can try a
+          number and try another.
         </p>
         <div class="season-settings">
           <div class="form-group">
-            <label class="form-label" for="fUnprovenDock">Starting penalty</label>
-            <input class="form-control" id="fUnprovenDock" type="number" min="0" max="400" step="5"
-              value="${esc(String(ladderCfg.elo_unproven_dock))}">
+            <label class="form-label" for="fUnplayedBase">Starting rating</label>
+            <input class="form-control" id="fUnplayedBase" type="number" min="0" max="2000" step="10"
+              value="${esc(String(ladderCfg.elo_unplayed_base))}">
             <p class="form-hint">
-              Rating points taken off a player who has never played. 0 turns it off.
-              <span id="dockHint"></span>
+              Where a player with no matches begins. The lowest finisher from the previous season
+              is worth ${esc(String(ladderCfg.elo_seed_bottom))}, so anything at or below that keeps
+              them behind everyone who played.
             </p>
           </div>
           <div class="form-group">
-            <label class="form-label" for="fProvMatches">Adjustment period</label>
-            <input class="form-control" id="fProvMatches" type="number" min="0" max="30" step="1"
-              value="${esc(String(ladderCfg.elo_provisional_matches))}">
-            <p class="form-hint">How many of their first matches count for more. 0 turns it off.</p>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="fProvGain">A win counts</label>
-            <input class="form-control" id="fProvGain" type="number" min="1" max="10" step="0.5"
-              value="${esc(String(ladderCfg.elo_provisional_gain))}">
-            <p class="form-hint">Times normal, during the adjustment period.</p>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="fProvLoss">A loss counts</label>
-            <input class="form-control" id="fProvLoss" type="number" min="0" max="1" step="0.01"
-              value="${esc(String(ladderCfg.elo_provisional_loss))}">
+            <label class="form-label" for="fUnplayedBonus">Club Locker adjustment</label>
+            <input class="form-control" id="fUnplayedBonus" type="number" min="0" max="400" step="5"
+              value="${esc(String(ladderCfg.elo_unplayed_rating_bonus))}">
             <p class="form-hint">
-              Times normal. Below 1 softens an early loss; losing to someone far above you already
-              costs little.
+              The most a Club Locker rating can add on top. The club's highest rating earns all of
+              it, the lowest none. Enough to sort newcomers sensibly, not enough to lift them past
+              players who have results.
             </p>
           </div>
           <div class="form-actions" style="justify-content:flex-start">
@@ -365,25 +356,11 @@ export async function renderClubSettings() {
     }
   });
 
-  // A live sense of what the penalty costs, in places rather than points.
-  const dockInput = document.getElementById('fUnprovenDock');
-  const dockHint = document.getElementById('dockHint');
-  const showDock = () => {
-    const n = Number(dockInput.value);
-    dockHint.textContent = n > 0
-      ? `About ${Math.max(1, Math.round(n / 6))} places at the moment.`
-      : '';
-  };
-  showDock();
-  dockInput?.addEventListener('input', showDock);
-
   document.getElementById('btnSaveLadderSettings')?.addEventListener('click', async () => {
     try {
       await window.api.updateSettings({
-        elo_unproven_dock: dockInput.value,
-        elo_provisional_matches: document.getElementById('fProvMatches').value,
-        elo_provisional_gain: document.getElementById('fProvGain').value,
-        elo_provisional_loss: document.getElementById('fProvLoss').value,
+        elo_unplayed_base: document.getElementById('fUnplayedBase').value,
+        elo_unplayed_rating_bonus: document.getElementById('fUnplayedBonus').value,
       });
       toast('Ladder settings saved');
     } catch (err) {

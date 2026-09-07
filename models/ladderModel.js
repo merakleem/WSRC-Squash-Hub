@@ -303,33 +303,38 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   const priorSize = priorOrder.length;
   const priorByIdMap = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
-  // Unproven: nothing played by the time ratings began. Judged at that fixed
-  // moment rather than "have they played yet", so the dock cannot evaporate the
-  // instant someone plays their first match and hand them a jump up before the
-  // result is even applied.
-  const ratingEraStart = firstRatedRange.start;
-  const isUnproven = (id) => !firstMatch[id] || firstMatch[id] >= ratingEraStart;
+  // Played anything by the time ratings began? Judged at that fixed moment
+  // rather than "have they played yet", so a seed cannot change under a player
+  // the instant they play their first match.
+  const isUnplayed = (id) => !firstMatch[id] || firstMatch[id] >= firstRatedRange.start;
+
+  // Only players with results are ranked into the seed range. Ranking the rest
+  // alongside them was the whole problem: it spent ladder places on estimates
+  // and pushed players who had actually played down the list.
+  const playedOrder = priorOrder.filter((r) => !isUnplayed(r.id));
+  const playedRank = Object.fromEntries(playedOrder.map((r, i) => [r.id, i + 1]));
+
+  // Where each Club Locker rating sits in the club's range, 0 to 1. Used only
+  // to order the players who have no results against each other.
+  const rated = players.map((p) => Number(p.club_locker_rating)).filter(Number.isFinite);
+  const lo = rated.length ? Math.min(...rated) : 0;
+  const hi = rated.length ? Math.max(...rated) : 0;
+  const shareOf = (p) => {
+    const r = Number(p.club_locker_rating);
+    if (!Number.isFinite(r) || hi <= lo) return 0;
+    return (r - lo) / (hi - lo);
+  };
 
   const ratings = {};
   for (const p of players) {
     ratings[p.id] = elo.seedRating({
       previousRating: null,
-      previousPosition: priorByIdMap[p.id]?.position ?? null,
-      ladderSize: priorSize,
-      clubLockerRating: p.club_locker_rating,
+      previousPosition: playedRank[p.id] ?? null,
+      ladderSize: playedOrder.length,
+      ratingShare: shareOf(p),
+      unplayed: isUnplayed(p.id),
     }, cfg);
-    if (isUnproven(p.id)) ratings[p.id] -= cfg.elo_unproven_dock;
   }
-
-  // How many amplified matches each unproven player has left. Established
-  // players never had any, so they always score at the plain K factor.
-  const provisionalLeft = {};
-  for (const p of players) {
-    provisionalLeft[p.id] = isUnproven(p.id) ? cfg.elo_provisional_matches : 0;
-  }
-  const mult = (id, kind) => (provisionalLeft[id] > 0
-    ? (kind === 'gain' ? cfg.elo_provisional_gain : cfg.elo_provisional_loss)
-    : 1);
 
   // Replay each rated season up to and including the requested one.
   let played = {}, wins = {}, losses = {}, seedsForTarget = { ...ratings };
@@ -351,16 +356,9 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
       const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
-      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor, {
-        winnerGain: mult(winnerId, 'gain'),
-        loserLoss: mult(loserId, 'loss'),
-      });
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
       ratings[winnerId] = r.winner;
       ratings[loserId] = r.loser;
-      // Spent whether it was won or lost: the adjustment is about settling at
-      // the right level, not about collecting free wins.
-      if (provisionalLeft[winnerId] > 0) provisionalLeft[winnerId] -= 1;
-      if (provisionalLeft[loserId] > 0) provisionalLeft[loserId] -= 1;
 
       if (isTarget) {
         played[winnerId] = (played[winnerId] || 0) + 1;
@@ -412,6 +410,10 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
       hidden_for_inactivity: hidden,
       last_active: seen || null,
       rating: Math.round(ratings[p.id]),
+      // The unrounded value decides the order. Players with no results are
+      // separated by only a few points, so rounding first would have the
+      // display tie them and the alphabet break it.
+      _exact: ratings[p.id],
       seed_rating: Math.round(seedsForTarget[p.id]),
       rating_change: Math.round(ratings[p.id] - seedsForTarget[p.id]),
       matches_played: played[p.id] || 0,
@@ -420,7 +422,7 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
     });
   }
 
-  rows.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
+  rows.sort((a, b) => b._exact - a._exact || a.name.localeCompare(b.name));
 
   // Movement is reported as places gained or lost, not points, matching how the
   // ladder has always read.
@@ -447,7 +449,7 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
       .forEach((r, i) => { priorPos[r.id] = i + 1; });
   }
 
-  return rows.map((r, i) => ({
+  return rows.map(({ _exact, ...r }, i) => ({
     ...r,
     position: i + 1,
     best_position: null,
@@ -569,26 +571,27 @@ function getPlayerMatchRatingDeltas(playerId) {
   const priorOrder = getLadder(_dayBefore(firstRange.start));
   const priorById = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
-  // Same dock and adjustment period the ladder itself applies, so the number
-  // shown against a match on a profile is the one that moved the standings.
+  // Seeded exactly as the ladder seeds, so the number shown against a match on
+  // a profile is the one that moved the standings.
   const firstMatch = getFirstMatchDates();
-  const isUnproven = (pid) => !firstMatch[pid] || firstMatch[pid] >= firstRange.start;
+  const isUnplayed = (pid) => !firstMatch[pid] || firstMatch[pid] >= firstRange.start;
+  const playedOrder = priorOrder.filter((r) => !isUnplayed(r.id));
+  const playedRank = Object.fromEntries(playedOrder.map((r, i) => [r.id, i + 1]));
+  const rated = players.map((p) => Number(p.club_locker_rating)).filter(Number.isFinite);
+  const lo = rated.length ? Math.min(...rated) : 0;
+  const hi = rated.length ? Math.max(...rated) : 0;
 
   const ratings = {};
-  const provisionalLeft = {};
   for (const p of players) {
+    const r = Number(p.club_locker_rating);
     ratings[p.id] = elo.seedRating({
       previousRating: null,
-      previousPosition: priorById[p.id]?.position ?? null,
-      ladderSize: priorOrder.length,
-      clubLockerRating: p.club_locker_rating,
+      previousPosition: playedRank[p.id] ?? null,
+      ladderSize: playedOrder.length,
+      ratingShare: Number.isFinite(r) && hi > lo ? (r - lo) / (hi - lo) : 0,
+      unplayed: isUnplayed(p.id),
     }, cfg);
-    if (isUnproven(p.id)) ratings[p.id] -= cfg.elo_unproven_dock;
-    provisionalLeft[p.id] = isUnproven(p.id) ? cfg.elo_provisional_matches : 0;
   }
-  const mult = (pid, kind) => (provisionalLeft[pid] > 0
-    ? (kind === 'gain' ? cfg.elo_provisional_gain : cfg.elo_provisional_loss)
-    : 1);
 
   for (let year = cutoverYear; year <= latestYear; year++) {
     const key = monthDay === '01-01'
@@ -599,20 +602,12 @@ function getPlayerMatchRatingDeltas(playerId) {
       const loserId  = match.eff_loser_id;
       if (!playerIds.has(winnerId) || !playerIds.has(loserId) || winnerId === loserId) continue;
 
-      const gain = mult(winnerId, 'gain');
-      const loss = mult(loserId, 'loss');
-      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor,
-        { winnerGain: gain, loserLoss: loss });
+      const r = elo.applyMatch(ratings[winnerId], ratings[loserId], cfg.elo_k_factor);
       ratings[winnerId] = r.winner;
       ratings[loserId] = r.loser;
-      if (provisionalLeft[winnerId] > 0) provisionalLeft[winnerId] -= 1;
-      if (provisionalLeft[loserId] > 0) provisionalLeft[loserId] -= 1;
 
       if (winnerId === id || loserId === id) {
-        // The player's own move, not the notional exchange: an amplified win
-        // shows the points they actually gained.
-        deltas[`${match.source}:${match.match_id}`] = Math.round(
-          winnerId === id ? r.delta * gain : -r.delta * loss);
+        deltas[`${match.source}:${match.match_id}`] = Math.round(winnerId === id ? r.delta : -r.delta);
       }
     }
   }
