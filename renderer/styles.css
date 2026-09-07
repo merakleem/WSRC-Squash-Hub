@@ -4367,6 +4367,22 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   transition: transform .22s ease;
 }
 .ldr-selfbar.show { transform: none; }
+/* The unranked bar says why you are not on the list, so it reads as a sentence
+   rather than as a rank and a name. */
+.ldr-selfbar-unranked { gap: 10px; }
+/* Scoped to the bar so it beats .ldr-selfbar-rank's Barlow 19px, which is
+   declared below this and would otherwise win the tie on source order. */
+.ldr-selfbar .ldr-selfbar-unranked-tag {
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.16);
+  white-space: nowrap;
+}
 .ldr-selfbar-rank {
   font-family: 'Barlow', sans-serif;
   font-size: 19px;
@@ -7571,7 +7587,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 
 /* --- Modal --- */
 .em-modal { display: flex; flex-direction: column; gap: 18px; }
-.em-sheet-handle { display: none; }
 
 .em-section { display: flex; flex-direction: column; gap: 8px; }
 
@@ -7813,14 +7828,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
     max-height: 92vh;
     border-radius: 18px 18px 0 0;
     transform: none;
-  }
-  .em-sheet-handle {
-    display: block;
-    width: 36px;
-    height: 4px;
-    margin: -4px auto 2px;
-    border-radius: 999px;
-    background: #dce3ed;
   }
   .modal-body:has(.em-modal) { padding: 16px; }
   .em-winner-grid, .em-games-grid { gap: 8px; }

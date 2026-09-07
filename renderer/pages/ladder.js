@@ -51,6 +51,47 @@ function _wireFab() {
 }
 
 // ===== LADDER PAGE =====
+// The list scrolls inside .content, not the document, and Safari on iOS honours
+// `behavior: 'smooth'` only on the document - on any other scroller it jumps.
+// Animating the scroller directly gives every browser the same movement.
+function _smoothScrollTo(el, reduceMotion) {
+  let box = el.parentElement;
+  while (box) {
+    const style = getComputedStyle(box);
+    if (/(auto|scroll)/.test(style.overflowY) && box.scrollHeight > box.clientHeight) break;
+    box = box.parentElement;
+  }
+
+  // Nothing between the row and the document scrolls, which the browser can
+  // animate itself.
+  if (!box) {
+    el.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+    return;
+  }
+
+  const target = Math.max(0, Math.min(
+    box.scrollHeight - box.clientHeight,
+    el.offsetTop - box.offsetTop - (box.clientHeight - el.offsetHeight) / 2,
+  ));
+  if (reduceMotion) { box.scrollTop = target; return; }
+
+  const from = box.scrollTop;
+  const distance = target - from;
+  if (Math.abs(distance) < 2) return;
+  // Long jumps take a little longer, but never so long that the page feels
+  // stuck: a ladder of 100 still lands inside half a second.
+  const duration = Math.min(480, 180 + Math.abs(distance) * 0.25);
+  const started = performance.now();
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+  const step = (now) => {
+    const t = Math.min(1, (now - started) / duration);
+    box.scrollTop = from + distance * ease(t);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 export async function renderLadder() {
   document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>`;
   document.getElementById('topbarActions').innerHTML = '';
@@ -192,7 +233,21 @@ export async function renderLadder() {
       ${myEntry ? `<button class="btn btn-outline btn-sm ldr-jump" id="ldrJumpMe">Jump to my rank</button>` : ''}
     </div>`;
 
-  const selfBarHTML = !myEntry ? '' : (() => {
+  // Someone who has not played yet has no row to scroll to, so the bar cannot
+  // be about finding them - it tells them why they are not on the list and what
+  // to do about it. Only on the live season, and never for a member the club has
+  // taken off the ladder, who has nothing to gain by playing.
+  const myPlayer = (state.players || []).find((p) => p.id === myId) || null;
+  const showUnrankedBar = !!myId && !myEntry && viewingCurrent && !ladderResult.frozen
+    && !(myPlayer && myPlayer.exclude_from_ladder);
+
+  const unrankedBarHTML = !showUnrankedBar ? '' : `
+    <div class="ldr-selfbar ldr-selfbar-unranked show" id="ldrSelfBar">
+      <span class="ldr-selfbar-rank ldr-selfbar-unranked-tag">Unranked</span>
+      <span class="ldr-selfbar-name">Play a match to join the ladder.</span>
+    </div>`;
+
+  const selfBarHTML = !myEntry ? unrankedBarHTML : (() => {
     const rec = recordFor(myEntry.player);
     const total = rec.wins + rec.losses;
     const pct = total > 0 ? Math.round(rec.wins / total * 100) : null;
@@ -263,6 +318,10 @@ export async function renderLadder() {
     _selfObserver = null;
     if (!selfBar) return;
 
+    // The unranked bar has no row to follow and is not about finding one: it
+    // stays put. Without this the observer would hide it the moment it renders.
+    if (selfBar.classList.contains('ldr-selfbar-unranked')) return;
+
     const meRow = rowsEl.querySelector('.ldr-all-me');
     if (!meRow) { selfBar.classList.remove('show'); return; }
 
@@ -300,7 +359,7 @@ export async function renderLadder() {
     const meRow = rowsEl.querySelector('.ldr-all-me');
     if (!meRow) return;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    meRow.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+    _smoothScrollTo(meRow, reduceMotion);
     meRow.classList.remove('ldr-flash');
     // Reflow between remove and add so a second press replays the highlight.
     void meRow.offsetWidth;

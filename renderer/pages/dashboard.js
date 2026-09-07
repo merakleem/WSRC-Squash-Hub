@@ -925,7 +925,7 @@ export async function renderDashboard() {
           <div class="db-stat"><div class="db-stat-val">${losses}</div><div class="db-stat-lbl">Losses</div></div>
           <div class="db-stat"><div class="db-stat-val">${winPct}%</div><div class="db-stat-lbl">Win Rate</div></div>
         </div>
-      ` : `<div class="db-empty-msg">Not ranked yet</div>`}
+      ` : `<div class="db-empty-msg">Play a match to join the ladder</div>`}
       ${ladderNearby.length > 0 ? `
         <div class="db-card-divider"></div>
         <div class="db-card-subtitle">Club Ladder</div>

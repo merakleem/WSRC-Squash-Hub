@@ -61,7 +61,7 @@ function _pageHTML() {
     <div class="rs-page">
       <div class="rs-head">
         <h2 class="rs-title">Your matches awaiting a score</h2>
-        <span class="rs-sub">League and ladder matches you are part of. Tournament scores are entered by the club.</span>
+        <span class="rs-sub">League and ladder matches you are part of.</span>
       </div>
       ${list}
       <div class="rs-divider">
