@@ -243,20 +243,30 @@ export async function renderClubSettings() {
         </div>
         <p class="settings-section-desc">
           The ladder is decided by results. Players who have played are ranked by where they
-          finished; players who have not yet played start at the foot of it, lifted by their Club
-          Locker rating. One win moves them into the ranked ladder properly. Change this and the
-          ladder recalculates: nothing is stored, so you can try a number, look at the ladder, and
-          try another.
+          finished; players who have not yet played start at the foot of it, lifted by however far
+          their Club Locker rating clears the floor. One win moves them into the ranked ladder
+          properly. Change these and the ladder recalculates: nothing is stored, so you can try a
+          number, look at the ladder, and try another.
         </p>
         <div class="season-settings">
           <div class="form-group">
-            <label class="form-label" for="fUnplayedBonus">Club Locker multiplier</label>
-            <input class="form-control" id="fUnplayedBonus" type="number" min="0" max="200" step="1"
+            <label class="form-label" for="fRatingFloor">Rating floor</label>
+            <input class="form-control" id="fRatingFloor" type="number" min="0" max="10" step="0.1"
+              value="${esc(String(ladderCfg.elo_unplayed_rating_floor))}">
+            <p class="form-hint">
+              A Club Locker rating at or below this is worth nothing: those players start at
+              ${esc(String(ladderCfg.elo_seed_bottom))}, the foot of the ladder. Raise it to make
+              the head start something only stronger players get.
+            </p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fUnplayedBonus">Points per rating point</label>
+            <input class="form-control" id="fUnplayedBonus" type="number" min="0" max="600" step="10"
               value="${esc(String(ladderCfg.elo_unplayed_rating_multiplier))}">
             <p class="form-hint">
-              Ladder points each point of Club Locker rating is worth at the start. A 4.0 player
-              begins on ${esc(String(ladderCfg.elo_seed_bottom))} plus four times this. Turn it up
-              to weight the rating more heavily. <span id="bonusHint"></span>
+              How much each point of rating above the floor is worth. This decides how far the
+              strongest newcomer reaches; it cannot lift anyone at or below the floor, so turning it
+              up does not drag the whole intake with it. <span id="bonusHint"></span>
             </p>
           </div>
           <div class="form-actions" style="justify-content:flex-start">
@@ -346,21 +356,25 @@ export async function renderClubSettings() {
     }
   });
 
-  // Worked through on two real ratings, so the multiplier is not abstract.
+  // Worked through on two real ratings, so neither number is abstract.
+  const floorInput = document.getElementById('fRatingFloor');
   const bonusInput = document.getElementById('fUnplayedBonus');
   const bonusHint = document.getElementById('bonusHint');
   const showBonus = () => {
     const foot = Number(ladderCfg.elo_seed_bottom);
+    const f = Number(floorInput.value || 0);
     const m = Number(bonusInput.value || 0);
-    bonusHint.textContent =
-      `A 3.0 would start on ${Math.round(foot + 3 * m)}, a 5.0 on ${Math.round(foot + 5 * m)}.`;
+    const at = (r) => Math.round(foot + Math.max(0, r - f) * m);
+    bonusHint.textContent = `A 4.0 would start on ${at(4)}, a 5.0 on ${at(5)}.`;
   };
   showBonus();
   bonusInput?.addEventListener('input', showBonus);
+  floorInput?.addEventListener('input', showBonus);
 
   document.getElementById('btnSaveLadderSettings')?.addEventListener('click', async () => {
     try {
       await window.api.updateSettings({
+        elo_unplayed_rating_floor: floorInput.value,
         elo_unplayed_rating_multiplier: bonusInput.value,
       });
       toast('Ladder settings saved');
