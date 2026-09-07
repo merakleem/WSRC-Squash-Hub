@@ -275,6 +275,9 @@ const getLastMatchDates    = matchModel.getLastMatchDates;
  * positional ladder ended on.
  */
 function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
+  // `includeHidden` keeps the players who have not played yet in the result,
+  // carrying the rating they would enter on. Used by the movement comparison
+  // below, and by anything that wants to say where a member would come in.
   const db = getDB();
   const cfg = elo.config(settings);
   const monthDay = seasonsLib.startMonthDay(settings);
@@ -369,44 +372,26 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
         ? targetRange.end
         : new Date().toISOString().slice(0, 10));
 
-  // Who appears at all: you drop off the ladder once a full year has passed with
-  // no activity - a year since your last match, or since you joined if you have
-  // never played one. A single game puts you straight back on at the rating you
-  // left with; nothing decays, so a return is never punished beyond the time
-  // already missed.
+  // Who appears at all: everyone who has played, and nobody else. Read over the
+  // same window the replay just used rather than up to today, because a match
+  // dated later in this season has already moved the ratings - otherwise a
+  // player's rating could move while they stayed off the ladder.
   //
-  // Measured against the later of the two dates, because a player row can be
-  // created after a result has already been entered for them.
-  const cutoff = _yearBefore(measuredAt);
-  // Read over the same window the replay just used, not up to today: a match
-  // dated later in this season has already moved the ratings, so it has to
-  // count as having played too, or a player's rating moves while they stay off
-  // the ladder.
+  // Nothing else takes anyone off. A rating earned is kept: sit out a year and
+  // it is still there when you come back.
   const lastMatch = getLastMatchDates(asOfDate || targetRange.end);
-  const lastActive = {};
-  for (const p of players) {
-    const joined = _joinDay(p, firstMatch);
-    const lastPlayed = lastMatch[p.id] || '';
-    lastActive[p.id] = joined > lastPlayed ? joined : lastPlayed;
-  }
 
   const rows = [];
   for (const p of players) {
-    // You are on the ladder once you have played, and not before. An estimate
-    // of how good someone is decides where they come in, never what rank they
-    // hold: a place has to be won from somebody.
+    // An estimate of how good someone is decides where they come in, never what
+    // rank they hold: a place has to be won from somebody.
     const unranked = !lastMatch[p.id];
-    // No date at all on either side means nothing is known about them; that is
-    // not evidence of a year away, so they stay on.
-    const seen = lastActive[p.id];
-    const hidden = !!seen && seen <= cutoff;
-    if ((unranked || hidden) && !includeHidden) continue;
+    if (unranked && !includeHidden) continue;
 
     rows.push({
       ...p,
       unranked,
-      hidden_for_inactivity: hidden,
-      last_active: seen || null,
+      last_played: lastMatch[p.id] || null,
       rating: Math.round(ratings[p.id]),
       // The unrounded value decides the order. Players with no results are
       // separated by only a few points, so rounding first would have the
@@ -463,13 +448,6 @@ function _dayBefore(iso) {
 
 function _daysAgo(n) {
   return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
-}
-
-/** The same calendar date a year earlier, for the ladder's inactivity cutoff. */
-function _yearBefore(iso) {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCFullYear(d.getUTCFullYear() - 1);
-  return d.toISOString().slice(0, 10);
 }
 
 /**

@@ -317,20 +317,12 @@ export async function renderLadder() {
   document.getElementById('btnLadderInfo')?.addEventListener('click', () => {
     modal.open('How the Ladder Works', isElo ? `
       <div class="info-modal-section">
-        <h4>Every match moves your rating</h4>
-        <p>You gain rating points for a win and lose them for a defeat. The winner gains exactly what the loser gives up, so the ladder never inflates.</p>
+        <h4>Play a match to get ranked</h4>
+        <p>The ladder is everyone who has played. Until you play your first match you're unranked, and every match after that moves you: you gain rating points for a win and lose them for a defeat. The winner gains exactly what the loser gives up, so the ladder never inflates.</p>
       </div>
       <div class="info-modal-section">
         <h4>Who you beat matters</h4>
         <p>Beating someone rated well above you is worth a lot. Beating someone well below you is worth very little, and losing to them costs you a lot. Evenly matched games move both players by a moderate amount either way.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Playing more helps</h4>
-        <p>Unlike the old ladder, every match counts, not just wins against players above you. The more you play, the more your rating reflects your real standing.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Inactivity</h4>
-        <p>After a full month without a match your rating starts to ease down, and continues each month you don't play. Play a match and it stops immediately. After six months without playing you're hidden from the ladder until you return.</p>
       </div>
       <div class="info-modal-section">
         <h4>Starting rating</h4>
@@ -338,7 +330,7 @@ export async function renderLadder() {
       </div>` : `
       <div class="info-modal-section">
         <h4>Starting positions</h4>
-        <p>Players are initially ranked based on their Club Locker rating. Players without a rating are placed at the bottom.</p>
+        <p>The ladder is everyone who has played; play a match and you're on it. New arrivals slot in below every member rated at least as highly as they are, and members without a rating start at the bottom.</p>
       </div>
       <div class="info-modal-section">
         <h4>Moving up</h4>
