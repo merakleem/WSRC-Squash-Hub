@@ -2,22 +2,30 @@ const express = require('express');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
-const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
+const { sendEmail, isConfigured: emailConfigured, appUrl } = require('../lib/email');
 const playerService = require('../services/playerService');
+const playerModel = require('../models/playerModel');
+const seasonModel = require('../models/seasonModel');
+const ladderModel = require('../models/ladderModel');
+const { savePlayerPhoto, deletePlayerPhoto } = require('../lib/photos');
 const tournamentModel = require('../models/tournamentModel');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
 
 const router = express.Router();
 
+// What a non-admin may see of another player. Contact details, account
+// status and the account flags — who is a member (or tester) is the club's
+// business, not something any signed-in player can enumerate. Tester rows
+// are left out of the list entirely.
 function _stripContact(player) {
-  const { email, phone, member_number, ...rest } = player;
+  const { email, phone, member_number, is_member, is_tester, account_status, ...rest } = player;
   return rest;
 }
 
 router.get('/players', wrap(async (req, res) => {
   const players = await playerService.getAllPlayers();
   const isAdmin = req.session?.role === 'admin';
-  res.json(isAdmin ? players : players.map(_stripContact));
+  res.json(isAdmin ? players : players.filter((p) => !p.is_tester).map(_stripContact));
 }));
 
 // /records and /verified-count must be registered before /:id to avoid Express matching them as an id
@@ -52,13 +60,32 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   const tournUpcoming = tournamentModel.getPlayerTournamentUpcoming(id);
 
   const pickupHistory = playerService.getPickupMatchHistory(id);
+
+  // Rating movement per match, present only for matches in a rated season.
+  const ratingDeltas = ladderModel.getPlayerMatchRatingDeltas(id);
+  const seasonSettings = seasonModel.getSettings();
+
+  const decorate = (m) => {
+    // Tournament rows carry a prefixed id ("t_12") to keep them unique in the
+    // merged list; the delta map is keyed on the raw table id.
+    const rawId = m.source === 'tournament' ? String(m.id).replace(/^t_/, '') : m.id;
+    const delta = ratingDeltas[`${m.source}:${rawId}`];
+    return {
+      ...m,
+      // Season comes from when the match was played, so it stays correct even
+      // if a date is corrected later.
+      season_key: seasonModel.seasonKeyForDate(m.week_date, seasonSettings),
+      ...(delta === undefined ? {} : { rating_change: delta }),
+    };
+  };
+
   const history = [
     ...leagueHistory.map((m) => ({ ...m, source: 'league' })),
     ...tournHistory,
     ...pickupHistory,
-  ].sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''));
+  ].map(decorate).sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''));
   const upcoming = [...leagueUpcoming.map((m) => ({ ...m, source: 'league' })), ...tournUpcoming]
-    .sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
+    .map(decorate).sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
 
   // Tournament results: one entry per tournament, with the player's finishing position
   const playerTournaments = db.prepare(`
@@ -67,7 +94,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
     WHERE t.id IN (
       SELECT tournament_id FROM tournament_players WHERE player_id = ?
       UNION
-      SELECT tournament_id FROM tournament_matches WHERE player1_id = ? OR player2_id = ?
+      SELECT tournament_id FROM matches WHERE type = 'tournament' AND (player1_id = ? OR player2_id = ?)
     )
     ORDER BY t.championship_date DESC
   `).all(id, id, id);
@@ -83,13 +110,38 @@ router.get('/players/:id/history', wrap(async (req, res) => {
       name: tourn.name,
       championship_date: tourn.championship_date,
       status: tourn.status,
+      season_key: seasonModel.seasonKeyForDate(tourn.championship_date),
       position: tier ? tier.position : null,
     });
   }
 
   const isAdmin = req.session?.role === 'admin';
   const playerData = isAdmin ? player : _stripContact(player);
-  res.json({ ...playerData, wins: rec.wins || 0, losses: rec.losses || 0, history, upcoming, accountStatus, tournamentResults });
+  // Seasons ship with the profile so the tab bar can be built without a second
+  // round trip; per-season records are derived client-side from history rows,
+  // which already carry season_key.
+  const seasons = seasonModel.getAllSeasons();
+  const ladderStats = ladderModel.getPlayerLadderStats(id);
+
+  // Division comes from the most recent league the player was entered in; the
+  // profile header shows it as part of their identity.
+  const division = db.prepare(`
+    SELECT d.name
+    FROM league_players lp
+    JOIN divisions d ON d.id = lp.division_id
+    JOIN leagues l ON l.id = lp.league_id
+    WHERE lp.player_id = ?
+    ORDER BY l.start_date DESC
+    LIMIT 1
+  `).get(id);
+
+  res.json({
+    ...playerData,
+    wins: rec.wins || 0, losses: rec.losses || 0,
+    history, upcoming, accountStatus, tournamentResults, seasons,
+    ladder: ladderStats,
+    division_name: division?.name || null,
+  });
 }));
 
 router.post('/players', requireAdmin, wrap(async (req, res) => {
@@ -102,6 +154,55 @@ router.put('/players/:id', requireAdmin, wrap(async (req, res) => {
   res.json(player);
 }));
 
+// Bulk field patch from the players page (flags and rating only). Admin-only —
+// membership is both an access switch (court booking) and private information.
+router.post('/players/bulk', requireAdmin, wrap(async (req, res) => {
+  const { ids, patch } = req.body;
+  const changed = await playerService.patchPlayers(ids, patch || {});
+  res.json({ changed });
+}));
+
+// Kept as an alias of /players/bulk for older clients.
+router.post('/players/membership', requireAdmin, wrap(async (req, res) => {
+  const { ids, is_member } = req.body;
+  const changed = await playerService.setMembership(ids, !!is_member);
+  res.json({ changed });
+}));
+
+// Bulk invites: every selected player who has an email and no working
+// password gets a fresh invite. The rest are counted, not failed.
+router.post('/players/send-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'Select at least one player' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+
+  const db = getDB();
+  let sent = 0, skipped = 0, failed = 0;
+  for (const id of ids.map(Number)) {
+    const player = db.prepare('SELECT id, name, email FROM players WHERE id = ?').get(id);
+    const account = player && db.prepare('SELECT password_hash FROM user_accounts WHERE player_id = ?').get(id);
+    if (!player || !player.email || account?.password_hash) { skipped++; continue; }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    db.prepare(`INSERT INTO user_accounts (player_id, invite_token, invite_expires)
+      VALUES (?, ?, ?)
+      ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`
+    ).run(id, token, expires);
+
+    const result = await sendEmail({
+      to: player.email,
+      subject: 'Activate your Play WSRC account',
+      html: `<p>Hi ${player.name},</p>
+<p>You've been invited to create an account on Play WSRC.</p>
+<p><a href="${appUrl(req)}/invite/${token}">Click here to activate your account</a></p>
+<p>This link expires in 72 hours.</p>`,
+    });
+    if (result.ok) sent++; else failed++;
+  }
+  res.json({ sent, skipped, failed });
+}));
+
 router.delete('/players/:id', requireAdmin, wrap(async (req, res) => {
   await playerService.deletePlayer(Number(req.params.id));
   res.json({ ok: true });
@@ -109,7 +210,6 @@ router.delete('/players/:id', requireAdmin, wrap(async (req, res) => {
 
 router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return res.status(404).json({ error: 'Player not found' });
@@ -122,27 +222,18 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
     ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`
   ).run(playerId, token, expires);
 
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  const inviteUrl = `${baseUrl}/invite/${token}`;
+  const inviteUrl = `${appUrl(req)}/invite/${token}`;
 
-  if (RESEND_API_KEY && player.email) {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: RESEND_FROM,
-        to: player.email,
-        subject: 'Activate your Play WSRC account',
-        html: `<p>Hi ${player.name},</p>
+  if (emailConfigured() && player.email) {
+    const result = await sendEmail({
+      to: player.email,
+      subject: 'Activate your Play WSRC account',
+      html: `<p>Hi ${player.name},</p>
 <p>You've been invited to create an account on Play WSRC.</p>
 <p><a href="${inviteUrl}">Click here to activate your account</a></p>
 <p>This link expires in 72 hours.</p>`,
-      }),
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      return res.status(502).json({ error: err.message || 'Failed to send email.', inviteUrl });
-    }
+    if (!result.ok) return res.status(502).json({ error: result.error, inviteUrl });
     return res.json({ ok: true, emailSent: true, inviteUrl });
   }
 
@@ -151,7 +242,6 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
 
 router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return res.status(404).json({ error: 'Player not found' });
@@ -164,27 +254,18 @@ router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (r
 
   db.prepare('UPDATE user_accounts SET reset_token = ?, reset_expires = ? WHERE player_id = ?').run(token, expires, playerId);
 
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  const resetUrl = `${baseUrl}/reset-password/${token}`;
+  const resetUrl = `${appUrl(req)}/reset-password/${token}`;
 
-  if (RESEND_API_KEY && player.email) {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: RESEND_FROM,
-        to: player.email,
-        subject: 'Reset your Play WSRC password',
-        html: `<p>Hi ${player.name},</p>
+  if (emailConfigured() && player.email) {
+    const result = await sendEmail({
+      to: player.email,
+      subject: 'Reset your Play WSRC password',
+      html: `<p>Hi ${player.name},</p>
 <p>A password reset was requested for your Play WSRC account.</p>
 <p><a href="${resetUrl}">Click here to reset your password</a></p>
 <p>This link expires in 24 hours. If you did not request this, you can ignore this email.</p>`,
-      }),
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      return res.status(502).json({ error: err.message || 'Failed to send email.', resetUrl });
-    }
+    if (!result.ok) return res.status(502).json({ error: result.error, resetUrl });
     return res.json({ ok: true, emailSent: true, resetUrl });
   }
 
@@ -201,8 +282,7 @@ router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, 
   const { message } = req.body;
   if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required.' });
 
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'Email service is not configured.' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'Email service is not configured.' });
 
   const db = getDB();
   const sender    = db.prepare('SELECT name, email FROM players WHERE id = ?').get(senderId);
@@ -217,27 +297,63 @@ router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, 
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: RESEND_FROM,
-      reply_to: sender.email,
-      to: [recipient.email],
-      subject: `Message from ${sender.name} via Play WSRC`,
-      html: `<p>Hi ${recipient.name},</p>
+  const result = await sendEmail({
+    reply_to: sender.email,
+    to: [recipient.email],
+    subject: `Message from ${sender.name} via Play WSRC`,
+    html: `<p>Hi ${recipient.name},</p>
 <p>${sender.name} sent you a message through Play WSRC:</p>
 <blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
 <p style="color:#6b7e93;font-size:12px">Reply to this email to respond directly to ${sender.name}. This message was sent through Play WSRC.</p>`,
-    }),
   });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    return res.status(502).json({ error: err.message || 'Failed to send message.' });
-  }
+  if (!result.ok) return res.status(502).json({ error: result.error });
 
   res.json({ ok: true });
+}));
+
+// ===== PROFILE PHOTOS =====
+// A player may set their own photo; an admin may set anyone's.
+function _canEditPhoto(req, playerId) {
+  return req.session?.role === 'admin' || req.session?.playerId === playerId;
+}
+
+router.put('/players/:id/photo', requireAuth, wrap(async (req, res) => {
+  const playerId = Number(req.params.id);
+  if (!_canEditPhoto(req, playerId)) return res.status(403).json({ error: 'You can only change your own photo.' });
+
+  const { image } = req.body;
+  if (!image) return res.status(400).json({ error: 'No image supplied.' });
+
+  const player = await playerService.getPlayerById(playerId);
+  if (!player) return res.status(404).json({ error: 'Player not found' });
+
+  let photoPath;
+  try {
+    photoPath = savePlayerPhoto(playerId, image);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  // Only remove the previous file once the new one is safely written.
+  const previous = player.photo_path;
+  const updated = await playerModel.setPlayerPhoto(playerId, photoPath);
+  if (previous && previous !== photoPath) deletePlayerPhoto(previous);
+
+  res.json({ ok: true, photo_path: updated.photo_path });
+}));
+
+router.delete('/players/:id/photo', requireAuth, wrap(async (req, res) => {
+  const playerId = Number(req.params.id);
+  if (!_canEditPhoto(req, playerId)) return res.status(403).json({ error: 'You can only change your own photo.' });
+
+  const player = await playerService.getPlayerById(playerId);
+  if (!player) return res.status(404).json({ error: 'Player not found' });
+
+  await playerModel.setPlayerPhoto(playerId, null);
+  deletePlayerPhoto(player.photo_path);
+
+  res.json({ ok: true, photo_path: null });
 }));
 
 module.exports = router;

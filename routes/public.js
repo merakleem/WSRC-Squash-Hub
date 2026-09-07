@@ -30,7 +30,7 @@ function buildPublicPage() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>League Schedule — Play WSRC</title>
+  <title>League Schedule &middot; Play WSRC</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -175,7 +175,7 @@ function buildPublicPage() {
       var scheduleHTML = (league.weeks||[]).map(function(week) {
         var muHTML = week.matchups.map(function(mu) {
           if (!isModern && mu.bye_team_id) {
-            return '<div class="bye-label">'+esc(mu.bye_team_name)+' — Bye week</div>';
+            return '<div class="bye-label">'+esc(mu.bye_team_name)+' &middot; Bye week</div>';
           }
           var matchesHTML = (mu.matches||[]).map(function(m) {
             var div = playerDiv[m.player1_id] || {};

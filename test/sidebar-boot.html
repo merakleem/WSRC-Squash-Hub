@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>booting</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+</head>
+<body>
+<script type="module">
+// Boots the real app shell for one role, so the sidebar suite asserts against
+// renderer/index.html's own markup and renderer/app.js's own wiring rather
+// than a copy of either. Loaded in an iframe per role, because app.js is a
+// module with one-shot side effects.
+const role = new URLSearchParams(location.search).get('role') || 'admin';
+
+const ME = {
+  admin:  { role: 'admin',  playerId: null, is_member: 0, name: null, photo_path: null },
+  member: { role: 'player', playerId: 7, is_member: 1, name: 'Mona Member', photo_path: null },
+  guest:  { role: 'player', playerId: 8, is_member: 0, name: 'Nate Newcomer', photo_path: null },
+}[role];
+
+// A restored page would pull a whole page render into the boot; the suite is
+// about the shell, so start clean every time.
+sessionStorage.clear();
+
+window.__calls = [];
+const realFetch = window.fetch.bind(window);
+window.fetch = async (url, opts) => {
+  if (String(url).includes('/api/me')) {
+    return new Response(JSON.stringify({ ...ME, csrf: 'x', viewing_as: null, is_tester: 0 }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  window.__calls.push(['fetch', String(url)]);
+  return new Response('[]', { headers: { 'Content-Type': 'application/json' } });
+};
+
+// Every page module reaches the network through window.api; a blanket stub
+// keeps the boot from depending on any one page's payload shape.
+window.api = new Proxy({}, {
+  get: (_, name) => async (...args) => {
+    window.__calls.push([String(name), ...args]);
+    return [];
+  },
+});
+
+// The real shell, scripts excluded: assigning innerHTML never runs them, so
+// app.js is imported once, below, under our stubs.
+const shell = await realFetch('../renderer/index.html').then((r) => r.text());
+const doc = new DOMParser().parseFromString(shell, 'text/html');
+doc.body.querySelectorAll('script').forEach((s) => s.remove());
+document.body.innerHTML = doc.body.innerHTML;
+
+await import('../renderer/app.js');
+window.dispatchEvent(new Event('DOMContentLoaded'));
+// The init handler is async; give its awaits a turn before the suite looks.
+await new Promise((r) => setTimeout(r, 60));
+// Screenshot helper: open the mobile drawer so the frame can be captured.
+if (new URLSearchParams(location.search).get('open')) {
+  document.querySelector('.sidebar').classList.add('mobile-open');
+  document.getElementById('sidebarOverlay').classList.add('open');
+}
+document.title = 'ready';
+</script>
+</body>
+</html>

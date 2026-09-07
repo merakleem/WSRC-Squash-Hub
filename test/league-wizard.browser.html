@@ -1,0 +1,273 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div id="pageTitle"></div><div id="topbarActions"></div>
+<main class="content" id="mainContent"></main>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $  = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const settle = () => new Promise((r) => setTimeout(r, 25));
+
+// ---- Fixture club: 16 ladder-ranked players, 4 courts ----
+const NAMES = ['James Whitfield','Sofia Duarte','Marcus Lang','Priya Raman','Tom Beckett','Elena Sorokin',
+  'Dev Patel','Ruth Okonjo','Callum Reid','Yuki Tanaka','Nadia Haddad','Owen Price',
+  'Ines Ferreira','Karl Mbeki','Grace Lindqvist','Hugo Alvarez'];
+const PLAYERS = NAMES.map((name, i) => ({ id: i + 1, name }));
+const COURTS = [1, 2, 3, 4].map((i) => ({ id: i, name: `Court ${i}` }));
+const calls = [];
+window.api = {
+  getLadder: async () => PLAYERS.map((p) => ({ id: p.id, name: p.name })),
+  getPlayers: async () => PLAYERS,
+  getCourts: async () => COURTS,
+  getValidConfigs: async (n) => {
+    const out = [];
+    for (let t = 2; t <= n; t++) if (n % t === 0) out.push({ teams: t, divisions: n / t });
+    return out;
+  },
+  createLeague: async (payload) => { calls.push(['createLeague', payload]); return 42; },
+  getLeague: async (id) => ({ id, name: 'made' }),
+};
+
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'admin' };
+const mod = await import('../renderer/pages/createLeague.js');
+window.navigate = (page, params) => {
+  calls.push(['navigate', page, params]);
+  if (page === 'createLeague') mod.renderCreateLeague();
+};
+
+// =====================================================================
+log.textContent += '\nSHELL + STEP 1\n';
+mod.startCreateLeague();
+await settle();
+ok('page titles itself', document.getElementById('pageTitle').textContent === 'New League');
+ok('five clickable steps', $$('.wz-step').length === 5);
+ok('step 1 is active', $('.wz-step--on')?.dataset.step === '1');
+ok('summary strip has six cells', $$('.wz-sum-cell').length === 6);
+ok('an unnamed league reads Untitled', $$('.wz-sum-val')[0]?.textContent === 'Untitled');
+ok('unknown values are dashes', $$('.wz-sum-val')[4]?.textContent === '—' || $$('.wz-sum-val')[5]?.textContent === '—');
+ok('players cell starts at 0', $$('.wz-sum-cell')[3]?.querySelector('.wz-sum-val')?.textContent === '0');
+ok('the step card titles itself', $('.wz-title')?.textContent === 'League information');
+ok('two format cards', $$('.wz-format').length === 2);
+ok('Teams is the default', $('.wz-format--on')?.dataset.type === 'traditional');
+ok('and carries the default tag', $('.wz-format--on .wz-format-tag')?.textContent === 'Current default');
+click($('#wNext'));
+await settle();
+ok('next without a name refuses', $('#wError')?.textContent === 'League name is required.');
+ok('and stays on step 1', state.wizard.step === 1);
+type($('#wName'), 'Fall 2026 League');
+ok('typing the name feeds the summary live', $$('.wz-sum-val')[0]?.textContent === 'Fall 2026 League');
+type($('#wDate'), '2026-09-14');
+click($$('.wz-format')[1]);
+await settle();
+ok('picking No teams selects it', $('.wz-format--on')?.dataset.type === 'modern');
+ok('format cell follows', $$('.wz-sum-val')[2]?.textContent === 'Divisions only');
+ok('the typed name survived the re-render', $('#wName')?.value === 'Fall 2026 League');
+click($$('.wz-format')[0]);
+await settle();
+
+log.textContent += '\nSTEPPER GUARDS\n';
+click($$('.wz-step')[2]); // jump to Structure with no players
+await settle();
+ok('jumping past step 2 with no players bounces to step 2', state.wizard.step === 2);
+ok('with the guard message', $('#wError')?.textContent === 'Select at least 2 players.');
+
+log.textContent += '\nSTEP 2 — ADD PLAYERS\n';
+ok('count chip starts at 0', $('#wzSelChip')?.textContent === '0 selected');
+ok('all 16 are available', $('#wzAvailN')?.textContent === '16 available');
+ok('rows carry ladder ranks', $('.wz-prow .wz-prank')?.textContent === '#1');
+ok('Clear is greyed with nothing picked', $('#wzClear')?.disabled === true);
+click($('#availableList .wz-prow'));
+ok('clicking a row adds the player', state.wizard.rankedPlayers.length === 1);
+ok('the chip follows', $('#wzSelChip')?.textContent === '1 selected');
+ok('with a seed number', $('#rankedList .wz-seed')?.textContent === '1');
+ok('and a navy avatar', !!$('#rankedList .wz-avatar--navy'));
+type($('#playerSearch'), 'zzz');
+ok('a hopeless search says so', /No players match/.test($('#availableList').textContent));
+ok('and greys Add all', $('#wzAddAll')?.disabled === true);
+type($('#playerSearch'), '');
+click($('#wzAddAll'));
+ok('Add all brings everyone in', state.wizard.rankedPlayers.length === 16);
+ok('in ladder order', state.wizard.rankedPlayers.map((p) => p.id).join(',') === PLAYERS.map((p) => p.id).join(','));
+ok('the left list empties', /Every club player is in/.test($('#availableList').textContent));
+click($('#wzClear'));
+ok('Clear empties the league', state.wizard.rankedPlayers.length === 0);
+ok('with the empty hint', /Click a name on the left/.test($('#rankedList').textContent));
+// Pick exactly 12 for the structure steps
+click($('#wzAddAll'));
+for (let i = 0; i < 4; i++) click($('#rankedList .wz-prow:last-child .wz-pbtn'));
+ok('12 players picked', state.wizard.rankedPlayers.length === 12);
+click($('#wNext'));
+await settle();
+ok('next moves to Structure', state.wizard.step === 3);
+
+log.textContent += '\nSTEP 3 — TRADITIONAL, LIVE\n';
+ok('valid default: 3 teams checks out', /Checks out/.test($('#wzCalc').textContent));
+ok('with the equation', /3 teams × 4 divisions = 12 players/.test($('#wzCalc').textContent));
+ok('and one chip per division', $$('.wz-distchip').length === 4);
+ok('weeks line multiplies out', $('#wzWeeks')?.textContent === '3 weeks × 1 = 3 total weeks');
+ok('presets are 2/3/4/6/8', $$('.wz-preset').map((b) => b.textContent).join(',') === '2,3,4,6,8');
+ok('3 is lit', $('.wz-preset--on')?.textContent === '3');
+ok('there is no Apply button', !$('#wApply'));
+click($$('[data-ctl="group-inc"]')[0]);
+await settle();
+ok('+ recalculates instantly', /4 teams × 3 divisions = 12 players/.test($('#wzCalc').textContent));
+ok('summary follows', $$('.wz-sum-val')[4]?.textContent === '4 × 3');
+click($$('[data-ctl="group-inc"]')[0]);
+await settle();
+ok('5 teams goes amber', $('.wz-calc--warn') !== null);
+ok("with today's suggestion", /can't be split into 5 teams evenly. Try/.test($('#wzCalc').textContent), $('#wzCalc').textContent.trim());
+ok('and Next disables', $('#wNext')?.disabled === true);
+click($$('.wz-step')[4]); // try to jump to Preview while invalid
+await settle();
+ok('jumping past an invalid structure bounces back', state.wizard.step === 3);
+ok('with its message', $('#wError')?.textContent === 'Fix the structure before continuing.');
+click($$('.wz-preset')[2]); // preset 4
+await settle();
+ok('a preset lands directly', state.wizard.numTeams === 4 && /Checks out/.test($('#wzCalc').textContent));
+click($$('[data-ctl="rounds-inc"]')[0]);
+await settle();
+ok('rounds double the weeks', $('#wzWeeks')?.textContent === '3 weeks × 2 = 6 total weeks');
+click($$('[data-ctl="rounds-dec"]')[0]);
+await settle();
+ok('no courts selected gets the amber note', /No courts selected/.test($('#wzNight').textContent));
+click($$('.wz-court')[0]);
+await settle();
+click($$('.wz-court')[1]);
+await settle();
+ok('court pills select', $$('.wz-court--on').length === 2 && state.wizard.selectedCourtIds.join(',') === '1,2');
+ok('and the count follows', $('#wzCourtN')?.textContent === '2 selected');
+const durEl = $('#wDuration');
+durEl.focus();
+type(durEl, '60');
+ok('typing a duration keeps focus', document.activeElement === durEl);
+type($('#wBuffer'), '30');
+ok('state takes the typed values', state.wizard.matchDuration === 60 && state.wizard.matchBuffer === 30);
+ok('a late night warns', /after 9:00 PM/.test($('#wzNight').textContent), $('#wzNight').textContent.trim());
+ok('naming the finish time', /around 23:30/.test($('#wzNight').textContent));
+type($('#wDuration'), '45');
+type($('#wBuffer'), '15');
+click($('#wNext'));
+await settle();
+ok('a valid structure advances', state.wizard.step === 4);
+ok('and commits the division count', state.wizard.numDivisions === 3);
+
+log.textContent += '\nSTEP 4 — BLACKOUT DATES\n';
+ok('the subtitle knows the span', /runs 3 weeks from Sep 14/.test($('.wz-sub').textContent));
+ok('empty state shows', /No dates skipped/.test($('.wz-boempty')?.textContent || ''));
+ok('week chips are laid out', $$('.wz-wkchip').length === 3);
+ok('week 1 lands on the start date', $$('.wz-wkchip-d')[0]?.textContent === 'Sep 14');
+ok('week 2 follows a week later', $$('.wz-wkchip-d')[1]?.textContent === 'Sep 21');
+type($('#wBlackoutDate'), '2026-09-21');
+click($('#wAddBlackout'));
+await settle();
+ok('an added date lists itself', /Monday, September 21, 2026/.test($('.wz-bodate')?.textContent || ''));
+ok('and pushes the weeks back', $$('.wz-wkchip-d').map((e) => e.textContent).join(',') === 'Sep 14,Sep 28,Oct 5');
+click($('[data-action="remove-blackout"]'));
+await settle();
+ok('remove restores the run', $$('.wz-wkchip-d')[1]?.textContent === 'Sep 21');
+type($('#wBlackoutDate'), '2026-09-21');
+click($('#wAddBlackout'));
+await settle();
+click($('#wNext'));
+await settle();
+
+log.textContent += '\nSTEP 5 — TRADITIONAL PREVIEW + CREATE\n';
+ok('the hero carries the name', $('.wz-hero-name')?.textContent === 'Fall 2026 League');
+ok('and the meta line', /Starts Monday, September 14, 2026 · 4 teams × 3 divisions · 1 blackout date/.test($('.wz-hero-meta').textContent));
+ok('stat tiles read 12 / 3 / 2', $$('.wz-tile-val').map((e) => e.textContent).join('/') === '12/3/2');
+ok('four team rosters', $$('.wz-rosterrow').length === 4);
+ok('each holding 3 players', $('.wz-countchip')?.textContent === '3 players');
+ok('the preview shows all 3 weeks', /All 3 weeks/.test($('.wz-card5note').textContent));
+ok('fixtures name the teams', /Team A vs/.test($('.wz-schedbody').textContent));
+click($('#btnEditTeams'));
+await settle();
+ok('Edit teams still opens its modal', !!document.getElementById('etGrid'));
+const btns = $$('.et-player-btn');
+click(btns[0]); click(btns[1]);
+click($('#fSubmit'));
+await settle();
+ok('a swap re-renders step 5', $$('.wz-rosterrow').length === 4);
+calls.length = 0;
+click($('#wCreate'));
+await settle();
+const created = calls.find((c) => c[0] === 'createLeague')?.[1];
+ok('create posts the payload', !!created);
+ok('with the traditional shape intact', created && JSON.stringify(Object.keys(created).sort()) ===
+  JSON.stringify(['blackoutDates','courtIds','matchBuffer','matchDuration','matchStartTime','name','numDivisions','numRounds','numTeams','rankedPlayers','setup_type','startDate','teamNames'].sort()));
+ok('name, date and counts are right', created && created.name === 'Fall 2026 League' && created.startDate === '2026-09-14'
+  && created.numTeams === 4 && created.numDivisions === 3 && created.numRounds === 1
+  && created.matchStartTime === '19:00' && created.matchDuration === 45 && created.matchBuffer === 15);
+ok('courts and blackouts came through', created && created.courtIds.join(',') === '1,2' && created.blackoutDates.join(',') === '2026-09-21');
+ok('players ranked 1..12', created && created.rankedPlayers.length === 12 && created.rankedPlayers.every((p, i) => p.rank === i + 1));
+ok('the swap reached the payload', created && created.rankedPlayers[0].playerId === 2 && created.rankedPlayers[1].playerId === 1);
+ok('then hands over to the league page', JSON.stringify(calls.find((c) => c[0] === 'navigate')?.slice(0, 2)) === '["navigate","leagueDetail"]');
+
+log.textContent += '\nMODERN FLOW\n';
+mod.startCreateLeague();
+await settle();
+type($('#wName'), 'Box League');
+click($$('.wz-format')[1]);
+await settle();
+click($('#wNext'));
+await settle();
+click($('#wzAddAll'));
+for (let i = 0; i < 4; i++) click($('#rankedList .wz-prow:last-child .wz-pbtn'));
+click($('#wNext'));
+await settle();
+ok('modern structure titles divisions', /Number of divisions/.test($('.wz-label').textContent) || $$('.wz-label').some?.call
+  ? $$('.wz-label').map((e) => e.textContent).includes('Number of divisions') : false);
+ok('presets are 2/3/4', $$('.wz-preset').map((b) => b.textContent).join(',') === '2,3,4');
+ok('distribution reads out', /2 divisions from 12 players/.test($('#wzCalc').textContent));
+ok('with even chips', $$('.wz-distchip').map((e) => e.textContent).join('|') === 'Div 1: 6|Div 2: 6');
+for (let i = 0; i < 5; i++) { click($$('[data-ctl="group-inc"]')[0]); await settle(); }
+ok('7 divisions of 12 is refused', /Can't create 7 divisions with 12 players/.test($('#wzCalc').textContent), $('#wzCalc').textContent.trim());
+ok('and Next disables', $('#wNext')?.disabled === true);
+click($$('.wz-preset')[1]); // 3 divisions
+await settle();
+ok('3 divisions distribute 4/4/4', $$('.wz-distchip').map((e) => e.textContent).join('|') === 'Div 1: 4|Div 2: 4|Div 3: 4');
+click($$('.wz-court')[0]);
+await settle();
+click($('#wNext'));
+await settle();
+click($('#wNext'));
+await settle();
+ok('modern preview shows division rosters', $$('.wz-rosterrow').length === 3);
+ok('only the first two divisions preview fixtures', $$('.wz-week')[0]?.querySelectorAll('.wz-fixgroup').length === 2);
+click($('#btnEditDivisions'));
+await settle();
+ok('Edit divisions still opens its modal', !!document.getElementById('edColumns'));
+click($('#fCancel'));
+await settle();
+calls.length = 0;
+click($('#wCreate'));
+await settle();
+const made = calls.find((c) => c[0] === 'createLeague')?.[1];
+ok('modern payload posts', !!made && made.setup_type === 'modern');
+ok('with the modern shape intact', made && JSON.stringify(Object.keys(made).sort()) ===
+  JSON.stringify(['blackoutDates','courtIds','divisions','matchBuffer','matchDuration','matchStartTime','name','numRounds','setup_type','startDate'].sort()));
+ok('three divisions of four', made && made.divisions.length === 3 && made.divisions.every((d) => d.length === 4));
+ok('ranks encode division and slot', made && made.divisions[1][0].rank === 1001 && made.divisions[2][3].rank === 2004);
+
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+</script>
+</body>
+</html>

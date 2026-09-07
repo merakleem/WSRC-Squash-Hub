@@ -3,18 +3,37 @@ import { esc, formatShortDate, toast, modal } from '../utils.js';
 import { startCreateLeague } from './createLeague.js';
 
 // ===== LEAGUES PAGE =====
+
+// The filter pills are page-local and deliberately not persisted: coming back
+// to Leagues always starts on All, so nothing is ever hidden by a choice made
+// in a previous visit.
+let _filter = 'all';
+
+const CAL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
+const PEOPLE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+  <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
+
 export async function renderLeagues() {
-  document.getElementById('pageTitle').textContent = 'Leagues';
   document.getElementById('topbarActions').innerHTML = isAdmin() ? `
     <button class="btn btn-primary" id="btnCreateLeague">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-      New League
+      <span class="lgl-new-long">New League</span><span class="lgl-new-short">New</span>
     </button>` : '';
 
   state.leagues = await window.api.getLeagues();
   const content = document.getElementById('mainContent');
 
+  const activeCount = state.leagues.filter((l) => l.status === 'active').length;
+  const doneCount = state.leagues.length - activeCount;
+  document.getElementById('pageTitle').innerHTML = state.leagues.length === 0
+    ? 'Leagues'
+    : `Leagues <span class="lgl-count">${activeCount} active &middot; ${doneCount} completed</span>`;
+
   if (state.leagues.length === 0) {
+    // The club has no leagues at all, which is a different message from a
+    // filter that happens to match nothing.
     content.innerHTML = `
       <div class="table-card">
         <div class="empty-state">
@@ -22,63 +41,179 @@ export async function renderLeagues() {
           <p>${isAdmin() ? 'Create your first league to get started.' : 'No leagues have been created yet.'}</p>
         </div>
       </div>`;
-  } else if (isAdmin()) {
-    content.innerHTML = `<div class="league-grid">${state.leagues.map(leagueCardHTML).join('')}</div>`;
   } else {
-    const playerId = state.currentUser?.playerId;
-    const mine = state.leagues.filter((l) => (l.player_ids || []).includes(playerId));
-    const other = state.leagues.filter((l) => !(l.player_ids || []).includes(playerId));
-    let html = '';
-    if (mine.length > 0) {
-      html += `<div class="leagues-section-label">My Leagues</div><div class="league-grid">${mine.map(leagueCardHTML).join('')}</div>`;
-    }
-    if (other.length > 0) {
-      html += `<div class="leagues-section-label${mine.length > 0 ? ' leagues-section-label--gap' : ''}">Other Leagues</div><div class="league-grid">${other.map(leagueCardHTML).join('')}</div>`;
-    }
-    content.innerHTML = html;
+    content.innerHTML = `
+      <div class="lgl-page">
+        <div class="lgl-filters" id="lglFilters">${_filtersHTML()}</div>
+        <div class="lgl-groups" id="lglGroups">${_groupsHTML()}</div>
+      </div>`;
+    _wireFilters();
+    _wireCards();
   }
-
-  content.querySelectorAll('[data-action="view"]').forEach((btn) => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); openLeague(Number(btn.dataset.id)); });
-  });
-  content.querySelectorAll('.league-card').forEach((card) => {
-    card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
-  });
 
   if (isAdmin()) {
     document.getElementById('btnCreateLeague')?.addEventListener('click', startCreateLeague);
   }
 }
 
+const FILTERS = [['all', 'All'], ['active', 'Active'], ['completed', 'Completed']];
+
+function _filtersHTML() {
+  return FILTERS.map(([key, label]) =>
+    `<button class="lgl-pill${key === _filter ? ' lgl-pill--on' : ''}" data-filter="${key}"
+       aria-pressed="${key === _filter}">${label}</button>`).join('');
+}
+
+/**
+ * The grid, grouped and filtered.
+ *
+ * Admins see Active / Completed; a player sees My Leagues / Other Leagues, the
+ * same split as before. Empty groups are dropped, so a filter narrows the page
+ * to the headings that still have cards under them.
+ */
+function _groupsHTML() {
+  const shown = state.leagues.filter((l) => _filter === 'all' || l.status === _filter);
+
+  const playerId = state.currentUser?.playerId;
+  const groups = isAdmin()
+    ? [['Active', shown.filter((l) => l.status === 'active')],
+       ['Completed', shown.filter((l) => l.status === 'completed')]]
+    : [['My Leagues', shown.filter((l) => (l.player_ids || []).includes(playerId))],
+       ['Other Leagues', shown.filter((l) => !(l.player_ids || []).includes(playerId))]];
+
+  const withCards = groups.filter(([, items]) => items.length > 0);
+  if (withCards.length === 0) {
+    return `
+      <div class="lgl-empty">
+        <strong>No leagues here</strong>
+        <span>Nothing matches this filter.</span>
+      </div>`;
+  }
+
+  return withCards.map(([label, items]) => `
+    <section class="lgl-group">
+      <div class="lgl-group-head">
+        <span class="lgl-group-label">${label}</span>
+        <span class="lgl-group-count">${items.length}</span>
+        <span class="lgl-group-rule"></span>
+      </div>
+      <div class="lgl-grid">${items.map(leagueCardHTML).join('')}</div>
+    </section>`).join('');
+}
+
+// Dates are read at local noon so a date-only string can't slide into the
+// previous day in a timezone behind UTC - the same trick formatShortDate uses.
+function _atNoon(dateStr) {
+  return dateStr ? new Date(`${String(dateStr).slice(0, 10)}T12:00:00`) : null;
+}
+
+/** "Wednesdays" - the day of the week a league is played on, from its start. */
+function _weekdayName(dateStr) {
+  const d = _atNoon(dateStr);
+  return d ? `${d.toLocaleDateString('en-US', { weekday: 'long' })}s` : '';
+}
+
+/** "Sep 9" - month and day only, for the week range where the year is implied. */
+function _monthDay(dateStr) {
+  const d = _atNoon(dateStr);
+  return d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+}
+
 function leagueCardHTML(league) {
+  const done = league.status === 'completed';
+  const playerId = state.currentUser?.playerId;
+  const mine = !isAdmin() && playerId != null && (league.player_ids || []).includes(playerId);
+
+  const structure = league.setup_type === 'modern'
+    ? `${league.num_divisions} division${league.num_divisions !== 1 ? 's' : ''} &middot; ${(league.player_ids || []).length} players`
+    : `${league.num_teams} teams &middot; ${league.num_divisions} divisions &middot; ${league.num_teams * league.num_divisions} players`;
+
+  const weekday = _weekdayName(league.start_date);
+  const dateLine = `${done ? 'Ran from' : 'Started'} ${formatShortDate(league.start_date)}${weekday ? ` &middot; ${weekday}` : ''}`;
+
+  const totalWeeks = Number(league.total_weeks) || 0;
+  const elapsed = Number(league.weeks_elapsed) || 0;
+
+  // A league with no weeks scheduled yet has nothing to chart, so the block is
+  // dropped and the body simply ends on the meta lines.
+  let progressHTML = '';
+  if (totalWeeks > 0) {
+    // Clamped so a league whose last week has passed but which nothing has
+    // marked completed reads "Week 10 of 10" rather than "Week 11 of 10".
+    const current = Math.min(elapsed, totalWeeks - 1);
+    const ticks = Array.from({ length: totalWeeks }, (_, i) => {
+      const mod = done || i < elapsed ? ' lgl-tick--past' : i === current ? ' lgl-tick--now' : '';
+      return `<span class="lgl-tick${mod}"></span>`;
+    }).join('');
+    progressHTML = `
+      <div class="lgl-progress">
+        <div class="lgl-progress-head">
+          <span class="lgl-week${done ? ' lgl-week--done' : ''}">${done ? 'Finished' : `Week ${current + 1} of ${totalWeeks}`}</span>
+          <span class="lgl-progress-right">
+            <span class="lgl-range">${_monthDay(league.start_date)} &ndash; ${_monthDay(league.last_week_date)}</span>
+            <span class="lgl-foot-m">${_footNoteHTML(league, mine, totalWeeks)}</span>
+          </span>
+        </div>
+        <div class="lgl-bar">${ticks}</div>
+      </div>`;
+  }
+
   return `
-    <div class="league-card" data-id="${league.id}">
-      <div class="league-card-header">
-        <h3>${esc(league.name)}</h3>
-        <span class="badge badge-${league.status}">${esc(league.status)}</span>
-      </div>
-      <div class="league-card-meta">
-        <div class="meta-row">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-          </svg>
-          Starts ${formatShortDate(league.start_date)}
+    <div class="lgl-card${done ? ' lgl-card--done' : ''}" data-id="${league.id}">
+      <div class="lgl-body">
+        <div class="lgl-card-head">
+          <h3 class="lgl-name">${esc(league.name)}</h3>
+          <span class="lgl-status lgl-status--${done ? 'done' : 'active'}">${done ? 'Completed' : 'Active'}</span>
         </div>
-        <div class="meta-row">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-          ${league.setup_type === 'modern'
-            ? `${league.num_divisions} Division${league.num_divisions !== 1 ? 's' : ''}`
-            : `${league.num_teams} teams &times; ${league.num_divisions} divisions &mdash; ${league.num_teams * league.num_divisions} players`}
+        <div class="lgl-meta">
+          <span class="lgl-meta-row">${CAL_ICON}${dateLine}</span>
+          <span class="lgl-meta-row">${PEOPLE_ICON}${structure}</span>
         </div>
+        ${progressHTML}
       </div>
-      <div class="league-card-footer">
-        <button class="btn btn-primary btn-sm" data-action="view" data-id="${league.id}">View League</button>
+      <div class="lgl-foot">
+        ${_footNoteHTML(league, mine, totalWeeks)}
+        <span class="lgl-view">View league <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
       </div>
     </div>`;
+}
+
+/**
+ * The small note on the left of the footer: which division you are in on your
+ * own leagues, otherwise how long the league runs.
+ *
+ * The division comes down with the list; when it doesn't, the chip still says
+ * you are in the league rather than firing a request per card.
+ */
+function _footNoteHTML(league, mine, totalWeeks) {
+  if (mine) {
+    return league.my_division_level != null
+      ? `<span class="lgl-chip">You &middot; Division ${league.my_division_level}</span>`
+      : `<span class="lgl-chip">You're in this league</span>`;
+  }
+  return totalWeeks > 0 ? `<span class="lgl-weeks">${totalWeeks} weeks</span>` : '<span></span>';
+}
+
+function _wireFilters() {
+  document.getElementById('lglFilters')?.querySelectorAll('[data-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.filter === _filter) return;
+      _filter = btn.dataset.filter;
+      // Only the pills and the grid depend on the filter, so the rest of the
+      // page - and the scroll position - is left alone.
+      document.getElementById('lglFilters').innerHTML = _filtersHTML();
+      document.getElementById('lglGroups').innerHTML = _groupsHTML();
+      _wireFilters();
+      _wireCards();
+    });
+  });
+}
+
+// The whole card is the click target; there are no buttons inside it.
+function _wireCards() {
+  document.getElementById('lglGroups')?.querySelectorAll('.lgl-card[data-id]').forEach((card) => {
+    card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
+  });
 }
 
 async function openLeague(id) {
@@ -150,7 +285,7 @@ export function printBoxes(league) {
 
     divisions.forEach((div) => {
       const players = div.players;
-      const roundLabel = numRounds > 1 ? ` &mdash; Round ${roundIdx + 1}` : '';
+      const roundLabel = numRounds > 1 ? ` &middot; Round ${roundIdx + 1}` : '';
 
       // Column headers
       const colHeaders = players.map((p) => `
@@ -207,7 +342,7 @@ export function printBoxes(league) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Box Sheets &mdash; ${esc(league.name)}</title>
+  <title>Box Sheets &middot; ${esc(league.name)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; }
@@ -349,52 +484,131 @@ export function copyPublicLink(league) {
 export function openMessagePlayersModal(league) {
   const players = (league.players || []).filter((p) => p.player_email);
   const noEmailPlayers = (league.players || []).filter((p) => !p.player_email);
+  const attachments = [];
+  let quill = null;
 
-  modal.open('Message Players', `
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
-      Sending to <strong>${players.length}</strong> player${players.length !== 1 ? 's' : ''} with an email address on file.
-      ${noEmailPlayers.length ? `<span style="color:var(--warning)"> ${noEmailPlayers.length} player${noEmailPlayers.length !== 1 ? 's have' : ' has'} no email and will be skipped.</span>` : ''}
+  const fmtSize = (bytes) => {
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+  };
+
+  const hasDraft = () =>
+    !!(document.getElementById('fMsgSubject')?.value.trim() || quill?.getText().trim() || attachments.length);
+
+  // The confirmation is a layer inside the modal, not a second modal.open —
+  // that would tear down the editor and lose the draft it is guarding.
+  function showDiscardConfirm() {
+    if (document.getElementById('mpDiscard')) return;
+    const layer = document.createElement('div');
+    layer.id = 'mpDiscard';
+    layer.className = 'mp-discard';
+    layer.innerHTML = `
+      <div class="mp-discard-card">
+        <div class="mp-discard-title">Discard this message?</div>
+        <div class="mp-discard-body">Your subject, message and attachments will be lost.</div>
+        <div class="mp-discard-btns">
+          <button class="btn btn-outline" id="mpKeep">Keep editing</button>
+          <button class="btn btn-danger" id="mpDiscardBtn">Discard</button>
+        </div>
+      </div>`;
+    document.getElementById('modal').appendChild(layer);
+    document.getElementById('mpKeep').addEventListener('click', () => layer.remove());
+    document.getElementById('mpDiscardBtn').addEventListener('click', () => { layer.remove(); modal.close(); });
+  }
+
+  modal.open('Message players', `
+    <p class="mp-recipients">
+      Sending to <strong>${players.length} player${players.length !== 1 ? 's' : ''}</strong> with an email on file.
+      ${noEmailPlayers.length ? `<span class="mp-skip">${noEmailPlayers.length} player${noEmailPlayers.length !== 1 ? 's have' : ' has'} no email and will be skipped.</span>` : ''}
     </p>
     <div class="form-group">
-      <label>Subject</label>
-      <input class="form-control" id="fMsgSubject" type="text" placeholder="e.g. League night this week">
+      <label class="mp-label">Subject</label>
+      <input class="form-control mp-subject" id="fMsgSubject" type="text" placeholder="e.g. League night this week">
     </div>
     <div class="form-group">
-      <label>Message</label>
-      <textarea class="form-control" id="fMsgBody" rows="6" placeholder="Write your message here…" style="resize:vertical"></textarea>
-    </div>
-    <div class="form-group">
-      <label>Attachments <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input class="form-control" id="fMsgFile" type="file" style="flex:1">
-        <button class="btn btn-outline" id="fAddFile" type="button" style="white-space:nowrap;flex-shrink:0">Add</button>
+      <label class="mp-label">Message</label>
+      <div class="mp-editor">
+        <div id="fMsgEditor"></div>
+        <div class="mp-editor-foot">
+          <span>Formatting is kept in the email.</span>
+          <span id="mpWords" hidden></span>
+        </div>
       </div>
-      <div id="fAttachmentList" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
     </div>
-    <div id="fMsgError" class="form-error"></div>
-    <div class="form-actions">
-      <button class="btn btn-outline" id="fCancel">Cancel</button>
-      <button class="btn btn-primary" id="fSend">Send Email</button>
-    </div>`);
+    <div class="form-group">
+      <label class="mp-label">Attachments <span class="mp-label-opt">(optional)</span></label>
+      <div class="mp-attach" id="fAttachmentList"></div>
+      <input id="fMsgFile" type="file" hidden>
+    </div>
+    <div class="mp-foot">
+      <div class="mp-foot-left">
+        <span id="fMsgError" class="form-error mp-err"></span>
+        <span id="mpDraftNote" class="mp-draftnote" hidden>Draft in progress</span>
+      </div>
+      <div class="mp-foot-btns">
+        <button class="btn btn-outline" id="fCancel">Cancel</button>
+        <button class="btn btn-primary" id="fSend">Send email</button>
+      </div>
+    </div>`, {
+    medium: true,
+    sticky: true,
+    onRequestClose: () => {
+      if (!hasDraft()) return modal.close();
+      showDiscardConfirm();
+    },
+  });
 
-  const attachments = [];
+  quill = new Quill('#fMsgEditor', {
+    theme: 'snow',
+    placeholder: 'Write your message here…',
+    modules: { toolbar: [
+      [{ header: [false, 2, 3] }],
+      ['bold', 'italic', 'underline'],
+      [{ list: 'ordered' }, { list: 'bullet' }],
+      ['link'],
+      ['clean'],
+    ] },
+  });
+
+  function updateDraftBits() {
+    const words = quill.getText().trim().split(/\s+/).filter(Boolean).length;
+    const wordsEl = document.getElementById('mpWords');
+    if (wordsEl) {
+      wordsEl.hidden = words === 0;
+      wordsEl.textContent = `${words} word${words !== 1 ? 's' : ''}`;
+    }
+    const note = document.getElementById('mpDraftNote');
+    if (note) note.hidden = !hasDraft() || !!document.getElementById('fMsgError')?.textContent;
+  }
+  quill.on('text-change', updateDraftBits);
+  document.getElementById('fMsgSubject').addEventListener('input', updateDraftBits);
 
   function renderAttachmentList() {
     const list = document.getElementById('fAttachmentList');
     list.innerHTML = attachments.map((a, i) => `
-      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-subtle,#f4f6fb);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename)}</span>
-        <button class="btn btn-ghost btn-sm" data-remove="${i}" style="flex-shrink:0;margin-left:8px;color:var(--danger,#e74c3c)">Remove</button>
-      </div>`).join('');
+      <span class="mp-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+        <span class="mp-chip-name">${esc(a.filename)}</span>
+        <span class="mp-chip-size">${fmtSize(a.size)}</span>
+        <button class="mp-chip-x" data-remove="${i}" aria-label="Remove">&times;</button>
+      </span>`).join('') + `
+      <button class="mp-addfile" id="fAddFile" type="button">+ Add file</button>`;
+
     list.querySelectorAll('[data-remove]').forEach((btn) => {
       btn.addEventListener('click', () => {
         attachments.splice(Number(btn.dataset.remove), 1);
         renderAttachmentList();
+        updateDraftBits();
       });
     });
+    document.getElementById('fAddFile').addEventListener('click', () => {
+      document.getElementById('fMsgFile').click();
+    });
   }
+  renderAttachmentList();
 
-  document.getElementById('fAddFile').addEventListener('click', async () => {
+  document.getElementById('fMsgFile').addEventListener('change', async () => {
     const fileInput = document.getElementById('fMsgFile');
     if (!fileInput.files.length) return;
     const file = fileInput.files[0];
@@ -404,29 +618,35 @@ export function openMessagePlayersModal(league) {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    attachments.push({ filename: file.name, content: base64 });
+    attachments.push({ filename: file.name, content: base64, size: file.size });
     fileInput.value = '';
     renderAttachmentList();
+    updateDraftBits();
   });
 
-  document.getElementById('fCancel').addEventListener('click', modal.close);
+  document.getElementById('fCancel').addEventListener('click', () => modal.requestClose());
   document.getElementById('fSend').addEventListener('click', async () => {
     const subject = document.getElementById('fMsgSubject').value.trim();
-    const body = document.getElementById('fMsgBody').value.trim();
+    const text = quill.getText().trim();
     const errEl = document.getElementById('fMsgError');
-    if (!subject) { errEl.textContent = 'Subject is required.'; return; }
-    if (!body) { errEl.textContent = 'Message is required.'; return; }
+    if (!subject) { errEl.textContent = 'Subject is required.'; updateDraftBits(); return; }
+    if (!text) { errEl.textContent = 'Message is required.'; updateDraftBits(); return; }
     errEl.textContent = '';
     document.getElementById('fSend').disabled = true;
     document.getElementById('fSend').textContent = 'Sending…';
     try {
-      const data = await window.api.messageLeaguePlayers(league.id, { subject, body, attachments });
+      const data = await window.api.messageLeaguePlayers(league.id, {
+        subject,
+        body: text,
+        bodyHtml: quill.getSemanticHTML(),
+        attachments: attachments.map(({ filename, content }) => ({ filename, content })),
+      });
       modal.close();
       toast(`Email sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}`, 'success');
     } catch (e) {
       errEl.textContent = e.message;
       document.getElementById('fSend').disabled = false;
-      document.getElementById('fSend').textContent = 'Send Email';
+      document.getElementById('fSend').textContent = 'Send email';
     }
   });
 }
@@ -458,7 +678,7 @@ export function openBulkInviteModal(league) {
       const data = await window.api.bulkInviteLeague(league.id);
       modal.close();
       if (data.sent === 0) {
-        toast('All players already have accounts — no invites sent.', 'info');
+        toast('All players already have accounts. No invites sent.', 'info');
       } else {
         toast(`Invites sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}.`, 'success');
       }
@@ -540,7 +760,7 @@ export function printSchedule(league) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Schedule — ${esc(league.name)}</title>
+  <title>Schedule &middot; ${esc(league.name)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; color: #000; font-size: 10pt; }

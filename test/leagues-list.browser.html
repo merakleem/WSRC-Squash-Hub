@@ -1,0 +1,201 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper">
+  <h1 class="topbar-title" id="pageTitle"></h1><div class="topbar-actions" id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const settle = () => new Promise((r) => setTimeout(r, 25));
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+
+// A modern league runs Wednesdays from Sep 9; three of its ten weeks are past.
+const FALL = {
+  id: 1, name: 'Fall 2026 Wednesday League', status: 'active', setup_type: 'modern',
+  start_date: '2026-09-09', num_divisions: 3, num_teams: 0,
+  player_ids: [7, 8, 9], total_weeks: 10, weeks_elapsed: 3,
+  last_week_date: '2026-11-18', my_division_level: 2,
+};
+// A traditional box league: teams x divisions gives the player count.
+const BOX = {
+  id: 2, name: 'Thursday Box League', status: 'active', setup_type: 'traditional',
+  start_date: '2026-09-10', num_divisions: 4, num_teams: 5,
+  player_ids: [11], total_weeks: 8, weeks_elapsed: 3,
+  last_week_date: '2026-11-05', my_division_level: null,
+};
+const SPRING = {
+  id: 3, name: 'Spring 2026 League', status: 'completed', setup_type: 'modern',
+  start_date: '2026-03-04', num_divisions: 3, num_teams: 0,
+  player_ids: [7], total_weeks: 10, weeks_elapsed: 10,
+  last_week_date: '2026-05-13', my_division_level: 2,
+};
+// Created but not yet scheduled: no weeks at all.
+const UNSCHEDULED = {
+  id: 4, name: 'Winter Draft League', status: 'active', setup_type: 'modern',
+  start_date: '2026-12-01', num_divisions: 2, num_teams: 0,
+  player_ids: [], total_weeks: 0, weeks_elapsed: 0,
+  last_week_date: null, my_division_level: null,
+};
+
+let LEAGUES = [FALL, BOX, SPRING];
+const calls = [];
+window.api = {
+  getLeagues: async () => LEAGUES.map((l) => ({ ...l })),
+  getLeague: async (id) => { calls.push(['getLeague', id]); return { id }; },
+};
+window.navigate = (page, params) => calls.push(['navigate', page, params?.league?.id]);
+
+const { state } = await import('../renderer/state.js');
+const mod = await import('../renderer/pages/leagues.js');
+
+const show = async (leagues, currentUser) => {
+  LEAGUES = leagues;
+  state.currentUser = currentUser;
+  await mod.renderLeagues();
+  await settle();
+};
+const ADMIN = { role: 'admin' };
+const PLAYER = { role: 'player', playerId: 7 };
+
+const groups = () => $$('.lgl-group-label').map((el) => el.textContent.trim());
+const cardNames = () => $$('.lgl-card .lgl-name').map((el) => el.textContent.trim());
+const cardFor = (name) => $$('.lgl-card').find((c) => c.querySelector('.lgl-name').textContent.trim() === name);
+const pill = (label) => $$('.lgl-pill').find((p) => p.textContent.trim() === label);
+
+// =====================================================================
+log.textContent += '\nADMIN VIEW\n';
+await show([FALL, BOX, SPRING], ADMIN);
+ok('two active and one completed are counted', /2 active . 1 completed/.test(txt($('#pageTitle'))), txt($('#pageTitle')));
+ok('admins get Active and Completed groups', groups().join('|') === 'Active|Completed', groups().join('|'));
+ok('every league is on the page', cardNames().length === 3, cardNames().join(', '));
+ok('the group count matches its cards', $('.lgl-group-count').textContent.trim() === '2');
+ok('there is a New League button', !!$('#btnCreateLeague'));
+ok('carrying a long and a short label',
+  !!$('#btnCreateLeague .lgl-new-long') && !!$('#btnCreateLeague .lgl-new-short'),
+  txt($('#btnCreateLeague')));
+ok('no per-card buttons are left', !$('.lgl-card button') && !$('[data-action="view"]'));
+
+log.textContent += '\nCARD CONTENT\n';
+const fall = cardFor('Fall 2026 Wednesday League');
+ok('an active league is pilled Active', txt(fall.querySelector('.lgl-status')) === 'Active');
+ok('the start line names the weekday', /Started Sep 9, 2026 . Wednesdays/.test(txt(fall)), txt(fall.querySelector('.lgl-meta')));
+ok('a modern league counts divisions and players',
+  /3 divisions . 3 players/.test(txt(fall.querySelector('.lgl-meta'))), txt(fall.querySelector('.lgl-meta')));
+const box = cardFor('Thursday Box League');
+ok('a box league counts teams, divisions and players',
+  /5 teams . 4 divisions . 20 players/.test(txt(box.querySelector('.lgl-meta'))), txt(box.querySelector('.lgl-meta')));
+ok('and names its own weekday', /Thursdays/.test(txt(box)), txt(box.querySelector('.lgl-meta')));
+
+log.textContent += '\nWEEK PROGRESS\n';
+ok('the week line counts from the weeks gone by',
+  txt(fall.querySelector('.lgl-week')) === 'Week 4 of 10', txt(fall.querySelector('.lgl-week')));
+ok('the range runs start to last week', /Sep 9 . Nov 18/.test(txt(fall.querySelector('.lgl-range'))), txt(fall.querySelector('.lgl-range')));
+ok('one tick per week', fall.querySelectorAll('.lgl-tick').length === 10);
+ok('three ticks are past', fall.querySelectorAll('.lgl-tick--past').length === 3);
+ok('exactly one is current', fall.querySelectorAll('.lgl-tick--now').length === 1);
+ok('and the current one follows the past ones',
+  [...fall.querySelectorAll('.lgl-tick')][3].classList.contains('lgl-tick--now'));
+const spring = cardFor('Spring 2026 League');
+ok('a completed league reads Finished', txt(spring.querySelector('.lgl-week')) === 'Finished');
+ok('with every tick filled', spring.querySelectorAll('.lgl-tick--past').length === 10
+  && spring.querySelectorAll('.lgl-tick--now').length === 0);
+ok('and the card is marked completed', spring.classList.contains('lgl-card--done')
+  && txt(spring.querySelector('.lgl-status')) === 'Completed');
+
+await show([UNSCHEDULED], ADMIN);
+ok('a league with no weeks hides the progress block', !$('.lgl-progress') && !!$('.lgl-card'));
+ok('and its footer does not claim 0 weeks', !/0 weeks/.test(txt($('.lgl-foot'))), txt($('.lgl-foot')));
+
+log.textContent += '\nFOOTER NOTE\n';
+await show([FALL, BOX, SPRING], ADMIN);
+ok('an admin sees how long a league runs', txt(cardFor('Fall 2026 Wednesday League').querySelector('.lgl-weeks')) === '10 weeks');
+ok('and never a "You" chip', !$('.lgl-chip'));
+await show([FALL, BOX, SPRING], PLAYER);
+ok('a player sees their division on their own league',
+  txt(cardFor('Fall 2026 Wednesday League').querySelector('.lgl-chip')) === 'You · Division 2',
+  txt(cardFor('Fall 2026 Wednesday League').querySelector('.lgl-chip')));
+ok('a league they are not in shows its length instead',
+  txt(cardFor('Thursday Box League').querySelector('.lgl-weeks')) === '8 weeks');
+await show([{ ...FALL, my_division_level: null }], PLAYER);
+ok('without a division it still says they are in it',
+  txt($('.lgl-chip')) === "You're in this league", txt($('.lgl-chip')));
+
+log.textContent += '\nPLAYER GROUPING\n';
+await show([FALL, BOX, SPRING], PLAYER);
+ok('a player gets My Leagues and Other Leagues', groups().join('|') === 'My Leagues|Other Leagues', groups().join('|'));
+ok('their own leagues come first',
+  $$('.lgl-group')[0].querySelectorAll('.lgl-card').length === 2, groups().join('|'));
+ok('a player gets no New League button', !$('#btnCreateLeague'), txt($('#topbarActions')));
+
+log.textContent += '\nFILTER PILLS\n';
+await show([FALL, BOX, SPRING], ADMIN);
+ok('three pills are offered', $$('.lgl-pill').map((p) => p.textContent.trim()).join('|') === 'All|Active|Completed');
+ok('All is on by default', pill('All').classList.contains('lgl-pill--on'));
+click(pill('Active')); await settle();
+ok('Active narrows to the active ones', cardNames().length === 2, cardNames().join(', '));
+ok('and drops the Completed heading', groups().join('|') === 'Active', groups().join('|'));
+ok('the pill moves with it', pill('Active').classList.contains('lgl-pill--on') && !pill('All').classList.contains('lgl-pill--on'));
+click(pill('Completed')); await settle();
+ok('Completed narrows the other way', cardNames().join('') === 'Spring 2026 League', cardNames().join(', '));
+click(pill('All')); await settle();
+ok('All brings everything back', cardNames().length === 3);
+
+await show([FALL, BOX], ADMIN);
+click(pill('Completed')); await settle();
+ok('a filter matching nothing says so', !!$('.lgl-empty') && /No leagues here/.test(txt($('.lgl-empty'))), txt($('.lgl-empty')));
+ok('and is not the same message as having none', !/No leagues yet/.test(txt($('#mainContent'))));
+click(pill('All')); await settle();
+
+log.textContent += '\nOPENING A LEAGUE\n';
+await show([FALL, BOX, SPRING], ADMIN);
+calls.length = 0;
+click(cardFor('Thursday Box League'));
+for (let i = 0; i < 40 && !calls.some((c) => c[0] === 'navigate'); i++) await settle();
+ok('clicking a card opens that league', calls.some((c) => c[0] === 'getLeague' && c[1] === 2), JSON.stringify(calls));
+ok('and navigates to the detail page', calls.some((c) => c[0] === 'navigate' && c[1] === 'leagueDetail'), JSON.stringify(calls));
+// Filtering rebuilds the grid, so the new cards must be wired up too.
+click(pill('Active')); await settle();
+calls.length = 0;
+click(cardFor('Fall 2026 Wednesday League'));
+for (let i = 0; i < 40 && !calls.some((c) => c[0] === 'navigate'); i++) await settle();
+ok('cards still open after a filter re-render', calls.some((c) => c[0] === 'navigate'), JSON.stringify(calls));
+
+log.textContent += '\nNO LEAGUES AT ALL\n';
+await show([], ADMIN);
+ok('the club-has-none message shows', /No leagues yet/.test(txt($('#mainContent'))));
+ok('with the admin prompt to create one', /Create your first league/.test(txt($('#mainContent'))));
+ok('no filter pills to press', !$('.lgl-pill'));
+ok('and no count line on the title', txt($('#pageTitle')) === 'Leagues', txt($('#pageTitle')));
+await show([], PLAYER);
+ok('a player is told none exist yet', /No leagues have been created yet/.test(txt($('#mainContent'))));
+
+log.textContent += '\nCOPY\n';
+await show([FALL, BOX, SPRING], PLAYER);
+const prose = $$('#mainContent *').filter((el) => !el.children.length);
+const dashed = prose.filter((el) => el.textContent.includes('—'));
+ok('no em dashes in the copy', dashed.length === 0, dashed.map((e) => e.textContent.trim()).join(' | '));
+ok('the week range uses an en dash', /–/.test(txt($('.lgl-range'))), txt($('.lgl-range')));
+
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+</script>
+</body>
+</html>

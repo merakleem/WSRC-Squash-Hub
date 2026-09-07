@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const { initDB, getDB } = require('./database/db');
 const { getSession, requireCsrf } = require('./middleware');
+const { ensureDir: ensureAvatarDir, AVATAR_DIR, AVATAR_URL_BASE } = require('./lib/photos');
 
 const PORT = process.env.PORT || 8080;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
@@ -48,6 +49,12 @@ app.use((req, res, next) => {
 // CSRF validation on all mutating API calls
 app.use('/api', requireCsrf);
 
+// Profile photos (behind the auth guard — member photos are not public).
+// Filenames are content-hashed, so these are safe to cache aggressively.
+app.use(AVATAR_URL_BASE, express.static(AVATAR_DIR, {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
+}));
+
 // Renderer SPA (no caching — auth check must run before this)
 app.use(express.static(path.join(__dirname, 'renderer'), {
   etag: false,
@@ -58,11 +65,23 @@ app.use(express.static(path.join(__dirname, 'renderer'), {
 // ===== API: WHO AM I =====
 app.get('/api/me', (req, res) => {
   let is_tester = 0;
+  let is_member = 0;
+  let viewing_as = null;
+  // Name and photo are the requester's own, for the sidebar's profile card;
+  // this route only ever reads the session's own player row.
+  let name = null;
+  let photo_path = null;
   if (req.session.playerId) {
-    const player = getDB().prepare('SELECT is_tester FROM players WHERE id = ?').get(req.session.playerId);
+    const player = getDB().prepare('SELECT is_tester, is_member, name, photo_path FROM players WHERE id = ?').get(req.session.playerId);
     is_tester = player?.is_tester || 0;
+    is_member = player?.is_member || 0;
+    name = player?.name || null;
+    photo_path = player?.photo_path || null;
+    // Set only when an admin is looking through a member's eyes, so the app can
+    // say so and offer the way back.
+    if (req.session.viewingAs) viewing_as = player?.name || 'this player';
   }
-  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester });
+  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, is_member, name, photo_path, viewing_as, club_timezone: require('./lib/clock').getClubTimezone() });
 });
 
 // ===== API ROUTES =====
@@ -75,6 +94,10 @@ app.use('/api', require('./routes/schedule'));
 app.use('/api', require('./routes/bookings'));
 app.use('/api', require('./routes/courts'));
 app.use('/api', require('./routes/tournaments'));
+app.use('/api', require('./routes/settings'));
+app.use('/api', require('./routes/session'));
+app.use('/api', require('./routes/seasons'));
+app.use('/api', require('./routes/events'));
 
 // ===== 404 =====
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
@@ -82,6 +105,7 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 // ===== START =====
 async function start() {
   await initDB(DB_PATH);
+  ensureAvatarDir();
   app.listen(PORT, () => {
     console.log('');
     console.log('  Play WSRC is running!');

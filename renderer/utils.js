@@ -1,3 +1,5 @@
+import { state } from './state.js';
+
 // ===== UTILS =====
 export function esc(str) {
   if (str == null) return '';
@@ -20,6 +22,51 @@ export function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// ===== AVATARS =====
+
+// Single source of truth for initials; the ladder and profile previously
+// disagreed (two letters vs one).
+export function playerInitials(name) {
+  if (!name) return '?';
+  const parts = String(name).trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Brand-adjacent and deliberately all dark: each one is at least 4.5:1 against
+// white, so the initials stay legible whichever colour a name lands on.
+const AVATAR_COLORS = [
+  '#1e2758', '#2d4a7c', '#3a3d8f', '#5a3576',
+  '#7c2f4a', '#8a3f2a', '#7a5320', '#4a5f24',
+  '#1c5f3a', '#15605c', '#175e78', '#44506b',
+];
+
+/**
+ * A player's colour, stable for a given name. Keyed on the name rather than the
+ * id because an avatar is sometimes drawn from a row that carries no id, and the
+ * same person must not change colour between two views of the same list.
+ */
+export function avatarColor(name) {
+  const str = String(name || '');
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+/**
+ * Avatar markup for a player: their photo when set, initials otherwise.
+ * `className` carries the size modifier (e.g. 'ldr-avatar ldr-avatar-sm').
+ * Initials avatars carry their colour as --avatar-bg so each surface decides
+ * how to use it; a photo needs none, since the image covers the circle.
+ */
+export function avatarHTML(player, className) {
+  const name = player?.name || '';
+  if (player?.photo_path) {
+    return `<div class="${className} has-photo"><img src="${esc(player.photo_path)}" alt="${esc(name)}" loading="lazy"></div>`;
+  }
+  return `<div class="${className}" style="--avatar-bg:${avatarColor(name)}">${esc(playerInitials(name))}</div>`;
+}
+
 // ===== TOAST =====
 export function toast(msg, type = 'default') {
   const container = document.getElementById('toastContainer');
@@ -35,21 +82,91 @@ export function toast(msg, type = 'default') {
 }
 
 // ===== MODAL =====
+// `sticky` opts a modal out of close-on-backdrop-click (the backdrop nudges
+// instead); `onRequestClose` intercepts every polite close (✕, Esc, backdrop)
+// so a modal can confirm before discarding work. modal.close() always closes.
 export const modal = {
-  open(title, bodyHTML, { wide = false, medium = false } = {}) {
+  _sticky: false,
+  _onRequestClose: null,
+  open(title, bodyHTML, { wide = false, medium = false, sticky = false, onRequestClose = null } = {}) {
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = bodyHTML;
     document.getElementById('modal').classList.toggle('modal-wide', wide);
     document.getElementById('modal').classList.toggle('modal-medium', medium && !wide);
     document.getElementById('modalOverlay').classList.add('open');
+    this._sticky = sticky;
+    this._onRequestClose = onRequestClose;
   },
   close() {
     document.getElementById('modal').classList.remove('modal-wide');
     document.getElementById('modalOverlay').classList.remove('open');
+    this._sticky = false;
+    this._onRequestClose = null;
+  },
+  requestClose() {
+    if (this._onRequestClose) this._onRequestClose();
+    else this.close();
   },
 };
 
-document.getElementById('modalClose').addEventListener('click', () => modal.close());
+// "I heard you, but no": a brief shake when a sticky modal's backdrop is clicked.
+function nudgeModal() {
+  const el = document.getElementById('modal');
+  el.classList.remove('nudge');
+  void el.offsetWidth; // restart the animation on repeat clicks
+  el.classList.add('nudge');
+  setTimeout(() => el.classList.remove('nudge'), 350);
+}
+
+document.getElementById('modalClose').addEventListener('click', () => modal.requestClose());
 document.getElementById('modalOverlay').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('modalOverlay')) modal.close();
+  if (e.target !== document.getElementById('modalOverlay')) return;
+  if (modal._sticky) { nudgeModal(); return; }
+  modal.close();
 });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('modalOverlay').classList.contains('open')) {
+    modal.requestClose();
+  }
+});
+
+
+// ===== CLUB CLOCK =====
+// Everything stored is club wall-clock time, and the club's timezone is a
+// setting the admin controls (carried to the SPA on /api/me). "Now" and
+// "today" must come from here, never from new Date() maths - otherwise a
+// player abroad sees the wrong day, a Now line in the wrong place, and slots
+// going past at the wrong moment.
+export function clubNow(at = new Date()) {
+  const tz = state.currentUser?.club_timezone;
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz || undefined,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(at).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  } catch (_) {
+    // An unknown timezone string falls back to the device rather than crashing.
+    parts = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(at).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  }
+  const hour = parts.hour === '24' ? 0 : Number(parts.hour);
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: hour * 60 + Number(parts.minute),
+  };
+}
+
+/** Today's date at the club, 'YYYY-MM-DD'. */
+export function clubTodayStr(at) {
+  return clubNow(at).date;
+}
+
+/** Minutes since the club's midnight. */
+export function clubNowMin(at) {
+  return clubNow(at).minutes;
+}

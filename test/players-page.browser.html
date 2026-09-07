@@ -1,0 +1,283 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const change = (el, v) => { if (v !== undefined) el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
+const check = (el, v) => { el.checked = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
+const esc = () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+const settle = () => new Promise((r) => setTimeout(r, 25));
+
+// ---- fixture club ----
+const mk = (id, name, o = {}) => ({
+  id, name, email: o.email ?? `${name.split(' ')[0].toLowerCase()}@x.invalid`, phone: o.phone ?? '(555) 0100',
+  member_number: o.member_number ?? String(1000 + id), club_locker_rating: 'rating' in o ? o.rating : 3.5,
+  is_member: o.is_member ?? 1, exclude_from_ladder: o.excl ?? 0, is_tester: o.tester ?? 0,
+  account_status: o.acct ?? 'verified', photo_path: null, created_at: '2024-03-01 10:00:00',
+});
+let PLAYERS = [
+  mk(1, 'Sofia Duarte'),
+  mk(2, 'Ben Halvorsen', { acct: 'pending', is_member: 0 }),
+  mk(3, 'Grace Odell', { email: '', acct: 'none', rating: null, member_number: '' }),
+  mk(4, 'Arjun Mehta', { excl: 1 }),
+  mk(5, 'Test Tessa', { tester: 1, is_member: 0, acct: 'none' }),
+  mk(6, 'Zoe Kimura', { phone: '', acct: 'none' }),
+];
+const calls = [];
+let nextId = 100;
+window.api = {
+  getPlayers: async () => PLAYERS.map((p) => ({ ...p })),
+  addPlayer: async (d) => { calls.push(['add', d]); const p = mk(nextId++, d.name, {}); Object.assign(p, d, { account_status: 'none' }); PLAYERS.push(p); return p; },
+  updatePlayer: async (d) => { calls.push(['update', d]); const p = PLAYERS.find((x) => x.id === d.id); Object.assign(p, d); return p; },
+  deletePlayer: async (id) => { calls.push(['delete', id]); PLAYERS = PLAYERS.filter((p) => p.id !== id); return { ok: true }; },
+  bulkPatchPlayers: async (d) => { calls.push(['patch', d]); PLAYERS.forEach((p) => { if (d.ids.includes(p.id)) Object.assign(p, d.patch); }); return { changed: d.ids.length }; },
+  bulkSendInvites: async (d) => { calls.push(['invites', d]); return { sent: 1, skipped: d.ids.length - 1, failed: 0 }; },
+  sendInvite: async (id) => { calls.push(['invite1', id]); return { emailSent: true }; },
+  sendReset: async (id) => { calls.push(['reset1', id]); return { emailSent: true }; },
+  viewAsPlayer: async (id) => { calls.push(['viewas', id]); return { ok: true }; },
+  deletePlayerPhoto: async (id) => ({ ok: true }),
+};
+window.navigate = (p) => calls.push(['navigate', p]);
+
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'admin' };
+state.page = 'players';
+const mod = await import('../renderer/pages/players.js');
+
+// =====================================================================
+log.textContent += '\nADMIN TABLE\n';
+await mod.renderPlayers();
+await settle();
+ok('summary counts players, members, missing accounts', /6 players · 4 members · 3 without accounts/.test($('#pageTitle').textContent), $('#pageTitle').textContent);
+ok('topbar carries Import / Export and Add players', /Import \/ Export/.test($('#plIoBtn')?.textContent) && /Add players/.test($('#plAddBtn')?.textContent));
+ok('six rows render', $$('.pl-row').length === 6);
+ok('rows sort by name by default', $('.pl-row .pl-name')?.textContent === 'Arjun Mehta');
+ok('the tester wears a TEST tag', $$('.pl-row').some((r) => r.querySelector('.pl-testtag') && /Test Tessa/.test(r.textContent)));
+ok('member numbers show under names', /Member #1001/.test($$('.pl-row')[3].textContent));
+ok('a missing email reads faintly', $$('.pl-row').some((r) => r.querySelector('.pl-cell--faint')?.textContent === 'No email'));
+ok('membership badges split green and grey', $$('.pl-badge--green').length === 4 && /Non-member/.test($$('.pl-row')[1].textContent));
+ok('account badges cover all three states', /Verified/.test($('.pl-body').textContent) && /Invited/.test($('.pl-body').textContent) && /No account/.test($('.pl-body').textContent));
+ok('the excluded player says so in red', $$('.pl-cell-ladder--out').length === 1);
+ok('count says All 6', $('#plShown').textContent === 'All 6');
+
+log.textContent += '\nSEARCH + FILTER + SORT\n';
+type($('#plSearch'), 'sofia');
+ok('search narrows to the match', $$('.pl-row').length === 1 && /Sofia/.test($('.pl-row').textContent));
+ok('and the count follows', $('#plShown').textContent === '1 of 6');
+click($('#plSearchClear'));
+ok('clear restores the list', $$('.pl-row').length === 6);
+click($('#plFilterBtn'));
+await settle();
+ok('the filter menu opens with five groups', $$('.pl-fgroup').length === 5);
+ok('option counts are computed', $$('.pl-frow-n').map((e) => e.textContent).slice(0, 2).join('/') === '4/2');
+check($('[data-filter="member:no"]'), true);
+await settle();
+ok('a filter narrows the table', $$('.pl-row').length === 2);
+ok('and chips appear', $('.pl-chip')?.textContent.includes('Non-members'));
+ok('and the button lights up', $('#plFilterBtn').classList.contains('pl-filter-btn--on') && $('#plFilterCount').textContent === '1');
+click($('.pl-chip button'));
+ok('removing the chip clears the filter', $$('.pl-row').length === 6);
+esc();
+await settle();
+ok('Esc closes the menu', !$('.pl-menu--filter'));
+click($$('[data-sort]')[2]); // rating
+ok('rating sorts ascending with nulls last', $$('.pl-row .pl-name').map((e)=>e.textContent).pop() === 'Grace Odell', $$('.pl-row .pl-name').map((e)=>e.textContent).join(','));
+click($$('[data-sort]')[2]);
+ok('clicking again flips to descending', $('.pl-th-arrow--desc') !== null);
+
+log.textContent += '\nSELECTION + BULK BAR\n';
+check($('[data-check="1"]'), true);
+check($('[data-check="2"]'), true);
+ok('selection shows the bulk bar', /2 selected/.test($('#plBulkBar')?.textContent || ''));
+ok('selected rows tint', $$('.pl-row--sel').length === 2);
+calls.length = 0;
+click($('#plBulkInvite'));
+await settle();
+ok('send invites posts the ids', JSON.stringify(calls.find((c) => c[0] === 'invites')?.[1].ids.sort()) === '[1,2]');
+ok('and reports skips in a toast', /1 invite sent · 1 skipped \(no email or already verified\)/.test($('.pl-toast')?.textContent || ''), $('.pl-toast')?.textContent);
+ok('selection clears after', !$('#plBulkBar'));
+
+log.textContent += '\nEDIT PANEL\n';
+click($$('.pl-row')[0]); // Arjun (name sort was flipped by rating sort; find by name instead)
+await settle();
+ok('a row click opens the slide-over', !!$('#plPanel'));
+const editName = $('#plPanel input[data-f="name"]').value;
+ok('with the player loaded', editName.length > 0, editName);
+ok('and their join year', /Player since 2024/.test($('.pl-panel-sub').textContent));
+ok('all three toggles present', $$('#plPanel .pl-toggle').length === 3);
+ok('the account section shows a badge and action', !!$('#plPanel .pl-acct-row .pl-badge'));
+ok('save starts disabled', $('#plPanelPrimary').disabled === true);
+click($('#plScrim'));
+ok('a backdrop click only nudges', !!$('#plPanel'));
+type($('#plPanel input[data-f="phone"]'), '(555) 9999');
+ok('typing enables save and notes the draft', $('#plPanelPrimary').disabled === false && $('#plPanelNote').textContent === 'Unsaved changes');
+click($('#plPanelCancel'));
+await settle();
+ok('cancel with edits asks first', /Discard changes\?/.test($('#plConfirm')?.textContent || ''));
+click($('#plConfirmCancel'));
+ok('Keep editing keeps the panel and the edit', !!$('#plPanel') && $('#plPanel input[data-f="phone"]').value === '(555) 9999');
+calls.length = 0;
+click($('#plPanelPrimary'));
+await settle();
+const upd = calls.find((c) => c[0] === 'update')?.[1];
+ok('save sends the full field set', upd && ['name','email','phone','member_number','club_locker_rating','is_member','exclude_from_ladder','is_tester'].every((k) => k in upd), JSON.stringify(upd));
+ok('with the new phone', upd && upd.phone === '(555) 9999');
+ok('and the panel closes', !$('#plPanel'));
+
+log.textContent += '\nADD ONE + SAVE & ADD ANOTHER\n';
+click($('#plAddBtn'));
+await settle();
+ok('the add panel opens on One player', $('.pl-tab--on')?.textContent === 'One player');
+ok('with a Save & add another button', !!$('#plPanelAnother'));
+click($('#plPanelPrimary'));
+await settle();
+ok('no name shows the error', $('#plErrName').hidden === false);
+type($('#plPanel input[data-f="name"]'), 'New Nadia');
+type($('#plPanel input[data-f="email"]'), 'sofia@x.invalid');
+ok('a duplicate email is named', /Already used by Sofia Duarte/.test($('#plErrEmail').textContent));
+type($('#plPanel input[data-f="email"]'), 'nadia@x.invalid');
+calls.length = 0;
+click($('#plPanelAnother'));
+await settle();
+ok('save & add another posts the player', calls.find((c) => c[0] === 'add')?.[1].name === 'New Nadia');
+ok('and keeps the panel with a fresh form', !!$('#plPanel') && $('#plPanel input[data-f="name"]').value === '');
+esc();
+await settle();
+ok('Esc closes the clean panel directly', !$('#plPanel'));
+
+log.textContent += '\nADD SEVERAL\n';
+click($('#plAddBtn'));
+await settle();
+click($$('[data-tab]')[1]);
+await settle();
+ok('the Several tab shows five blank rows', $$('#plDraftRows .pl-dgrid--row').length === 5);
+type($('[data-d="name"][data-i="0"]'), 'Row One');
+type($('[data-d="name"][data-i="1"]'), 'Row Two');
+ok('the footer counts drafts', /2 ready to add/.test($('#plDraftSummary').textContent));
+click($('#plPasteToggle'));
+$('#plPasteText').value = 'Paste Pam\tpam@x.invalid\t555-1\t1200\t4.2';
+click($('#plPasteApply'));
+await settle();
+ok('paste appends parsed rows', $$('#plDraftRows .pl-dgrid--row').length === 3 && $('[data-d="member_number"][data-i="2"]').value === '1200');
+calls.length = 0;
+click($('#plPanelPrimary'));
+await settle();
+ok('add several posts each named row', calls.filter((c) => c[0] === 'add').length === 3);
+ok('rows default to member', calls.filter((c) => c[0] === 'add').every((c) => c[1].is_member === true));
+ok('and the toast counts them', $$('.pl-toast').some((t) => /3 players added/.test(t.textContent)), $$('.pl-toast').map((t)=>t.textContent).join('|'));
+
+log.textContent += '\nIMPORT CSV\n';
+click($('#plIoBtn'));
+await settle();
+ok('the io menu lists exports and import', /All players/.test($('.pl-menu--io').textContent) && /Import from CSV/.test($('.pl-menu--io').textContent));
+ok('selected export is disabled with no selection', $('[data-io="selected"]').disabled === true);
+click($('[data-io="import"]'));
+await settle();
+ok('import opens on its tab with a dropzone', $('.pl-tab--on')?.textContent === 'Import CSV' && !!$('.pl-dropzone'));
+const csv = 'Full Name,Email Address,Mobile,Member No,CL Rating,Membership\nSofia Duarte,sofia@x.invalid,(555) 0100,1000,3.75,yes\nNewbie Ned,ned@x.invalid,,1300,2.9,yes\nExtra Eve,eve@x.invalid,,1400,,no\n,,,1500,,no';
+const dt = new DataTransfer();
+dt.items.add(new File([csv], 'intake.csv', { type: 'text/csv' }));
+const fileEl = $('#plCsvFile');
+fileEl.files = dt.files;
+change(fileEl);
+for (let i = 0; i < 40 && !$('.pl-maprow'); i++) await settle();
+ok('headers auto-map through aliases', $$('.pl-maprow select').map((s) => s.value).join(',') === 'name,email,phone,member_number,club_locker_rating,is_member');
+ok('stat tiles count new, existing, skipped', $$('.pl-stat span').map((e) => e.textContent).join('/') === '2/1/1', $$('.pl-stat span').map((e) => e.textContent).join('/'));
+ok('the preview tags rows', /SKIP/.test($('.pl-preview').textContent) && /NEW/.test($('.pl-preview').textContent));
+ok('primary counts only importables', /Import 2 players/.test($('#plPanelPrimary').textContent));
+click($$('[name="plDupes"]')[1]); // Update them
+await settle();
+ok('switching to update raises the count', /Import 3 players/.test($('#plPanelPrimary').textContent));
+ok('and relabels the tile', /Existing · updated/.test($('.pl-stats').textContent));
+calls.length = 0;
+click($('#plPanelPrimary'));
+await settle();
+ok('import adds the new players', calls.filter((c) => c[0] === 'add').length === 2);
+const impUpd = calls.find((c) => c[0] === 'update')?.[1];
+ok('and updates the existing one', impUpd && impUpd.id === 1);
+ok('sending only mapped, non-blank fields', impUpd && !('is_tester' in impUpd) && !('exclude_from_ladder' in impUpd) && impUpd.club_locker_rating === 3.75, JSON.stringify(impUpd));
+
+log.textContent += '\nBULK EDIT\n';
+await settle();
+check($('[data-check="2"]'), true);
+check($('[data-check="4"]'), true);
+click($('#plBulkEdit'));
+await settle();
+ok('bulk panel opens wide on Set for all', $('#plPanel').classList.contains('pl-panel--wide') && $('.pl-seg-btn--on')?.textContent === 'Set for all');
+ok('four tickable fields', $$('.pl-bulkfield').length === 4);
+ok('apply starts disabled', $('#plPanelPrimary').disabled === true);
+check($('[data-bulktick="is_member"]'), true);
+ok('ticking lights the row and enables apply', $('[data-bf="is_member"]').classList.contains('pl-bulkfield--on') && !$('#plPanelPrimary').disabled);
+calls.length = 0;
+click($('#plPanelPrimary'));
+await settle();
+const patch = calls.find((c) => c[0] === 'patch')?.[1];
+ok('apply posts one bulk patch', patch && JSON.stringify(patch.patch) === '{"is_member":true}' && patch.ids.length === 2, JSON.stringify(patch));
+ok('with an Undo toast', !!$('.pl-toast-undo'));
+calls.length = 0;
+click($('.pl-toast-undo'));
+await settle();
+ok('undo restores each former value', calls.filter((c) => c[0] === 'update').length === 2 && calls.find((c) => c[0] === 'update')[1].is_member === 0, JSON.stringify(calls.filter((c) => c[0] === 'update').map((c) => c[1])));
+ok('and says so', $$('.pl-toast').some((t) => /Reverted/.test(t.textContent)), $$('.pl-toast').map((t)=>t.textContent).join('|'));
+
+check($('[data-check="2"]'), true);
+click($('#plBulkEdit'));
+await settle();
+click($$('[data-bulkmode]')[1]);
+await settle();
+ok('Edit individually lists the selected rows', $$('.pl-dgrid--bulk.pl-dgrid--row').length === 1);
+type($('[data-b="phone"][data-i="0"]'), '(555) 7777');
+ok('an edited row tints', $('.pl-dgrid--changed') !== null);
+calls.length = 0;
+click($('#plPanelPrimary'));
+await settle();
+ok('only changed rows save', calls.filter((c) => c[0] === 'update').length === 1 && calls[0][1].phone === '(555) 7777');
+
+log.textContent += '\nDELETE FROM PANEL\n';
+click($$('.pl-row')[0]);
+await settle();
+click($('#plPanelDelete'));
+await settle();
+ok('delete asks with the standard copy', /match history stays on record/.test($('#plConfirm').textContent));
+calls.length = 0;
+click($('#plConfirmOk'));
+await settle();
+ok('confirm deletes and closes', calls.some((c) => c[0] === 'delete') && !$('#plPanel'));
+
+log.textContent += '\nMEMBER VIEW\n';
+state.currentUser = { role: 'player', playerId: 1 };
+await mod.renderPlayers();
+await settle();
+ok('the member view is a centred name list', !!$('.pl-public') && $$('.pl-public-row').length > 0);
+ok('with no admin chrome', !$('#plAddBtn') && !$('.pl-grid'));
+ok('and no contact details anywhere', !/@x\.invalid/.test($('#mainContent').textContent));
+type($('#plPublicSearch'), 'zoe');
+ok('search narrows the list', $$('.pl-public-row').length === 1);
+
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+</script>
+</body>
+</html>

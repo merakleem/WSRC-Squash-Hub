@@ -85,6 +85,21 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Court booking is a members-only feature. Admins pass; a player passes only
+// if their row says is_member. Checked here on the server — the hidden nav
+// item in the client is cosmetic, this is the boundary. The flag is read
+// fresh per request, so revoking membership takes effect immediately.
+function requireMember(req, res, next) {
+  if (req.session?.role === 'admin') return next();
+  const playerId = req.session?.playerId;
+  if (playerId) {
+    const row = require('./database/db').getDB()
+      .prepare('SELECT is_member FROM players WHERE id = ?').get(playerId);
+    if (row?.is_member) return next();
+  }
+  return res.status(403).json({ error: 'Court booking is available to club members.' });
+}
+
 function requireAdminPage(req, res, next) {
   const session = getSession(req);
   if (!session) return res.redirect('/login');
@@ -131,6 +146,7 @@ module.exports = {
   clearSessionCookie,
   requireAuth,
   requireAdmin,
+  requireMember,
   requireAdminPage,
   requireCsrf,
   loginLimiter,

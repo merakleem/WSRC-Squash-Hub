@@ -49,14 +49,52 @@ function initDB(dbPath) {
     `CREATE TABLE IF NOT EXISTS tournament_courts (tournament_id INTEGER NOT NULL, court_id INTEGER NOT NULL, PRIMARY KEY (tournament_id, court_id), FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE, FOREIGN KEY (court_id) REFERENCES courts(id) ON DELETE CASCADE)`,
     `CREATE TABLE IF NOT EXISTS tournament_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, tournament_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE)`,
     `CREATE TABLE IF NOT EXISTS tournament_players (id INTEGER PRIMARY KEY AUTOINCREMENT, tournament_id INTEGER NOT NULL, player_id INTEGER NOT NULL, group_id INTEGER, seed INTEGER, FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE, FOREIGN KEY (player_id) REFERENCES players(id), FOREIGN KEY (group_id) REFERENCES tournament_groups(id))`,
-    `CREATE TABLE IF NOT EXISTS tournament_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, tournament_id INTEGER NOT NULL, round TEXT NOT NULL, group_id INTEGER, bracket_slot TEXT, player1_id INTEGER, player2_id INTEGER, court_id INTEGER, match_date TEXT, match_time TEXT, scores TEXT, winner_id INTEGER, FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE, FOREIGN KEY (group_id) REFERENCES tournament_groups(id), FOREIGN KEY (player1_id) REFERENCES players(id), FOREIGN KEY (player2_id) REFERENCES players(id), FOREIGN KEY (court_id) REFERENCES courts(id), FOREIGN KEY (winner_id) REFERENCES players(id))`,
-    `ALTER TABLE tournament_matches ADD COLUMN confirmed_at TEXT`,
-    `CREATE TABLE IF NOT EXISTS pickup_matches (id INTEGER PRIMARY KEY AUTOINCREMENT, player1_id INTEGER NOT NULL, player2_id INTEGER NOT NULL, player1_score INTEGER NOT NULL, player2_score INTEGER NOT NULL, winner_id INTEGER NOT NULL, submitted_by_player_id INTEGER, played_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (player1_id) REFERENCES players(id), FOREIGN KEY (player2_id) REFERENCES players(id), FOREIGN KEY (winner_id) REFERENCES players(id), FOREIGN KEY (submitted_by_player_id) REFERENCES players(id))`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_players_email ON players (LOWER(email)) WHERE email IS NOT NULL AND email != ''`,
     `ALTER TABLE players ADD COLUMN is_tester INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE players ADD COLUMN is_member INTEGER NOT NULL DEFAULT 0`,
+    `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
+    `ALTER TABLE players ADD COLUMN photo_path TEXT`,
+    `CREATE TABLE IF NOT EXISTS seasons (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, is_current INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+    // Seasons are assigned explicitly rather than inferred from dates: a league
+    // can straddle a boundary, and admin intent should win over inference.
+    `ALTER TABLE leagues ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
+    `ALTER TABLE tournaments ADD COLUMN season_id INTEGER REFERENCES seasons(id)`,
+    // Which ranking system a season is played under. Held per season so past
+    // ladders are always rendered by the rules they were actually played under,
+    // and so switching systems never disturbs a season already in progress.
+    `ALTER TABLE seasons ADD COLUMN ladder_system TEXT NOT NULL DEFAULT 'leapfrog'`,
+    `ALTER TABLE seasons ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
+    `ALTER TABLE seasons ADD COLUMN ended_at TEXT`,
+    // Frozen final standings. Once a season is ended these are served verbatim,
+    // so a late-reported score can never move a past ladder.
+    `CREATE TABLE IF NOT EXISTS season_standings (
+       season_id INTEGER NOT NULL,
+       player_id INTEGER NOT NULL,
+       position INTEGER NOT NULL,
+       rating REAL,
+       wins INTEGER NOT NULL DEFAULT 0,
+       losses INTEGER NOT NULL DEFAULT 0,
+       PRIMARY KEY (season_id, player_id),
+       FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
+       FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+     )`,
+    // Events: club happenings players sign up for, optionally pointing at a
+    // league or tournament so registration has one front door.
+    `CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', event_date TEXT NOT NULL, start_time TEXT, guests_allowed INTEGER NOT NULL DEFAULT 0, max_people INTEGER, league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL, tournament_id INTEGER REFERENCES tournaments(id) ON DELETE SET NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+    `CREATE TABLE IF NOT EXISTS event_signups (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE, guests INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(event_id, player_id))`,
   ];
+
   for (const sql of migrations) {
-    try { db.prepare(sql).run(); } catch (_) { /* column already exists */ }
+    try {
+      db.prepare(sql).run();
+    } catch (err) {
+      // "duplicate column name" just means the migration already ran; expected.
+      // Anything else is a real failure and must not pass silently, or the app
+      // boots looking healthy and then throws at query time.
+      if (!/duplicate column name/i.test(err.message)) {
+        console.error(`[migration] FAILED: ${sql}\n           ${err.message}`);
+      }
+    }
   }
 
   // Make league_players.team_id nullable for modern leagues (SQLite requires table recreation)
@@ -84,8 +122,178 @@ function initDB(dbPath) {
     db.pragma('foreign_keys = ON');
   }
 
+  // ===== ONE MATCHES TABLE =====
+  // League, ladder and tournament matches used to live in three tables with
+  // three shapes, and every feature that asked "what matches exist?" unioned
+  // them itself, with its own filters. Those hand-rolled unions disagreed:
+  // a player's record and their match history could return different counts
+  // for the same match. This folds all three into `matches`, which becomes the
+  // single source of truth; a league now just produces rows in it.
+  //
+  // League ids are preserved exactly, because match_subs rows and the schedule
+  // grid address them. Ladder and tournament rows are appended with new ids;
+  // nothing stored refers to those.
+  const hasTable = (name) =>
+    !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(name);
+
+  const matchCols = db.prepare(`PRAGMA table_info(matches)`).all().map((c) => c.name);
+  if (!matchCols.includes('type')) {
+    // Plain copies, no constraints, as a rollback path. Kept rather than
+    // dropped: this is the club's whole competitive history.
+    db.exec(`CREATE TABLE IF NOT EXISTS matches_legacy AS SELECT * FROM matches;`);
+    if (hasTable('tournament_matches')) {
+      db.exec(`CREATE TABLE IF NOT EXISTS tournament_matches_legacy AS SELECT * FROM tournament_matches;`);
+    }
+    if (hasTable('pickup_matches')) {
+      db.exec(`CREATE TABLE IF NOT EXISTS pickup_matches_legacy AS SELECT * FROM pickup_matches;`);
+    }
+
+    db.pragma('foreign_keys = OFF');
+    // One transaction, because this is the only migration that drops a table
+    // it cannot rebuild. A container restart between the DROP and the RENAME
+    // would otherwise leave a database with no matches table at all; SQLite
+    // rolls DDL back like anything else, so a killed boot now changes nothing
+    // and the next boot starts over. The pragma stays outside: SQLite ignores
+    // a foreign_keys change while a transaction is open.
+    const consolidateMatches = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE matches_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+          -- what kind of match, and where it is in its life
+          type   TEXT NOT NULL DEFAULT 'league',      -- league | ladder | tournament
+          status TEXT NOT NULL DEFAULT 'unscheduled', -- unscheduled | scheduled | played
+
+          -- who played. Nullable: a tournament bracket holds slots before it
+          -- knows who fills them.
+          player1_id INTEGER,
+          player2_id INTEGER,
+
+          -- games won, plus the per-game detail tournaments record
+          player1_score INTEGER,
+          player2_score INTEGER,
+          scores TEXT,
+          winner_id INTEGER,
+
+          -- when it is due to be played, and where
+          scheduled_date TEXT,
+          scheduled_time TEXT,
+          court_id INTEGER,
+          court_number INTEGER,
+
+          -- when it was actually played, and who reported it. played_at is the
+          -- editable truth; confirmed_at records when the score was entered.
+          played_at TEXT,
+          confirmed_at TEXT,
+          submitted_by_player_id INTEGER,
+
+          -- league context
+          league_id INTEGER,
+          week_id INTEGER,
+          matchup_id INTEGER,
+          division_id INTEGER,
+
+          -- tournament context
+          tournament_id INTEGER,
+          round TEXT,
+          bracket_slot TEXT,
+          tournament_group_id INTEGER,
+
+          skipped INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+          FOREIGN KEY (player1_id)   REFERENCES players(id),
+          FOREIGN KEY (player2_id)   REFERENCES players(id),
+          FOREIGN KEY (winner_id)    REFERENCES players(id),
+          FOREIGN KEY (court_id)     REFERENCES courts(id),
+          FOREIGN KEY (matchup_id)   REFERENCES team_matchups(id) ON DELETE CASCADE,
+          FOREIGN KEY (division_id)  REFERENCES divisions(id),
+          FOREIGN KEY (week_id)      REFERENCES weeks(id) ON DELETE CASCADE,
+          FOREIGN KEY (league_id)    REFERENCES leagues(id) ON DELETE CASCADE,
+          FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
+        );
+      `);
+
+      // --- league rows, ids preserved -------------------------------------
+      // status: scored means played; otherwise it is scheduled only once it has
+      // a court and a time, which is exactly what puts it on the live schedule.
+      // played_at reproduces what every query already computed for a league
+      // match's date: its confirmation time, falling back to the week's date.
+      db.exec(`
+        INSERT INTO matches_new (
+          id, type, status, player1_id, player2_id, player1_score, player2_score, winner_id,
+          scheduled_date, scheduled_time, court_id, court_number,
+          played_at, confirmed_at, submitted_by_player_id,
+          league_id, week_id, matchup_id, division_id, skipped
+        )
+        SELECT m.id, 'league',
+          CASE WHEN m.player1_score IS NOT NULL THEN 'played'
+               WHEN m.court_id IS NOT NULL AND m.match_time IS NOT NULL THEN 'scheduled'
+               ELSE 'unscheduled' END,
+          m.player1_id, m.player2_id, m.player1_score, m.player2_score, m.winner_id,
+          w.date, m.match_time, m.court_id, m.court_number,
+          CASE WHEN m.player1_score IS NOT NULL THEN COALESCE(m.confirmed_at, w.date) END,
+          m.confirmed_at, m.submitted_by_player_id,
+          w.league_id, tm.week_id, m.matchup_id, m.division_id, COALESCE(m.skipped, 0)
+        FROM matches m
+        JOIN team_matchups tm ON tm.id = m.matchup_id
+        JOIN weeks w          ON w.id  = tm.week_id;
+      `);
+
+      // --- ladder rows ------------------------------------------------------
+      // A ladder match is only ever recorded after it has been played.
+      if (hasTable('pickup_matches')) db.exec(`
+        INSERT INTO matches_new (
+          type, status, player1_id, player2_id, player1_score, player2_score, winner_id,
+          played_at, confirmed_at, submitted_by_player_id
+        )
+        SELECT 'ladder', 'played', player1_id, player2_id, player1_score, player2_score, winner_id,
+          played_at, played_at, submitted_by_player_id
+        FROM pickup_matches ORDER BY id;
+      `);
+
+      // --- tournament rows --------------------------------------------------
+      // Tournaments keep their per-game text in `scores`; a winner is what marks
+      // one as played.
+      if (hasTable('tournament_matches')) db.exec(`
+        INSERT INTO matches_new (
+          type, status, player1_id, player2_id, scores, winner_id,
+          scheduled_date, scheduled_time, court_id, played_at, confirmed_at,
+          tournament_id, round, bracket_slot, tournament_group_id
+        )
+        SELECT 'tournament',
+          CASE WHEN winner_id IS NOT NULL THEN 'played'
+               WHEN court_id IS NOT NULL AND match_time IS NOT NULL THEN 'scheduled'
+               ELSE 'unscheduled' END,
+          player1_id, player2_id, scores, winner_id,
+          match_date, match_time, court_id,
+          CASE WHEN winner_id IS NOT NULL THEN COALESCE(confirmed_at, match_date) END,
+          confirmed_at, tournament_id, round, bracket_slot, group_id
+        FROM tournament_matches ORDER BY id;
+      `);
+
+      db.exec(`DROP TABLE matches; ALTER TABLE matches_new RENAME TO matches;`);
+      if (hasTable('tournament_matches')) db.exec(`DROP TABLE tournament_matches;`);
+      if (hasTable('pickup_matches'))     db.exec(`DROP TABLE pickup_matches;`);
+    });
+    consolidateMatches();
+    db.pragma('foreign_keys = ON');
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_matches_type_status ON matches (type, status);
+    CREATE INDEX IF NOT EXISTS idx_matches_p1          ON matches (player1_id);
+    CREATE INDEX IF NOT EXISTS idx_matches_p2          ON matches (player2_id);
+    CREATE INDEX IF NOT EXISTS idx_matches_played_at   ON matches (played_at);
+    CREATE INDEX IF NOT EXISTS idx_matches_scheduled   ON matches (scheduled_date);
+    CREATE INDEX IF NOT EXISTS idx_matches_matchup     ON matches (matchup_id);
+    CREATE INDEX IF NOT EXISTS idx_matches_week        ON matches (week_id);
+    CREATE INDEX IF NOT EXISTS idx_matches_league      ON matches (league_id);
+    CREATE INDEX IF NOT EXISTS idx_matches_tournament  ON matches (tournament_id);
+  `);
+
   // Purge any tournament_matches whose parent tournament was deleted without cascade
-  db.prepare('DELETE FROM tournament_matches WHERE tournament_id NOT IN (SELECT id FROM tournaments)').run();
+  db.prepare(`DELETE FROM matches WHERE type = 'tournament' AND tournament_id NOT IN (SELECT id FROM tournaments)`).run();
 
   // Backfill/regenerate tokens to ensure they are 4-char hex
   const leaguesNeedingToken = db.prepare(`SELECT id FROM leagues WHERE public_token IS NULL OR length(public_token) != 4`).all();
@@ -93,8 +301,18 @@ function initDB(dbPath) {
     db.prepare(`UPDATE leagues SET public_token = ? WHERE id = ?`).run(crypto.randomBytes(2).toString('hex'), league.id);
   }
 
+
   return Promise.resolve(db);
 }
+
+/**
+ * One-time seed: create the first two seasons and file all pre-existing data
+ * under the earlier one.
+ *
+ * Guarded on the seasons table being empty, so it runs once and is a no-op on
+ * every subsequent boot. Dates are starting points only; an admin edits them
+ * in Club Settings, and nothing here overwrites their changes.
+ */
 
 function getDB() {
   return db;

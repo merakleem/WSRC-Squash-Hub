@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<style>
+#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}
+iframe{position:absolute;left:-9999px;width:1280px;height:800px;border:0}
+</style>
+</head>
+<body>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+
+// Each role gets its own frame: app.js runs once per document.
+async function boot(role) {
+  const f = document.createElement('iframe');
+  f.src = `sidebar-boot.html?role=${role}`;
+  document.body.appendChild(f);
+  for (let i = 0; i < 300; i++) {
+    if (f.contentDocument?.title === 'ready') break;
+    await settle(50);
+  }
+  if (f.contentDocument?.title !== 'ready') throw new Error(`${role} frame never booted`);
+  const d = f.contentDocument;
+  return {
+    win: f.contentWindow,
+    doc: d,
+    $: (s) => d.querySelector(s),
+    $$: (s) => [...d.querySelectorAll(s)],
+    // What a person can actually see, ignoring anything display:none'd by
+    // either an inline style or a role class.
+    visibleNav: () => [...d.querySelectorAll('.nav-item')]
+      .filter((el) => el.offsetParent !== null)
+      .map((el) => el.textContent.trim()),
+    visibleLabels: () => [...d.querySelectorAll('.sb-group-label')]
+      .filter((el) => el.offsetParent !== null)
+      .map((el) => el.textContent.trim()),
+    shows: (sel) => { const el = d.querySelector(sel); return !!el && el.offsetParent !== null; },
+  };
+}
+
+// =====================================================================
+log.textContent += '\nA PLAYER WHO IS NOT A MEMBER\n';
+const guest = await boot('guest');
+ok('sees the everyday pages',
+  ['Dashboard', 'Ladder', 'Leagues', 'Events', 'Players', 'Club Activity'].every((n) => guest.visibleNav().includes(n)),
+  guest.visibleNav().join(', '));
+ok('is not shown Court Schedule', !guest.visibleNav().includes('Court Schedule'), guest.visibleNav().join(', '));
+ok('is not shown Club Settings', !guest.visibleNav().includes('Club Settings'), guest.visibleNav().join(', '));
+ok('is not shown Tournaments', !guest.visibleNav().includes('Tournaments'), guest.visibleNav().join(', '));
+ok('never sees the word Admin in the nav', !guest.visibleLabels().includes('Admin'), guest.visibleLabels().join(', '));
+ok('sees only the Play and Club headings', guest.visibleLabels().join('|') === 'Play|Club', guest.visibleLabels().join('|'));
+ok('and no Book a Court, being no member', !guest.visibleNav().includes('Book a Court'), guest.visibleNav().join(', '));
+
+log.textContent += '\nA PLAYER WHO IS A MEMBER\n';
+const member = await boot('member');
+ok('gets Book a Court', member.visibleNav().includes('Book a Court'), member.visibleNav().join(', '));
+ok('but still no admin pages',
+  !member.visibleNav().some((n) => ['Court Schedule', 'Club Settings', 'Tournaments'].includes(n)),
+  member.visibleNav().join(', '));
+ok('and still no Admin heading', !member.visibleLabels().includes('Admin'), member.visibleLabels().join(', '));
+
+log.textContent += '\nTHE MEMBER PROFILE CARD\n';
+ok('the sidebar is marked as a player', member.$('.sidebar').classList.contains('sb-role-player'));
+ok('the profile card is on show', member.shows('#sbProfile'));
+ok('naming the signed-in member', member.$('#sbProfileName').textContent === 'Mona Member',
+  member.$('#sbProfileName').textContent);
+ok('and calling them a Player', member.$('.sb-profile-role').textContent.trim() === 'Player');
+ok('with an initials avatar when they have no photo',
+  member.$('.sb-profile-avatar')?.textContent.trim() === 'MM', member.$('.sb-profile-avatar')?.textContent.trim());
+ok('the admin card is not', !member.shows('.sb-admin'));
+
+log.textContent += '\nTHE ACCOUNT POPOVER\n';
+const menu = member.$('#sbMenu');
+const card = member.$('#sbProfile');
+ok('it starts closed', menu.hidden && card.getAttribute('aria-expanded') === 'false');
+card.click(); await settle();
+ok('the card opens it', !menu.hidden && card.getAttribute('aria-expanded') === 'true');
+ok('offering My Profile and Logout',
+  [...menu.querySelectorAll('.sb-menu-item')].map((e) => e.textContent.trim()).join('|') === 'My Profile|Logout',
+  [...menu.querySelectorAll('.sb-menu-item')].map((e) => e.textContent.trim()).join('|'));
+ok('with Logout still a real link', menu.querySelector('a[href="/logout"]') !== null);
+member.doc.body.click(); await settle();
+ok('a click outside closes it', menu.hidden);
+card.click(); await settle();
+member.doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle();
+ok('Escape closes it too', menu.hidden);
+card.click(); await settle();
+member.$('#sbMenuProfile').click(); await settle();
+ok('choosing My Profile closes it', menu.hidden);
+ok('and opens the signed-in player\'s own profile',
+  member.win.__calls.some((c) => c[0] === 'getPlayerHistory' && c[1] === 7),
+  JSON.stringify(member.win.__calls.filter((c) => c[0] === 'getPlayerHistory')));
+ok('popover items are not nav items',
+  member.$$('.sb-menu .nav-item').length === 0 && !member.$('#sbProfile').classList.contains('nav-item'));
+
+log.textContent += '\nAN ADMIN\n';
+const admin = await boot('admin');
+ok('gets the admin pages',
+  ['Court Schedule', 'Club Settings', 'Tournaments'].every((n) => admin.visibleNav().includes(n)),
+  admin.visibleNav().join(', '));
+ok('under an Admin heading', admin.visibleLabels().join('|') === 'Play|Club|Admin', admin.visibleLabels().join('|'));
+ok('and is NOT offered Book a Court', !admin.visibleNav().includes('Book a Court'), admin.visibleNav().join(', '));
+ok('the sidebar is marked as an admin', admin.$('.sidebar').classList.contains('sb-role-admin'));
+ok('the admin card is on show', admin.shows('.sb-admin'));
+ok('reading Administrator', admin.$('.sb-admin-name').textContent.trim() === 'Administrator');
+ok('with its own logout link', admin.$('.sb-admin-logout').getAttribute('href') === '/logout');
+ok('the profile card is not', !admin.shows('#sbProfile'));
+ok('and there is no name or photo to leak', !admin.$('#sbProfileName').textContent.trim());
+
+log.textContent += '\nCOURT BOOKING IS NOT REACHABLE FOR AN ADMIN\n';
+admin.win.navigate('courtBooking');
+await settle();
+// navigate() marks the nav item for whatever page it settled on, so the
+// highlight is the honest read of where the admin ended up.
+const landed = () => admin.$('.nav-item.active')?.textContent.trim() || '(none)';
+ok('an admin asking for it lands on the dashboard instead', landed() === 'Dashboard', landed());
+// A member asking for the same page gets it.
+member.win.navigate('courtBooking');
+await settle();
+const memberLanded = member.$('.nav-item.active')?.textContent.trim() || '(none)';
+ok('while a member is let through', memberLanded === 'Book a Court', memberLanded);
+ok('and Book a Court is still not in the admin nav', !admin.visibleNav().includes('Book a Court'));
+
+log.textContent += '\nSHELL STRUCTURE\n';
+ok('the wordmark reads PLAY WSRC',
+  admin.$('.sb-word-play').textContent.trim() === 'Play' && admin.$('.sb-word-club').textContent.trim() === 'WSRC');
+ok('the active pill has no left border',
+  admin.win.getComputedStyle(admin.$('.nav-item')).borderLeftWidth === '0px',
+  admin.win.getComputedStyle(admin.$('.nav-item')).borderLeftWidth);
+ok('the sidebar is 240px wide',
+  admin.win.getComputedStyle(admin.$('.sidebar')).width === '240px',
+  admin.win.getComputedStyle(admin.$('.sidebar')).width);
+ok('every nav link still carries .nav-item for the active state',
+  admin.$$('.sidebar a[data-page]').every((el) => el.classList.contains('nav-item')));
+ok('the old standalone Logout nav link is gone', !admin.$('.nav-item-logout'));
+ok('and the My Profile nav item with it', !admin.$('#navMyProfile'));
+
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+</script>
+</body>
+</html>

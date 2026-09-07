@@ -22,6 +22,12 @@ function deleteBookingType(id) {
 
 // ===== BOOKINGS =====
 
+function _validationError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
 function _checkConflict(courtId, date, startTime, durationMinutes, excludeIds) {
   const db = getDB();
   const [h, m] = startTime.split(':').map(Number);
@@ -50,10 +56,10 @@ function _checkAdjacency(courtIds) {
   const courts = db.prepare('SELECT id FROM courts ORDER BY sort_order ASC, id ASC').all();
   const idxMap = new Map(courts.map((c, i) => [c.id, i]));
   const idxs = courtIds.map((cId) => idxMap.get(cId)).filter((x) => x !== undefined);
-  if (idxs.length !== courtIds.length) throw new Error('One or more courts not found.');
+  if (idxs.length !== courtIds.length) throw _validationError('One or more courts not found.');
   const sorted = [...idxs].sort((a, b) => a - b);
   for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i] !== sorted[i - 1] + 1) throw new Error('Multi-court bookings must span adjacent courts.');
+    if (sorted[i] !== sorted[i - 1] + 1) throw _validationError('Multi-court bookings must span adjacent courts.');
   }
 }
 
@@ -62,12 +68,11 @@ function _checkLeagueConflict(db, courtId, date, startTime, durationMinutes) {
   const startMin = h * 60 + m;
   const endMin = startMin + durationMinutes;
   const matches = db.prepare(`
-    SELECT m.match_time AS start_time, l.match_duration
+    SELECT m.scheduled_time AS start_time, l.match_duration
     FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w          ON tm.week_id = w.id
-    JOIN leagues l        ON w.league_id = l.id
-    WHERE m.court_id = ? AND w.date = ? AND m.match_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+    JOIN leagues l ON l.id = m.league_id
+    WHERE m.type = 'league' AND m.court_id = ? AND m.scheduled_date = ?
+      AND m.scheduled_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
   `).all(courtId, date);
   return matches.some((lm) => {
     const [bh, bm] = lm.start_time.split(':').map(Number);
@@ -98,7 +103,7 @@ function addBooking({ courtId, courtIds, date, startTime, durationMinutes, booki
   _checkAdjacency(effectiveCourtIds);
   for (const cId of effectiveCourtIds) {
     if (_checkConflict(cId, date, startTime, durationMinutes, [])) {
-      throw new Error('This time slot is already booked on one or more of those courts.');
+      throw _validationError('This time slot is already booked on one or more of those courts.');
     }
   }
   const db = getDB();
@@ -168,7 +173,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
 
     for (const cId of newCourtIds) {
       if (_checkConflict(cId, date, startTime, durationMinutes, memberIdsList)) {
-        throw new Error(newCourtIds.length === 1
+        throw _validationError(newCourtIds.length === 1
           ? 'This time slot is already booked on that court.'
           : 'This time slot is already booked on one or more of those courts.');
       }
@@ -200,7 +205,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
   } else {
     if (newCourtIds.length === 1) {
       if (_checkConflict(newCourtIds[0], date, startTime, durationMinutes, [Number(id), ...extraExclude])) {
-        throw new Error('This time slot is already booked on that court.');
+        throw _validationError('This time slot is already booked on that court.');
       }
       run(
         'UPDATE bookings SET court_id=?, date=?, start_time=?, duration_minutes=?, booking_type_id=?, name=?, info=? WHERE id=?',
@@ -214,7 +219,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
     } else {
       for (const cId of newCourtIds) {
         if (_checkConflict(cId, date, startTime, durationMinutes, [Number(id), ...extraExclude])) {
-          throw new Error('This time slot is already booked on one or more of those courts.');
+          throw _validationError('This time slot is already booked on one or more of those courts.');
         }
       }
       const groupId = Number(id);
@@ -269,10 +274,11 @@ function createRepeatBookings(baseData, repeatOptions) {
     if (daysSet.has(_dayOfWeek(d))) dates.push(d);
   }
 
-  if (dates.length === 0) return { created: 0, skipped: 0, leagueConflicts: [] };
+  if (dates.length === 0) return { created: 0, skipped: 0, leagueConflicts: [], ids: [] };
 
   let created = 0, skipped = 0;
   const leagueConflicts = [];
+  const createdIds = [];
   let repeatGroupId = null;
 
   const txn = db.transaction(() => {
@@ -320,6 +326,7 @@ function createRepeatBookings(baseData, repeatOptions) {
         if (repeatGroupId === null) repeatGroupId = newId;
         db.prepare('UPDATE bookings SET repeat_group_id = ? WHERE id = ?').run(repeatGroupId, newId);
         _setBookingPlayers(db, newId, playerIds);
+        createdIds.push(newId);
       } else {
         const r = db.prepare(
           'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -329,6 +336,7 @@ function createRepeatBookings(baseData, repeatOptions) {
         if (repeatGroupId === null) repeatGroupId = firstId;
         db.prepare('UPDATE bookings SET repeat_group_id = ? WHERE id = ?').run(repeatGroupId, firstId);
         _setBookingPlayers(db, firstId, playerIds);
+        createdIds.push(firstId);
         for (let i = 1; i < effectiveCourtIds.length; i++) {
           db.prepare(
             'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, group_id, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -340,7 +348,7 @@ function createRepeatBookings(baseData, repeatOptions) {
   });
   txn();
 
-  return { created, skipped, leagueConflicts };
+  return { created, skipped, leagueConflicts, ids: createdIds };
 }
 
 // ===== SCHEDULE =====
@@ -435,38 +443,37 @@ function getScheduleForDate(date) {
   const courtOrderById = new Map(courts.map((c, i) => [c.id, i]));
 
   const tournamentMatches = db.prepare(`
-    SELECT tm.id, tm.match_time AS start_time, tm.court_id, tm.player1_id, tm.player2_id,
+    SELECT tm.id, tm.scheduled_time AS start_time, tm.court_id, tm.player1_id, tm.player2_id,
       t.match_duration_minutes, p1.name AS p1_name, p2.name AS p2_name,
       t.name AS tournament_name, tm.round
-    FROM tournament_matches tm
+    FROM matches tm
     JOIN tournaments t ON t.id = tm.tournament_id
     LEFT JOIN players p1 ON p1.id = tm.player1_id
     LEFT JOIN players p2 ON p2.id = tm.player2_id
-    WHERE tm.match_date = ? AND tm.court_id IS NOT NULL AND tm.match_time IS NOT NULL
+    WHERE tm.type = 'tournament' AND tm.scheduled_date = ?
+      AND tm.court_id IS NOT NULL AND tm.scheduled_time IS NOT NULL
   `).all(date);
 
   const leagueMatches = db.prepare(`
     SELECT
       m.id AS match_id,
-      m.match_time AS start_time,
+      m.scheduled_time AS start_time,
       m.court_id,
       l.match_duration,
       COALESCE(sp1.name, p1.name) AS eff_p1_name,
       COALESCE(sp2.name, p2.name) AS eff_p2_name,
       l.name AS league_name
     FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w          ON tm.week_id = w.id
-    JOIN leagues l        ON w.league_id = l.id
+    JOIN leagues l        ON l.id = m.league_id
     JOIN players p1       ON p1.id = m.player1_id
     JOIN players p2       ON p2.id = m.player2_id
     LEFT JOIN match_subs s1  ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
     LEFT JOIN match_subs s2  ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     LEFT JOIN players sp1    ON sp1.id = s1.sub_player_id
     LEFT JOIN players sp2    ON sp2.id = s2.sub_player_id
-    WHERE w.date = ?
+    WHERE m.type = 'league' AND m.scheduled_date = ?
       AND m.court_id IS NOT NULL
-      AND m.match_time IS NOT NULL
+      AND m.scheduled_time IS NOT NULL
       AND (m.skipped = 0 OR m.skipped IS NULL)
   `).all(date);
 

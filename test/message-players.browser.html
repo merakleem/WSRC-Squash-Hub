@@ -1,0 +1,162 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- The app's exact CSP: Quill must load under it, which is why it is vendored.
+     (The CDN build of this suite once passed while the real app blocked the CDN.) -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<link href="../renderer/vendor/quill/quill.snow.css" rel="stylesheet">
+<script src="../renderer/vendor/quill/quill.js"></script>
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div id="pageTitle"></div><div id="topbarActions"></div>
+<main class="content" id="mainContent"></main>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const esc = () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+const settle = () => new Promise((r) => setTimeout(r, 25));
+
+const calls = [];
+window.api = {
+  messageLeaguePlayers: async (id, payload) => { calls.push([id, payload]); return { sent: 2 }; },
+  getLadder: async () => [], getPlayers: async () => [],
+};
+window.navigate = () => {};
+
+const { modal } = await import('../renderer/utils.js');
+const { openMessagePlayersModal } = await import('../renderer/pages/leagues.js');
+
+const LEAGUE = { id: 7, players: [
+  { player_id: 1, player_email: 'a@x.invalid' },
+  { player_id: 2, player_email: 'b@x.invalid' },
+  { player_id: 3, player_email: null },
+] };
+const overlay = document.getElementById('modalOverlay');
+const backdropClick = () => overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+// =====================================================================
+log.textContent += '\nOPEN + LOOK\n';
+ok('Quill loaded under the app CSP', typeof window.Quill === 'function');
+openMessagePlayersModal(LEAGUE);
+await settle();
+ok('the modal opens', overlay.classList.contains('open'));
+ok('titled in the new casing', document.getElementById('modalTitle').textContent === 'Message players');
+ok('recipients line counts emails on file', /Sending to\s*2 players/.test($('.mp-recipients').textContent.replace(/\s+/g, ' ')));
+ok('and warns about the skipped player', /1 player has no email and will be skipped/.test($('.mp-skip')?.textContent || ''));
+ok('Quill mounted with its toolbar', !!$('.mp-editor .ql-toolbar'));
+ok('bold, italic and underline buttons', !!$('.ql-bold') && !!$('.ql-italic') && !!$('.ql-underline'));
+ok('list, link and clean buttons', !!$('.ql-list') && !!$('.ql-link') && !!$('.ql-clean'));
+ok('heading picker present', !!$('.ql-header'));
+ok('placeholder shows in the empty editor', $('.ql-editor')?.classList.contains('ql-blank'));
+ok('editor footer promises kept formatting', /Formatting is kept in the email/.test($('.mp-editor-foot').textContent));
+ok('word count hidden while empty', document.getElementById('mpWords').hidden === true);
+ok('the old visible file input is gone', document.getElementById('fMsgFile').hidden === true);
+ok('replaced by a dashed Add file button', /Add file/.test(document.getElementById('fAddFile').textContent));
+ok('send button reads Send email', document.getElementById('fSend').textContent === 'Send email');
+
+log.textContent += '\nBACKDROP IS SAFE\n';
+backdropClick();
+await settle();
+ok('a backdrop click does not close it', overlay.classList.contains('open'));
+ok('but nudges the modal', document.getElementById('modal').classList.contains('nudge'));
+await new Promise((r) => setTimeout(r, 400));
+ok('the nudge clears itself', !document.getElementById('modal').classList.contains('nudge'));
+
+log.textContent += '\nCLOSE WITH NO DRAFT\n';
+click(document.getElementById('modalClose'));
+await settle();
+ok('the X closes straight away when nothing is typed', !overlay.classList.contains('open'));
+
+log.textContent += '\nDISCARD GUARD\n';
+openMessagePlayersModal(LEAGUE);
+await settle();
+document.getElementById('fMsgSubject').value = 'League night';
+document.getElementById('fMsgSubject').dispatchEvent(new Event('input', { bubbles: true }));
+ok('a subject counts as a draft', document.getElementById('mpDraftNote').hidden === false);
+click(document.getElementById('fCancel'));
+await settle();
+ok('Cancel asks before discarding', !!document.getElementById('mpDiscard'));
+ok('the modal stays open behind it', overlay.classList.contains('open'));
+ok('with the question', /Discard this message\?/.test($('.mp-discard-title').textContent));
+click(document.getElementById('mpKeep'));
+await settle();
+ok('Keep editing removes the layer', !document.getElementById('mpDiscard'));
+ok('and the draft survives', document.getElementById('fMsgSubject').value === 'League night');
+esc();
+await settle();
+ok('Esc routes through the same guard', !!document.getElementById('mpDiscard'));
+esc();
+await settle();
+ok('a second Esc does not stack layers', document.querySelectorAll('.mp-discard').length === 1);
+click(document.getElementById('mpDiscardBtn'));
+await settle();
+ok('Discard closes the modal', !overlay.classList.contains('open'));
+ok('and takes the layer with it', !document.getElementById('mpDiscard'));
+
+log.textContent += '\nRICH TEXT + SEND\n';
+openMessagePlayersModal(LEAGUE);
+await settle();
+click(document.getElementById('fSend'));
+await settle();
+ok('no subject refuses', document.getElementById('fMsgError').textContent === 'Subject is required.');
+document.getElementById('fMsgSubject').value = 'League night';
+document.getElementById('fMsgSubject').dispatchEvent(new Event('input', { bubbles: true }));
+click(document.getElementById('fSend'));
+await settle();
+ok('no message refuses', document.getElementById('fMsgError').textContent === 'Message is required.');
+const quill = Quill.find(document.getElementById('fMsgEditor'));
+quill.insertText(0, 'Hello all\n', 'user');
+quill.formatText(0, 5, 'bold', true, 'user');
+await settle();
+ok('typing shows the word count', document.getElementById('mpWords').textContent === '2 words');
+// an attachment through the hidden input
+const dt = new DataTransfer();
+dt.items.add(new File(['attach me'], 'notice.pdf', { type: 'application/pdf' }));
+const fileInput = document.getElementById('fMsgFile');
+fileInput.files = dt.files;
+fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+for (let i = 0; i < 40 && !$('.mp-chip'); i++) await settle(); // FileReader is genuinely async
+ok('an added file becomes a chip', /notice\.pdf/.test($('.mp-chip')?.textContent || ''));
+ok('with its size', /9 B/.test($('.mp-chip-size')?.textContent || ''), $('.mp-chip-size')?.textContent);
+calls.length = 0;
+click(document.getElementById('fSend'));
+await settle();
+const sent = calls[0];
+ok('send posts to the league', sent && sent[0] === 7);
+ok('with the subject', sent && sent[1].subject === 'League night');
+ok('plain text rides along for the fallback', sent && sent[1].body === 'Hello all');
+ok('the HTML keeps the bold', sent && /<strong>Hello<\/strong>/.test(sent[1].bodyHtml), sent && sent[1].bodyHtml);
+ok('attachments keep the filename/content shape', sent && JSON.stringify(Object.keys(sent[1].attachments[0]).sort()) === '["content","filename"]');
+ok('the base64 decodes back to the file', sent && atob(sent[1].attachments[0].content) === 'attach me');
+ok('a successful send closes the modal', !overlay.classList.contains('open'));
+
+log.textContent += '\nOTHER MODALS UNCHANGED\n';
+modal.open('Plain modal', '<p>hello</p>');
+await settle();
+backdropClick();
+await settle();
+ok('an ordinary modal still closes on backdrop click', !overlay.classList.contains('open'));
+modal.open('Plain modal', '<p>hello</p>');
+await settle();
+esc();
+await settle();
+ok('and closes on Esc', !overlay.classList.contains('open'));
+
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+</script>
+</body>
+</html>

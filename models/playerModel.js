@@ -1,30 +1,87 @@
 const { getDB } = require('../database/db');
+const matchModel = require('./matchModel');
 
 function getAllPlayers() {
-  return getDB().prepare('SELECT * FROM players ORDER BY name ASC').all();
+  // account_status is derived, never stored: verified once a password is set,
+  // pending while an invite row exists, none otherwise. The route strips it
+  // (with the other private fields) before a non-admin sees the list.
+  return getDB().prepare(`
+    SELECT p.*,
+      CASE WHEN ua.password_hash IS NOT NULL THEN 'verified'
+           WHEN ua.player_id IS NOT NULL THEN 'pending'
+           ELSE 'none' END AS account_status
+    FROM players p
+    LEFT JOIN user_accounts ua ON ua.player_id = p.id
+    ORDER BY p.name ASC`).all();
 }
 
 function getPlayerById(id) {
   return getDB().prepare('SELECT * FROM players WHERE id = ?').get(Number(id));
 }
 
-function addPlayer({ name, email, phone, club_locker_rating, exclude_from_ladder }) {
+function addPlayer({ name, email, phone, member_number, club_locker_rating, exclude_from_ladder, is_member, is_tester }) {
   const db = getDB();
   const result = db.prepare(
-    'INSERT INTO players (name, email, phone, club_locker_rating, exclude_from_ladder) VALUES (?, ?, ?, ?, ?)'
-  ).run(name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0);
+    `INSERT INTO players (name, email, phone, member_number, club_locker_rating, exclude_from_ladder, is_member, is_tester)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(name, email || null, phone || null, member_number || null, club_locker_rating ?? null,
+    exclude_from_ladder ? 1 : 0, is_member ? 1 : 0, is_tester ? 1 : 0);
   return getPlayerById(result.lastInsertRowid);
 }
 
-function updatePlayer({ id, name, email, phone, club_locker_rating, exclude_from_ladder, is_tester }) {
-  getDB().prepare(
-    'UPDATE players SET name = ?, email = ?, phone = ?, club_locker_rating = ?, exclude_from_ladder = ?, is_tester = ? WHERE id = ?'
-  ).run(name, email || null, phone || null, club_locker_rating ?? null, exclude_from_ladder ? 1 : 0, is_tester ? 1 : 0, Number(id));
-  return getPlayerById(id);
+// Partial update: only the keys the caller actually sent change. A CSV import
+// updating just ratings, a bulk edit sending no flags, or a form that predates
+// a column must never blank out what it didn't mention.
+const _UPDATABLE = ['name', 'email', 'phone', 'member_number', 'club_locker_rating', 'exclude_from_ladder', 'is_member', 'is_tester'];
+
+function updatePlayer(data) {
+  const sets = [];
+  const vals = [];
+  for (const key of _UPDATABLE) {
+    if (!(key in data)) continue;
+    const v = data[key];
+    sets.push(`${key} = ?`);
+    if (key === 'name') vals.push(v);
+    else if (key === 'club_locker_rating') vals.push(v ?? null);
+    else if (key === 'exclude_from_ladder' || key === 'is_member' || key === 'is_tester') vals.push(v ? 1 : 0);
+    else vals.push(v || null);
+  }
+  if (sets.length) {
+    getDB().prepare(`UPDATE players SET ${sets.join(', ')} WHERE id = ?`).run(...vals, Number(data.id));
+  }
+  return getPlayerById(data.id);
+}
+
+// Bulk field patch for the players page: one statement, all-or-nothing.
+// Only the flag columns and the rating may be patched this way.
+const _BULK_PATCHABLE = ['is_member', 'exclude_from_ladder', 'is_tester', 'club_locker_rating'];
+
+function patchPlayers(ids, patch) {
+  const sets = [];
+  const vals = [];
+  for (const key of _BULK_PATCHABLE) {
+    if (!(key in patch)) continue;
+    sets.push(`${key} = ?`);
+    vals.push(key === 'club_locker_rating' ? (patch[key] ?? null) : (patch[key] ? 1 : 0));
+  }
+  if (!sets.length) return 0;
+  const list = ids.map(() => '?').join(',');
+  return getDB().prepare(`UPDATE players SET ${sets.join(', ')} WHERE id IN (${list})`)
+    .run(...vals, ...ids.map(Number)).changes;
+}
+
+function setMembership(ids, isMember) {
+  return patchPlayers(ids, { is_member: !!isMember });
 }
 
 function deletePlayer(id) {
   getDB().prepare('DELETE FROM players WHERE id = ?').run(Number(id));
+}
+
+// Kept separate from updatePlayer so an ordinary player edit can't clear a photo.
+function setPlayerPhoto(id, photoPath) {
+  getDB().prepare('UPDATE players SET photo_path = ? WHERE id = ?').run(photoPath, Number(id));
+  return getPlayerById(id);
 }
 
 /**
@@ -42,7 +99,7 @@ function getPlayerMatchHistory(id) {
       CASE WHEN m.winner_id = eff_winner THEN 'W' ELSE 'L' END AS result,
       opp_name  AS opponent_name,
       opp_id    AS opponent_id,
-      COALESCE(m.confirmed_at, w.date) AS week_date,
+      m.played_at AS week_date,
       w.week_number,
       l.id          AS league_id,
       l.name        AS league_name,
@@ -99,84 +156,37 @@ function getPlayerMatchHistory(id) {
       WHERE sub_in.sub_player_id = ?
     ) AS participated
     JOIN matches m  ON m.id = participated.id
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w          ON tm.week_id = w.id
-    JOIN leagues l        ON w.league_id = l.id
-    JOIN divisions d      ON m.division_id = d.id
+    JOIN weeks w    ON w.id = m.week_id
+    JOIN leagues l  ON l.id = m.league_id
+    JOIN divisions d ON d.id = m.division_id
     WHERE m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-    ORDER BY COALESCE(m.confirmed_at, w.date) DESC, w.week_number DESC
+    ORDER BY m.played_at DESC, w.week_number DESC
   `).all(numId, numId, numId, numId);
 }
 
 /** Win/loss counts for every player in one query (league + tournament). */
+/**
+ * Every player's win/loss record, across every kind of match.
+ *
+ * One row per player per match, taken from whoever actually played it - a
+ * substitute is credited, the player they stood in for is not. Reading the
+ * same effective-player rule the match history reads is what keeps the two
+ * from disagreeing; they used to be assembled separately and could return
+ * different counts for the same match.
+ */
 function getAllPlayerRecords() {
   return getDB().prepare(`
     SELECT p.id,
-      COUNT(CASE WHEN played AND won  THEN 1 END) AS wins,
-      COUNT(CASE WHEN played AND NOT won AND finished THEN 1 END) AS losses
+      COUNT(CASE WHEN part.won THEN 1 END)     AS wins,
+      COUNT(CASE WHEN part.won = 0 THEN 1 END) AS losses
     FROM players p
     LEFT JOIN (
-      SELECT m.player1_id AS player_id,
-             m.winner_id IS NOT NULL AS finished,
-             (m.winner_id = m.player1_id) AS won,
-             1 AS played
-      FROM matches m
-      LEFT JOIN match_subs s ON s.match_id = m.id AND s.original_player_id = m.player1_id
-      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-
+      SELECT ${matchModel.EFF_P1} AS player_id, (${matchModel.WON_SIDE} = 1) AS won
+      FROM matches m ${matchModel.EFF_JOIN} WHERE ${matchModel.COUNTS}
       UNION ALL
-
-      SELECT m.player2_id AS player_id,
-             m.winner_id IS NOT NULL AS finished,
-             (m.winner_id = m.player2_id) AS won,
-             1 AS played
-      FROM matches m
-      LEFT JOIN match_subs s ON s.match_id = m.id AND s.original_player_id = m.player2_id
-      WHERE s.sub_player_id IS NULL AND m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-
-      UNION ALL
-
-      SELECT s.sub_player_id AS player_id,
-             m.winner_id IS NOT NULL AS finished,
-             (m.winner_id = s.original_player_id) AS won,
-             1 AS played
-      FROM match_subs s
-      JOIN matches m ON m.id = s.match_id AND m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-
-      UNION ALL
-
-      SELECT tm.player1_id AS player_id,
-             1 AS finished,
-             (tm.winner_id = tm.player1_id) AS won,
-             1 AS played
-      FROM tournament_matches tm
-      WHERE tm.winner_id IS NOT NULL AND tm.player1_id IS NOT NULL AND tm.player2_id IS NOT NULL
-
-      UNION ALL
-
-      SELECT tm.player2_id AS player_id,
-             1 AS finished,
-             (tm.winner_id = tm.player2_id) AS won,
-             1 AS played
-      FROM tournament_matches tm
-      WHERE tm.winner_id IS NOT NULL AND tm.player1_id IS NOT NULL AND tm.player2_id IS NOT NULL
-
-      UNION ALL
-
-      SELECT pm.player1_id AS player_id,
-             1 AS finished,
-             (pm.winner_id = pm.player1_id) AS won,
-             1 AS played
-      FROM pickup_matches pm
-
-      UNION ALL
-
-      SELECT pm.player2_id AS player_id,
-             1 AS finished,
-             (pm.winner_id = pm.player2_id) AS won,
-             1 AS played
-      FROM pickup_matches pm
-    ) AS participation ON participation.player_id = p.id
+      SELECT ${matchModel.EFF_P2}, (${matchModel.WON_SIDE} = 2)
+      FROM matches m ${matchModel.EFF_JOIN} WHERE ${matchModel.COUNTS}
+    ) AS part ON part.player_id = p.id
     GROUP BY p.id
   `).all();
 }
@@ -185,24 +195,24 @@ function getPickupMatchHistory(id) {
   const numId = Number(id);
   return getDB().prepare(`
     SELECT
-      pm.id,
-      CASE WHEN pm.player1_id = ? THEN 1 ELSE 0 END AS played_as_p1,
-      CASE WHEN pm.player1_id = ? THEN pm.player1_score ELSE pm.player2_score END AS my_score,
-      CASE WHEN pm.player1_id = ? THEN pm.player2_score ELSE pm.player1_score END AS their_score,
-      CASE WHEN pm.winner_id = ? THEN 'W' ELSE 'L' END AS result,
+      m.id,
+      CASE WHEN m.player1_id = @id THEN 1 ELSE 0 END AS played_as_p1,
+      CASE WHEN m.player1_id = @id THEN m.player1_score ELSE m.player2_score END AS my_score,
+      CASE WHEN m.player1_id = @id THEN m.player2_score ELSE m.player1_score END AS their_score,
+      CASE WHEN m.winner_id = @id THEN 'W' ELSE 'L' END AS result,
       opp.name AS opponent_name,
-      CASE WHEN pm.player1_id = ? THEN pm.player2_id ELSE pm.player1_id END AS opponent_id,
-      pm.played_at AS week_date,
+      CASE WHEN m.player1_id = @id THEN m.player2_id ELSE m.player1_id END AS opponent_id,
+      m.played_at AS week_date,
       NULL AS week_number,
       NULL AS league_id,
       'Ladder Match' AS league_name,
       NULL AS division_name,
       'pickup' AS source
-    FROM pickup_matches pm
-    JOIN players opp ON opp.id = CASE WHEN pm.player1_id = ? THEN pm.player2_id ELSE pm.player1_id END
-    WHERE pm.player1_id = ? OR pm.player2_id = ?
-    ORDER BY pm.played_at DESC
-  `).all(numId, numId, numId, numId, numId, numId, numId, numId);
+    FROM matches m
+    JOIN players opp ON opp.id = CASE WHEN m.player1_id = @id THEN m.player2_id ELSE m.player1_id END
+    WHERE m.type = 'ladder' AND (m.player1_id = @id OR m.player2_id = @id)
+    ORDER BY m.played_at DESC
+  `).all({ id: numId });
 }
 
 function getPlayerUpcomingMatches(id) {
@@ -220,7 +230,7 @@ function getPlayerUpcomingMatches(id) {
       m.court_number,
       m.court_id,
       c.name AS court_name,
-      m.match_time,
+      m.scheduled_time AS match_time,
       l.schedule_courts
     FROM matches m
     JOIN players p1 ON p1.id = m.player1_id
@@ -229,12 +239,12 @@ function getPlayerUpcomingMatches(id) {
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     LEFT JOIN players sp1 ON sp1.id = s1.sub_player_id
     LEFT JOIN players sp2 ON sp2.id = s2.sub_player_id
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w          ON tm.week_id = w.id
-    JOIN leagues l        ON w.league_id = l.id
-    JOIN divisions d      ON m.division_id = d.id
-    LEFT JOIN courts c    ON c.id = m.court_id
-    WHERE ((m.player1_id = ? AND s1.sub_player_id IS NULL)
+    JOIN weeks w       ON w.id = m.week_id
+    JOIN leagues l     ON l.id = m.league_id
+    JOIN divisions d   ON d.id = m.division_id
+    LEFT JOIN courts c ON c.id = m.court_id
+    WHERE m.type = 'league'
+      AND ((m.player1_id = ? AND s1.sub_player_id IS NULL)
        OR  (m.player2_id = ? AND s2.sub_player_id IS NULL))
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
 
@@ -252,7 +262,7 @@ function getPlayerUpcomingMatches(id) {
       m.court_number,
       m.court_id,
       c.name AS court_name,
-      m.match_time,
+      m.scheduled_time AS match_time,
       l.schedule_courts
     FROM match_subs s
     JOIN matches m ON m.id = s.match_id
@@ -262,12 +272,11 @@ function getPlayerUpcomingMatches(id) {
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     LEFT JOIN players sp1 ON sp1.id = s1.sub_player_id
     LEFT JOIN players sp2 ON sp2.id = s2.sub_player_id
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w          ON tm.week_id = w.id
-    JOIN leagues l        ON w.league_id = l.id
-    JOIN divisions d      ON m.division_id = d.id
-    LEFT JOIN courts c    ON c.id = m.court_id
-    WHERE s.sub_player_id = ?
+    JOIN weeks w       ON w.id = m.week_id
+    JOIN leagues l     ON l.id = m.league_id
+    JOIN divisions d   ON d.id = m.division_id
+    LEFT JOIN courts c ON c.id = m.court_id
+    WHERE m.type = 'league' AND s.sub_player_id = ?
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
 
     ORDER BY week_date ASC, match_time ASC
@@ -275,6 +284,6 @@ function getPlayerUpcomingMatches(id) {
 }
 
 module.exports = {
-  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer,
+  getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, setPlayerPhoto, setMembership, patchPlayers,
   getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
 };

@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal } from '../utils.js';
+import { esc, toast, modal, formatShortDate } from '../utils.js';
 
 // ===== DASHBOARD HELPERS =====
 function abbrevName(name) {
@@ -84,7 +84,7 @@ export async function renderClubActivity(days = 7) {
     const deleteBtn   = (admin && m.source === 'pickup')
       ? `<button class="ca-delete-btn" data-id="${m.id}">Delete</button>` : '';
     return `
-      <div class="ca-item">
+      <div class="ca-item" data-match="${m.id}">
         <div class="ca-item-main">
           <span class="ca-winner">${esc(winnerLabel)}${esc(winnerName)}</span>
           <span class="ca-verb"> beat </span>
@@ -134,19 +134,172 @@ export async function renderClubActivity(days = 7) {
 }
 
 // ===== CLUB SETTINGS =====
+// Every IANA zone the browser knows, with the chosen one selected. Older
+// browsers without supportedValuesOf get a short list of plausible zones.
+function _timezoneOptionsHTML(current) {
+  let zones;
+  try { zones = Intl.supportedValuesOf('timeZone'); }
+  catch (_) {
+    zones = ['America/Winnipeg', 'America/Toronto', 'America/Vancouver', 'America/Edmonton',
+      'America/Regina', 'America/Halifax', 'America/St_Johns', 'UTC'];
+  }
+  if (!zones.includes(current)) zones = [current, ...zones];
+  return zones.map((z) =>
+    `<option value="${esc(z)}"${z === current ? ' selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('');
+}
+
 export async function renderClubSettings() {
   document.getElementById('pageTitle').textContent = 'Club Settings';
   document.getElementById('topbarActions').innerHTML = '';
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
 
-  const [courts, bookingTypes] = await Promise.all([
+  const [courts, bookingTypes, seasons, settings, clubSettings] = await Promise.all([
     window.api.getCourts(),
     window.api.getBookingTypes(),
+    window.api.getSeasons(),
+    window.api.getSeasonSettings(),
+    window.api.getSettings(),
   ]);
+
+  // The API resolves these through the ladder's own defaults, so a setting that
+  // has never been saved still shows the value actually in force.
+  const ladderCfg = clubSettings.ladder || {};
+
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  const [startMonth, startDay] = String(settings.season_start_md || '09-01').split('-');
 
   content.innerHTML = `
     <div class="settings-page">
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Seasons</h2>
+        </div>
+        <p class="settings-section-desc">
+          Seasons group match history so profiles can show a season at a time. They are worked out
+          from the date a match was played, so there is nothing to create or switch over: set the
+          day the year rolls over and it repeats every year. The first season keeps the original
+          position ladder; every season after it uses ratings.
+        </p>
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fSeasonStart">Season starts</label>
+            <div class="season-md">
+              <select class="form-control" id="fSeasonStartMonth">
+                ${MONTHS.map((m, i) => `<option value="${String(i + 1).padStart(2, '0')}" ${startMonth === String(i + 1).padStart(2, '0') ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+              <select class="form-control" id="fSeasonStartDay">
+                ${Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'))
+                  .map((d) => `<option value="${d}" ${startDay === d ? 'selected' : ''}>${Number(d)}</option>`).join('')}
+              </select>
+            </div>
+            <p class="form-hint">Every year on this day, a new season begins.</p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveSeasonSettings">Save</button>
+          </div>
+        </div>
+
+        <div class="court-list" style="margin-top:6px">
+          ${seasons.map((s) => `
+            <div class="court-item">
+              <div class="court-item-name">
+                ${esc(s.name)}${s.is_current ? '<span class="season-current-chip">Current</span>' : ''}
+                <div class="season-meta">
+                  ${s.ladder_system === 'elo' ? 'Rating ladder' : 'Position ladder'} ·
+                  ${formatShortDate(s.start_date)} – ${formatShortDate(s.end_date)}
+                  · ${s.usage.matches === 0 ? 'no matches' : `${s.usage.matches} match${s.usage.matches === 1 ? '' : 'es'}`}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Time zone</h2>
+        </div>
+        <p class="settings-section-desc">
+          The club's clock. Everything time-related follows this time zone for everyone, no
+          matter where their own device thinks it is: the schedule's Now line, what counts as
+          today, and when a booking or event is in the past.
+        </p>
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fClubTimezone">Club time zone</label>
+            <select class="form-control" id="fClubTimezone">${_timezoneOptionsHTML(clubSettings.club_timezone || 'America/Winnipeg')}</select>
+            <p class="form-hint">Right now at the club: <span id="clubTzPreview"></span></p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveClubTimezone">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Joining the ladder</h2>
+        </div>
+        <p class="settings-section-desc">
+          A member joins the ladder by playing a match, and not before, so a Club Locker rating
+          never holds a rank on its own. What it does decide is where they come in on the day they
+          first play; the result of that match, and every one after it, moves them from there.
+          Change these and the ladder recalculates: nothing is stored, so you can try a number, look
+          at the ladder, and try another.
+        </p>
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fRatingFloor">Mid-ladder rating</label>
+            <input class="form-control" id="fRatingFloor" type="number" min="0" max="10" step="0.1"
+              value="${esc(String(ladderCfg.elo_club_locker_pivot))}">
+            <p class="form-hint">
+              The Club Locker rating that comes in at the middle of the ladder, on
+              ${esc(String(ladderCfg.elo_base_rating))}. Ratings above it enter higher, below it
+              lower.
+            </p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fUnplayedBonus">Points per rating point</label>
+            <input class="form-control" id="fUnplayedBonus" type="number" min="0" max="600" step="10"
+              value="${esc(String(ladderCfg.elo_club_locker_scale))}">
+            <p class="form-hint">
+              How far each point of Club Locker rating moves that entry point. Bigger spreads new
+              players further apart; smaller brings them all closer to the middle.
+              <span id="bonusHint"></span>
+            </p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveLadderSettings">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">Winning margin</h2>
+        </div>
+        <p class="settings-section-desc">
+          How much the scoreline counts. A 3-1 is the middle result and scores at face value; a 3-0
+          pays more and a 3-2 pays less. The exchange stays even either way, so a narrow defeat costs
+          exactly as much less as a narrow win pays less.
+        </p>
+        <div class="season-settings">
+          <div class="form-group">
+            <label class="form-label" for="fMarginWeight">Weight per game</label>
+            <input class="form-control" id="fMarginWeight" type="number" min="0" max="0.5" step="0.05"
+              value="${esc(String(ladderCfg.elo_margin_weight))}">
+            <p class="form-hint">
+              How much each game of margin is worth, either side of a 3-1. Zero ignores the
+              scoreline: a win is a win. <span id="marginHint"></span>
+            </p>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" id="btnSaveMargin">Save</button>
+          </div>
+        </div>
+      </div>
+
       <div class="settings-section">
         <div class="settings-section-header">
           <h2 class="settings-section-title">Courts</h2>
@@ -193,6 +346,89 @@ export async function renderClubSettings() {
         }
       </div>
     </div>`;
+
+  document.getElementById('btnSaveSeasonSettings').addEventListener('click', async () => {
+    const md = `${document.getElementById('fSeasonStartMonth').value}-${document.getElementById('fSeasonStartDay').value}`;
+    try {
+      await window.api.updateSeasonSettings({ season_start_md: md });
+      toast('Season settings saved');
+      renderClubSettings();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  const tzSelect = document.getElementById('fClubTimezone');
+  const tzPreview = () => {
+    const el = document.getElementById('clubTzPreview');
+    if (!el || !tzSelect) return;
+    try {
+      el.textContent = new Intl.DateTimeFormat('en-US', {
+        timeZone: tzSelect.value, weekday: 'short', hour: 'numeric', minute: '2-digit',
+      }).format(new Date());
+    } catch (_) { el.textContent = '—'; }
+  };
+  tzPreview();
+  tzSelect?.addEventListener('change', tzPreview);
+  document.getElementById('btnSaveClubTimezone')?.addEventListener('click', async () => {
+    try {
+      await window.api.updateSettings({ club_timezone: tzSelect.value });
+      // The running session follows the new clock immediately.
+      if (state.currentUser) state.currentUser.club_timezone = tzSelect.value;
+      toast('Time zone saved');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  // Worked through on two real ratings, so neither number is abstract.
+  const floorInput = document.getElementById('fRatingFloor');
+  const bonusInput = document.getElementById('fUnplayedBonus');
+  const bonusHint = document.getElementById('bonusHint');
+  const showBonus = () => {
+    const base = Number(ladderCfg.elo_base_rating);
+    const pivot = Number(floorInput.value || 0);
+    const scale = Number(bonusInput.value || 0);
+    const at = (r) => Math.round(base + (r - pivot) * scale);
+    bonusHint.textContent = `A 3.0 would come in on ${at(3)}, a 5.0 on ${at(5)}.`;
+  };
+  showBonus();
+  bonusInput?.addEventListener('input', showBonus);
+  floorInput?.addEventListener('input', showBonus);
+
+  document.getElementById('btnSaveLadderSettings')?.addEventListener('click', async () => {
+    try {
+      await window.api.updateSettings({
+        elo_club_locker_pivot: floorInput.value,
+        elo_club_locker_scale: bonusInput.value,
+      });
+      toast('Ladder settings saved');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  // Worked through on an evenly matched game, where the difference is clearest.
+  const marginInput = document.getElementById('fMarginWeight');
+  const marginHint = document.getElementById('marginHint');
+  const showMargin = () => {
+    const k = Number(ladderCfg.elo_k_factor);
+    const w = Number(marginInput.value || 0);
+    const at = (games) => (k / 2 * Math.max(0.2, 1 + (games - 2) * w)).toFixed(1);
+    marginHint.textContent =
+      `Between evenly matched players: 3-0 pays ${at(3)}, 3-1 pays ${at(2)}, 3-2 pays ${at(1)}.`;
+  };
+  showMargin();
+  marginInput?.addEventListener('input', showMargin);
+
+  document.getElementById('btnSaveMargin')?.addEventListener('click', async () => {
+    try {
+      await window.api.updateSettings({ elo_margin_weight: marginInput.value });
+      toast('Winning margin saved');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
 
   document.getElementById('btnAddCourt').addEventListener('click', openAddCourtModal);
 
@@ -561,8 +797,15 @@ export async function renderDashboard() {
   const totalPlayers = ladderVisible.length;
   const todayStr = _localDateStr();
   const nextMatch = upcoming.find((m) => m.week_date >= todayStr) || null;
-  const wins = playerData.wins || 0;
-  const losses = playerData.losses || 0;
+  // Season-scoped, because the rank beside these figures is the current season's
+  // and the profile reports the same season by default. A career total here made
+  // one card contradict the other two surfaces.
+  const currentSeason = (playerData.seasons || []).find((s) => s.is_current) || null;
+  const seasonHistory = currentSeason
+    ? (playerData.history || []).filter((m) => m.season_key === currentSeason.key)
+    : (playerData.history || []);
+  const wins = seasonHistory.filter((m) => m.result === 'W').length;
+  const losses = seasonHistory.filter((m) => m.result === 'L').length;
   const total = wins + losses;
   const winPct = total > 0 ? Math.round((wins / total) * 100) : 0;
   const firstName = (playerData.name || '').split(' ')[0];
@@ -628,7 +871,7 @@ export async function renderDashboard() {
           ${nextMatch ? `
             <div class="dh-hero-left">
               <div class="dh-match-label">${esc(leagueLabel)}</div>
-              <div class="dh-matchup">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}</div>
+              <div class="dh-matchup" data-match="${nextMatch.id}">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}</div>
               <div class="dh-pills">${pills}</div>
             </div>
             ${countdownInnerHTML ? `
@@ -676,6 +919,7 @@ export async function renderDashboard() {
             <div class="db-rank-of">of ${totalPlayers}</div>
           </div>
         </div>
+        <div class="db-card-subtitle">${currentSeason ? esc(currentSeason.name) : 'All time'}</div>
         <div class="db-rank-stats">
           <div class="db-stat"><div class="db-stat-val">${wins}</div><div class="db-stat-lbl">Wins</div></div>
           <div class="db-stat"><div class="db-stat-val">${losses}</div><div class="db-stat-lbl">Losses</div></div>
@@ -727,13 +971,9 @@ export async function renderDashboard() {
           <svg class="db-quick-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" fill="#5b7cf9"><g transform="translate(-180,-2159)"><g transform="translate(56,160)"><path d="M134,2008.99998 C131.783496,2008.99998 129.980955,2007.20598 129.980955,2004.99998 C129.980955,2002.79398 131.783496,2000.99998 134,2000.99998 C136.216504,2000.99998 138.019045,2002.79398 138.019045,2004.99998 C138.019045,2007.20598 136.216504,2008.99998 134,2008.99998 M137.775893,2009.67298 C139.370449,2008.39598 140.299854,2006.33098 139.958235,2004.06998 C139.561354,2001.44698 137.368965,1999.34798 134.722423,1999.04198 C131.070116,1998.61898 127.971432,2001.44898 127.971432,2004.99998 C127.971432,2006.88998 128.851603,2008.57398 130.224107,2009.67298 C126.852128,2010.93398 124.390463,2013.89498 124.004634,2017.89098 C123.948368,2018.48198 124.411563,2018.99998 125.008391,2018.99998 C125.519814,2018.99998 125.955881,2018.61598 126.001095,2018.10898 C126.404004,2013.64598 129.837274,2010.99998 134,2010.99998 C138.162726,2010.99998 141.595996,2013.64598 141.998905,2018.10898 C142.044119,2018.61598 142.480186,2018.99998 142.991609,2018.99998 C143.588437,2018.99998 144.051632,2018.48198 143.995366,2017.89098 C143.609537,2013.89498 141.147872,2010.93398 137.775893,2009.67298"/></g></g></svg>
           My Profile
         </button>
-        <button class="db-quick-item" onclick="openReportScoreModal()">
+        <button class="db-quick-item" onclick="navigate('reportScore')">
           <svg class="db-quick-icon" viewBox="0 0 98.374 98.374" xmlns="http://www.w3.org/2000/svg" fill="#2ec610"><path d="M97.789,23.118l-7.24-7.24c-0.781-0.781-2.047-0.781-2.828,0L50.464,53.133l-13.291-13.29c-0.781-0.781-2.047-0.781-2.828,0l-7.24,7.24c-0.375,0.375-0.586,0.884-0.586,1.414c0,0.53,0.211,1.039,0.586,1.414L49.05,71.854c0.391,0.391,0.902,0.586,1.414,0.586c0.513,0,1.022-0.195,1.414-0.586l45.91-45.908c0.375-0.375,0.586-0.884,0.586-1.414C98.374,24.002,98.164,23.493,97.789,23.118z"/><path d="M73.583,80.979H10V17.395h65.098l8.485-8c0-1.104-0.896-2-2-2H2c-1.104,0-2,0.896-2,2v79.584c0,1.104,0.896,2,2,2h79.584c1.105,0,2-0.896,2-2v-37.88l-10,10.5L73.583,80.979L73.583,80.979z"/></svg>
-          Report Score
-        </button>
-        <button class="db-quick-item" onclick="openPickupGameModal()">
-          <svg class="db-quick-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="#ff7300"><path d="M23.5 13.187h-7.5v-12.187l-7.5 17.813h7.5v12.187l7.5-17.813z"/></svg>
-          Report Ladder Match Score
+          Report score
         </button>
       </div>
     </div>`;
@@ -784,12 +1024,8 @@ export async function renderDashboard() {
   document.getElementById('btnQuickActionsInfo')?.addEventListener('click', () => {
     modal.open('Quick Actions', `
       <div class="info-modal-section">
-        <h4>Report Score</h4>
+        <h4>Report League Match Score</h4>
         <p>Use this after playing a scheduled league match. It submits the result for your match in the current season.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Report Ladder Match Score</h4>
-        <p>Playing a casual game at the club? Record the result here and it counts toward your ladder ranking and appears in your match history. A simple way to add a little extra stakes to any friendly match.</p>
       </div>`);
   });
 }

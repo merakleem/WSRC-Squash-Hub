@@ -5,7 +5,9 @@ const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
-const RESEND_FROM = process.env.RESEND_FROM || 'Play WSRC <no-reply@playwsrc.ca>';
+const { sendBatch, isConfigured: emailConfigured, appUrl } = require('../lib/email');
+const { clubToday } = require('../lib/clock');
+const sanitizeHtml = require('sanitize-html');
 
 const router = express.Router();
 
@@ -29,10 +31,50 @@ router.get('/leagues', wrap(async (req, res) => {
   `).all();
   const countMap = {};
   for (const row of matchCounts) countMap[row.league_id] = row;
+
+  // Week progress, for the card's segmented bar. One grouped query rather than
+  // one per league. "Elapsed" is measured against the club's today, not SQLite's
+  // UTC now, so an evening viewer in Winnipeg doesn't see the week tick over a
+  // day early.
+  const weekRows = db.prepare(`
+    SELECT w.league_id,
+           COUNT(*) AS total_weeks,
+           SUM(CASE WHEN w.date < @today THEN 1 ELSE 0 END) AS weeks_elapsed,
+           MAX(w.date) AS last_week_date
+    FROM weeks w
+    GROUP BY w.league_id
+  `).all({ today: clubToday() });
+  const weekMap = {};
+  for (const row of weekRows) weekMap[row.league_id] = row;
+
+  // The signed-in player's own division, for the "You · Division 2" chip. Only
+  // ever their own row: nobody else's placement is sent to a client, and this
+  // is the whole list in one query rather than a fetch per card.
+  const myDivision = {};
+  const playerId = req.session?.playerId;
+  if (playerId) {
+    const rows = db.prepare(`
+      SELECT lp.league_id, d.level
+      FROM league_players lp
+      JOIN divisions d ON d.id = lp.division_id
+      WHERE lp.player_id = ?
+    `).all(playerId);
+    for (const row of rows) myDivision[row.league_id] = row.level;
+  }
+
   res.json(leagues.map((l) => {
     const counts = countMap[l.id];
     const status = counts && counts.total > 0 && counts.done === counts.total ? 'completed' : 'active';
-    return { ...l, player_ids: memberMap[l.id] || [], status };
+    const weeks = weekMap[l.id];
+    return {
+      ...l,
+      player_ids: memberMap[l.id] || [],
+      status,
+      total_weeks: weeks?.total_weeks || 0,
+      weeks_elapsed: weeks?.weeks_elapsed || 0,
+      last_week_date: weeks?.last_week_date || null,
+      my_division_level: myDivision[l.id] ?? null,
+    };
   }));
 }));
 
@@ -86,46 +128,48 @@ router.put('/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) => 
   res.json({ ok: true, count });
 }));
 
-router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
-  const { subject, body, attachments } = req.body;
-  if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required' });
+// The body arrives as editor HTML (bodyHtml) with a plain-text copy (body).
+// Admin-authored, but it lands in players' inboxes, so it goes through a
+// strict allowlist matching exactly what the editor can produce.
+function sanitizeMessageHtml(bodyHtml) {
+  return sanitizeHtml(bodyHtml, {
+    allowedTags: ['p', 'br', 'strong', 'em', 'u', 'b', 'i', 'ol', 'ul', 'li', 'a', 'h2', 'h3'],
+    allowedAttributes: { a: ['href', 'target', 'rel'] },
+    allowedSchemes: ['http', 'https', 'mailto'],
+    transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener' }) },
+  });
+}
+router.sanitizeMessageHtml = sanitizeMessageHtml;
 
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
+  const { subject, body, bodyHtml, attachments } = req.body;
+  if (!subject || !(bodyHtml || body)) return res.status(400).json({ error: 'Subject and body are required' });
+
+  if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
   const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
   const recipients = players.filter((p) => p.player_email);
   if (recipients.length === 0) return res.json({ sent: 0 });
 
-  const htmlBody = body
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
+  const html = bodyHtml
+    ? sanitizeMessageHtml(bodyHtml)
+    : `<p>${body
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>')}</p>`;
 
-  // Resend batch API: up to 100 emails per request, avoiding per-email rate limits
-  const BATCH_SIZE = 100;
-  let sent = 0;
-  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-    const chunk = recipients.slice(i, i + BATCH_SIZE);
-    const batch = chunk.map((player) => ({
-      from: RESEND_FROM,
-      to: [player.player_email],
-      subject,
-      html: `<p>${htmlBody}</p>`,
-      ...(attachments && attachments.length ? { attachments } : {}),
-    }));
-    const response = await fetch('https://api.resend.com/emails/batch', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(batch),
-    });
-    if (response.ok) sent += chunk.length;
-  }
-  res.json({ sent });
+  const { sent, failed } = await sendBatch(recipients.map((player) => ({
+    to: [player.player_email],
+    subject,
+    html,
+    ...(body ? { text: body } : {}),
+    ...(attachments && attachments.length ? { attachments } : {}),
+  })));
+
+  res.json({ sent, failed });
 }));
 
 router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  if (!RESEND_API_KEY) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
+  if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
   const db = getDB();
   const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
@@ -138,7 +182,7 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
 
   if (eligible.length === 0) return res.json({ sent: 0 });
 
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const baseUrl = appUrl(req);
   const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
 
   const batch = eligible.map((p) => {
@@ -149,7 +193,6 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
       ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires
     `).run(p.player_id, token, expires);
     return {
-      from: RESEND_FROM,
       to: [p.player_email],
       subject: 'Activate your Play WSRC account',
       html: `<p>Hi ${p.player_name},</p>
@@ -159,19 +202,9 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
     };
   });
 
-  const BATCH_SIZE = 100;
-  let sent = 0;
-  for (let i = 0; i < batch.length; i += BATCH_SIZE) {
-    const chunk = batch.slice(i, i + BATCH_SIZE);
-    const response = await fetch('https://api.resend.com/emails/batch', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(chunk),
-    });
-    if (response.ok) sent += chunk.length;
-  }
+  const { sent, failed } = await sendBatch(batch);
 
-  res.json({ sent });
+  res.json({ sent, failed });
 }));
 
 router.get('/configs/:numPlayers', wrap(async (req, res) => {
