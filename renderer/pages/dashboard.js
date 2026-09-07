@@ -245,28 +245,19 @@ export async function renderClubSettings() {
           The ladder is decided by results. Players who have played are ranked by where they
           finished; players who have not yet played start at the foot of it, ordered among
           themselves by their Club Locker rating. One win moves them into the ranked ladder
-          properly. Change these and the ladder recalculates: nothing is stored, so you can try a
-          number and try another.
+          properly. Change this and the ladder recalculates: nothing is stored, so you can try a
+          number, look at the ladder, and try another.
         </p>
         <div class="season-settings">
           <div class="form-group">
-            <label class="form-label" for="fUnplayedBase">Starting rating</label>
-            <input class="form-control" id="fUnplayedBase" type="number" min="0" max="2000" step="10"
-              value="${esc(String(ladderCfg.elo_unplayed_base))}">
-            <p class="form-hint">
-              Where a player with no matches begins. The lowest finisher from the previous season
-              is worth ${esc(String(ladderCfg.elo_seed_bottom))}, so anything at or below that keeps
-              them behind everyone who played.
-            </p>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="fUnplayedBonus">Club Locker adjustment</label>
-            <input class="form-control" id="fUnplayedBonus" type="number" min="0" max="400" step="5"
+            <label class="form-label" for="fUnplayedBonus">Club Locker head start</label>
+            <input class="form-control" id="fUnplayedBonus" type="number" min="0" max="600" step="10"
               value="${esc(String(ladderCfg.elo_unplayed_rating_bonus))}">
             <p class="form-hint">
-              The most a Club Locker rating can add on top. The club's highest rating earns all of
-              it, the lowest none. Enough to sort newcomers sensibly, not enough to lift them past
-              players who have results.
+              Rating points the club's <em>highest</em> Club Locker rating is worth at the start.
+              Everyone else gets a share of it in proportion, so the lowest rating in the club earns
+              nothing and begins at ${esc(String(ladderCfg.elo_seed_bottom))}. Turn it up to give
+              strong newcomers a bigger head start. <span id="bonusHint"></span>
             </p>
           </div>
           <div class="form-actions" style="justify-content:flex-start">
@@ -356,11 +347,20 @@ export async function renderClubSettings() {
     }
   });
 
+  // Says what the number means in ladder terms rather than rating points.
+  const bonusInput = document.getElementById('fUnplayedBonus');
+  const bonusHint = document.getElementById('bonusHint');
+  const showBonus = () => {
+    const top = Number(ladderCfg.elo_seed_bottom) + Number(bonusInput.value || 0);
+    bonusHint.textContent = `The club's top newcomer would start on ${Math.round(top)}.`;
+  };
+  showBonus();
+  bonusInput?.addEventListener('input', showBonus);
+
   document.getElementById('btnSaveLadderSettings')?.addEventListener('click', async () => {
     try {
       await window.api.updateSettings({
-        elo_unplayed_base: document.getElementById('fUnplayedBase').value,
-        elo_unplayed_rating_bonus: document.getElementById('fUnplayedBonus').value,
+        elo_unplayed_rating_bonus: bonusInput.value,
       });
       toast('Ladder settings saved');
     } catch (err) {

@@ -32,20 +32,32 @@ ok('a finisher is spread across the seed range: first gets the top',
   seed({ previousPosition: 1, ladderSize: 10 }) === cfg.elo_seed_top);
 ok('and last gets the bottom',
   seed({ previousPosition: 10, ladderSize: 10 }) === cfg.elo_seed_bottom);
-ok('a player with no matches starts at the unplayed base',
-  seed({ unplayed: true, ratingShare: 0 }) === cfg.elo_unplayed_base, String(seed({ unplayed: true, ratingShare: 0 })));
-ok('the club\'s highest rating earns the whole adjustment',
-  seed({ unplayed: true, ratingShare: 1 }) === cfg.elo_unplayed_base + cfg.elo_unplayed_rating_bonus,
+ok('a player with no matches starts at the foot of the ladder',
+  seed({ unplayed: true, ratingShare: 0 }) === cfg.elo_seed_bottom, String(seed({ unplayed: true, ratingShare: 0 })));
+ok('the club\'s highest rating earns the whole head start',
+  seed({ unplayed: true, ratingShare: 1 }) === cfg.elo_seed_bottom + cfg.elo_unplayed_rating_bonus,
   String(seed({ unplayed: true, ratingShare: 1 })));
 ok('and a middling rating earns half of it',
-  seed({ unplayed: true, ratingShare: 0.5 }) === cfg.elo_unplayed_base + cfg.elo_unplayed_rating_bonus / 2);
+  seed({ unplayed: true, ratingShare: 0.5 }) === cfg.elo_seed_bottom + cfg.elo_unplayed_rating_bonus / 2);
 ok('an unrated newcomer gets none of it',
-  seed({ unplayed: true, ratingShare: null }) === cfg.elo_unplayed_base);
-ok('having played always beats having a rating: the last finisher outranks the best newcomer',
-  seed({ previousPosition: 10, ladderSize: 10 }) >= seed({ unplayed: true, ratingShare: 1 }) - cfg.elo_unplayed_rating_bonus,
-  `${seed({ previousPosition: 10, ladderSize: 10 })} vs ${seed({ unplayed: true, ratingShare: 1 })}`);
+  seed({ unplayed: true, ratingShare: null }) === cfg.elo_seed_bottom);
+// The share is a proportion; a bad one must not send a newcomer up the ladder.
+ok('a share above 1 is capped at the whole head start',
+  seed({ unplayed: true, ratingShare: 5 }) === cfg.elo_seed_bottom + cfg.elo_unplayed_rating_bonus,
+  String(seed({ unplayed: true, ratingShare: 5 })));
+ok('and a negative share cannot push anyone below the foot',
+  seed({ unplayed: true, ratingShare: -3 }) === cfg.elo_seed_bottom,
+  String(seed({ unplayed: true, ratingShare: -3 })));
+ok('a nonsense share is treated as none',
+  seed({ unplayed: true, ratingShare: 'abc' }) === cfg.elo_seed_bottom);
 ok('a position cannot lift someone who has not played',
-  seed({ previousPosition: 1, ladderSize: 10, unplayed: true, ratingShare: 0 }) === cfg.elo_unplayed_base);
+  seed({ previousPosition: 1, ladderSize: 10, unplayed: true, ratingShare: 0 }) === cfg.elo_seed_bottom);
+// The foot of the ladder is one number, used by both: a player who finished
+// last and a player who never played start level, and the head start then
+// separates them. Turning the head start off makes them exactly equal.
+ok('finishing last and never playing both start at the foot',
+  seed({ previousPosition: 10, ladderSize: 10 }) === seed({ unplayed: true, ratingShare: 0 }),
+  `${seed({ previousPosition: 10, ladderSize: 10 })} vs ${seed({ unplayed: true, ratingShare: 0 })}`);
 
 console.log('\nNO ADJUSTMENT PERIOD LEFT');
 ok('a match is a plain zero-sum exchange', (() => {
@@ -58,10 +70,13 @@ ok('beating someone far above you still pays more than beating an equal',
 ok('and losing to them still costs less',
   elo.ratingDelta(1300, 1000, cfg.elo_k_factor) < elo.ratingDelta(1000, 1000, cfg.elo_k_factor));
 
-console.log('\nBOTH NUMBERS ARE SETTINGS');
-ok('the base is overridable', elo.config({ elo_unplayed_base: '900' }).elo_unplayed_base === 900);
-ok('the adjustment is overridable', elo.config({ elo_unplayed_rating_bonus: '120' }).elo_unplayed_rating_bonus === 120);
-ok('a blank falls back to the default', elo.config({ elo_unplayed_base: '' }).elo_unplayed_base === 800);
+console.log('\nONE NUMBER, AND IT IS A SETTING');
+ok('the head start is overridable', elo.config({ elo_unplayed_rating_bonus: '120' }).elo_unplayed_rating_bonus === 120);
+ok('a blank falls back to the default', elo.config({ elo_unplayed_rating_bonus: '' }).elo_unplayed_rating_bonus === 80);
+ok('the old two-setting shape is gone', (() => {
+  const c = elo.config({});
+  return !('elo_unplayed_base' in c) && !('elo_unproven_dock' in c) && !('elo_provisional_matches' in c);
+})());
 
 console.log('\nON A LADDER');
 set({ season_start_md: '09-01' });
@@ -95,40 +110,40 @@ ok('everyone who won a match is above everyone who has not played',
     < Math.min(...['Nia Newcomer', 'Hugh Highrated', 'Una Unrated'].map(posOf)), names());
 ok('even the club\'s highest rating does not jump the queue',
   posOf('Hugh Highrated') > posOf('Cal Climber'), names());
-// Worth stating out loud: the base and the bottom of the seed range are both
-// 800 by default, so a player who lost every match finishes level with someone
-// who never played, and the Club Locker adjustment then puts the newcomer
-// ahead. Drop the base below the seed bottom for a clean split.
+// Worth stating out loud: a player who lost every match finishes last and so
+// starts at the foot, level with someone who never played - and the head start
+// then puts the rated newcomer ahead of them. Turning it off levels them again.
 ok('a player who lost every match can fall below a rated newcomer',
   posOf('Ben Battler') > posOf('Hugh Highrated'), names());
-ok('and dropping the base below the seed bottom separates them cleanly', (() => {
-  set({ elo_unplayed_base: 700 });
-  const clean = posOf('Ben Battler') < Math.min(...['Nia Newcomer', 'Hugh Highrated', 'Una Unrated'].map(posOf));
-  set({ elo_unplayed_base: 800 });
-  return clean;
+ok('with no head start they start on the same rating', (() => {
+  set({ elo_unplayed_rating_bonus: 0 });
+  const level = ratingOf('Ben Battler') === ratingOf('Hugh Highrated');
+  set({ elo_unplayed_rating_bonus: 80 });
+  return level;
 })());
 ok('among those who have not played, rating decides',
   posOf('Hugh Highrated') < posOf('Nia Newcomer'), names());
 ok('and an unrated newcomer sits below a rated one',
   posOf('Una Unrated') > posOf('Nia Newcomer'), names());
-ok('the unrated newcomer starts exactly at the base',
-  ratingOf('Una Unrated') === cfg.elo_unplayed_base, String(ratingOf('Una Unrated')));
-ok('the highest-rated newcomer starts at the base plus the whole adjustment',
-  ratingOf('Hugh Highrated') === cfg.elo_unplayed_base + cfg.elo_unplayed_rating_bonus,
+ok('the unrated newcomer starts exactly at the foot',
+  ratingOf('Una Unrated') === cfg.elo_seed_bottom, String(ratingOf('Una Unrated')));
+ok('the highest-rated newcomer starts at the foot plus the whole head start',
+  ratingOf('Hugh Highrated') === cfg.elo_seed_bottom + cfg.elo_unplayed_rating_bonus,
   String(ratingOf('Hugh Highrated')));
 
 console.log('\nTHE SETTINGS MOVE THE LADDER');
 set({ elo_unplayed_rating_bonus: 0 });
-ok('with no adjustment every newcomer starts level',
+ok('with no head start every newcomer starts level',
   ratingOf('Hugh Highrated') === ratingOf('Nia Newcomer'), String(ratingOf('Hugh Highrated')));
-set({ elo_unplayed_rating_bonus: 400, elo_unplayed_base: 800 });
-ok('a large enough adjustment does lift them into the ranked players',
+set({ elo_unplayed_rating_bonus: 400 });
+ok('a big enough head start lifts them among the ranked players',
   posOf('Hugh Highrated') < Math.max(...['Ann Anchor', 'Ben Battler', 'Cal Climber'].map(posOf)), names());
-set({ elo_unplayed_rating_bonus: 50 });
-ok('and putting it back restores the split',
-  posOf('Hugh Highrated') > Math.max(posOf('Ann Anchor'), posOf('Cal Climber')), names());
-ok('nothing is stored: the ladder recomputes from the settings each time',
-  ratingOf('Hugh Highrated') === cfg.elo_unplayed_base + 50);
+ok('and it is the one number doing it: turning it back restores the order', (() => {
+  set({ elo_unplayed_rating_bonus: 80 });
+  return posOf('Hugh Highrated') > Math.max(posOf('Ann Anchor'), posOf('Cal Climber'));
+})(), names());
+ok('nothing is stored: the ladder recomputes from the setting each time',
+  ratingOf('Hugh Highrated') === cfg.elo_seed_bottom + 80);
 
 console.log('\nONE WIN JOINS THE RANKED LADDER');
 const beforeWin = ratingOf('Nia Newcomer');
