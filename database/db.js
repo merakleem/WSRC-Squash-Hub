@@ -149,125 +149,134 @@ function initDB(dbPath) {
     }
 
     db.pragma('foreign_keys = OFF');
-    db.exec(`
-      CREATE TABLE matches_new (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    // One transaction, because this is the only migration that drops a table
+    // it cannot rebuild. A container restart between the DROP and the RENAME
+    // would otherwise leave a database with no matches table at all; SQLite
+    // rolls DDL back like anything else, so a killed boot now changes nothing
+    // and the next boot starts over. The pragma stays outside: SQLite ignores
+    // a foreign_keys change while a transaction is open.
+    const consolidateMatches = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE matches_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-        -- what kind of match, and where it is in its life
-        type   TEXT NOT NULL DEFAULT 'league',      -- league | ladder | tournament
-        status TEXT NOT NULL DEFAULT 'unscheduled', -- unscheduled | scheduled | played
+          -- what kind of match, and where it is in its life
+          type   TEXT NOT NULL DEFAULT 'league',      -- league | ladder | tournament
+          status TEXT NOT NULL DEFAULT 'unscheduled', -- unscheduled | scheduled | played
 
-        -- who played. Nullable: a tournament bracket holds slots before it
-        -- knows who fills them.
-        player1_id INTEGER,
-        player2_id INTEGER,
+          -- who played. Nullable: a tournament bracket holds slots before it
+          -- knows who fills them.
+          player1_id INTEGER,
+          player2_id INTEGER,
 
-        -- games won, plus the per-game detail tournaments record
-        player1_score INTEGER,
-        player2_score INTEGER,
-        scores TEXT,
-        winner_id INTEGER,
+          -- games won, plus the per-game detail tournaments record
+          player1_score INTEGER,
+          player2_score INTEGER,
+          scores TEXT,
+          winner_id INTEGER,
 
-        -- when it is due to be played, and where
-        scheduled_date TEXT,
-        scheduled_time TEXT,
-        court_id INTEGER,
-        court_number INTEGER,
+          -- when it is due to be played, and where
+          scheduled_date TEXT,
+          scheduled_time TEXT,
+          court_id INTEGER,
+          court_number INTEGER,
 
-        -- when it was actually played, and who reported it. played_at is the
-        -- editable truth; confirmed_at records when the score was entered.
-        played_at TEXT,
-        confirmed_at TEXT,
-        submitted_by_player_id INTEGER,
+          -- when it was actually played, and who reported it. played_at is the
+          -- editable truth; confirmed_at records when the score was entered.
+          played_at TEXT,
+          confirmed_at TEXT,
+          submitted_by_player_id INTEGER,
 
-        -- league context
-        league_id INTEGER,
-        week_id INTEGER,
-        matchup_id INTEGER,
-        division_id INTEGER,
+          -- league context
+          league_id INTEGER,
+          week_id INTEGER,
+          matchup_id INTEGER,
+          division_id INTEGER,
 
-        -- tournament context
-        tournament_id INTEGER,
-        round TEXT,
-        bracket_slot TEXT,
-        tournament_group_id INTEGER,
+          -- tournament context
+          tournament_id INTEGER,
+          round TEXT,
+          bracket_slot TEXT,
+          tournament_group_id INTEGER,
 
-        skipped INTEGER NOT NULL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          skipped INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-        FOREIGN KEY (player1_id)   REFERENCES players(id),
-        FOREIGN KEY (player2_id)   REFERENCES players(id),
-        FOREIGN KEY (winner_id)    REFERENCES players(id),
-        FOREIGN KEY (court_id)     REFERENCES courts(id),
-        FOREIGN KEY (matchup_id)   REFERENCES team_matchups(id) ON DELETE CASCADE,
-        FOREIGN KEY (division_id)  REFERENCES divisions(id),
-        FOREIGN KEY (week_id)      REFERENCES weeks(id) ON DELETE CASCADE,
-        FOREIGN KEY (league_id)    REFERENCES leagues(id) ON DELETE CASCADE,
-        FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
-      );
-    `);
+          FOREIGN KEY (player1_id)   REFERENCES players(id),
+          FOREIGN KEY (player2_id)   REFERENCES players(id),
+          FOREIGN KEY (winner_id)    REFERENCES players(id),
+          FOREIGN KEY (court_id)     REFERENCES courts(id),
+          FOREIGN KEY (matchup_id)   REFERENCES team_matchups(id) ON DELETE CASCADE,
+          FOREIGN KEY (division_id)  REFERENCES divisions(id),
+          FOREIGN KEY (week_id)      REFERENCES weeks(id) ON DELETE CASCADE,
+          FOREIGN KEY (league_id)    REFERENCES leagues(id) ON DELETE CASCADE,
+          FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
+        );
+      `);
 
-    // --- league rows, ids preserved -------------------------------------
-    // status: scored means played; otherwise it is scheduled only once it has
-    // a court and a time, which is exactly what puts it on the live schedule.
-    // played_at reproduces what every query already computed for a league
-    // match's date: its confirmation time, falling back to the week's date.
-    db.exec(`
-      INSERT INTO matches_new (
-        id, type, status, player1_id, player2_id, player1_score, player2_score, winner_id,
-        scheduled_date, scheduled_time, court_id, court_number,
-        played_at, confirmed_at, submitted_by_player_id,
-        league_id, week_id, matchup_id, division_id, skipped
-      )
-      SELECT m.id, 'league',
-        CASE WHEN m.player1_score IS NOT NULL THEN 'played'
-             WHEN m.court_id IS NOT NULL AND m.match_time IS NOT NULL THEN 'scheduled'
-             ELSE 'unscheduled' END,
-        m.player1_id, m.player2_id, m.player1_score, m.player2_score, m.winner_id,
-        w.date, m.match_time, m.court_id, m.court_number,
-        CASE WHEN m.player1_score IS NOT NULL THEN COALESCE(m.confirmed_at, w.date) END,
-        m.confirmed_at, m.submitted_by_player_id,
-        w.league_id, tm.week_id, m.matchup_id, m.division_id, COALESCE(m.skipped, 0)
-      FROM matches m
-      JOIN team_matchups tm ON tm.id = m.matchup_id
-      JOIN weeks w          ON w.id  = tm.week_id;
-    `);
+      // --- league rows, ids preserved -------------------------------------
+      // status: scored means played; otherwise it is scheduled only once it has
+      // a court and a time, which is exactly what puts it on the live schedule.
+      // played_at reproduces what every query already computed for a league
+      // match's date: its confirmation time, falling back to the week's date.
+      db.exec(`
+        INSERT INTO matches_new (
+          id, type, status, player1_id, player2_id, player1_score, player2_score, winner_id,
+          scheduled_date, scheduled_time, court_id, court_number,
+          played_at, confirmed_at, submitted_by_player_id,
+          league_id, week_id, matchup_id, division_id, skipped
+        )
+        SELECT m.id, 'league',
+          CASE WHEN m.player1_score IS NOT NULL THEN 'played'
+               WHEN m.court_id IS NOT NULL AND m.match_time IS NOT NULL THEN 'scheduled'
+               ELSE 'unscheduled' END,
+          m.player1_id, m.player2_id, m.player1_score, m.player2_score, m.winner_id,
+          w.date, m.match_time, m.court_id, m.court_number,
+          CASE WHEN m.player1_score IS NOT NULL THEN COALESCE(m.confirmed_at, w.date) END,
+          m.confirmed_at, m.submitted_by_player_id,
+          w.league_id, tm.week_id, m.matchup_id, m.division_id, COALESCE(m.skipped, 0)
+        FROM matches m
+        JOIN team_matchups tm ON tm.id = m.matchup_id
+        JOIN weeks w          ON w.id  = tm.week_id;
+      `);
 
-    // --- ladder rows ------------------------------------------------------
-    // A ladder match is only ever recorded after it has been played.
-    if (hasTable('pickup_matches')) db.exec(`
-      INSERT INTO matches_new (
-        type, status, player1_id, player2_id, player1_score, player2_score, winner_id,
-        played_at, confirmed_at, submitted_by_player_id
-      )
-      SELECT 'ladder', 'played', player1_id, player2_id, player1_score, player2_score, winner_id,
-        played_at, played_at, submitted_by_player_id
-      FROM pickup_matches ORDER BY id;
-    `);
+      // --- ladder rows ------------------------------------------------------
+      // A ladder match is only ever recorded after it has been played.
+      if (hasTable('pickup_matches')) db.exec(`
+        INSERT INTO matches_new (
+          type, status, player1_id, player2_id, player1_score, player2_score, winner_id,
+          played_at, confirmed_at, submitted_by_player_id
+        )
+        SELECT 'ladder', 'played', player1_id, player2_id, player1_score, player2_score, winner_id,
+          played_at, played_at, submitted_by_player_id
+        FROM pickup_matches ORDER BY id;
+      `);
 
-    // --- tournament rows --------------------------------------------------
-    // Tournaments keep their per-game text in `scores`; a winner is what marks
-    // one as played.
-    if (hasTable('tournament_matches')) db.exec(`
-      INSERT INTO matches_new (
-        type, status, player1_id, player2_id, scores, winner_id,
-        scheduled_date, scheduled_time, court_id, played_at, confirmed_at,
-        tournament_id, round, bracket_slot, tournament_group_id
-      )
-      SELECT 'tournament',
-        CASE WHEN winner_id IS NOT NULL THEN 'played'
-             WHEN court_id IS NOT NULL AND match_time IS NOT NULL THEN 'scheduled'
-             ELSE 'unscheduled' END,
-        player1_id, player2_id, scores, winner_id,
-        match_date, match_time, court_id,
-        CASE WHEN winner_id IS NOT NULL THEN COALESCE(confirmed_at, match_date) END,
-        confirmed_at, tournament_id, round, bracket_slot, group_id
-      FROM tournament_matches ORDER BY id;
-    `);
+      // --- tournament rows --------------------------------------------------
+      // Tournaments keep their per-game text in `scores`; a winner is what marks
+      // one as played.
+      if (hasTable('tournament_matches')) db.exec(`
+        INSERT INTO matches_new (
+          type, status, player1_id, player2_id, scores, winner_id,
+          scheduled_date, scheduled_time, court_id, played_at, confirmed_at,
+          tournament_id, round, bracket_slot, tournament_group_id
+        )
+        SELECT 'tournament',
+          CASE WHEN winner_id IS NOT NULL THEN 'played'
+               WHEN court_id IS NOT NULL AND match_time IS NOT NULL THEN 'scheduled'
+               ELSE 'unscheduled' END,
+          player1_id, player2_id, scores, winner_id,
+          match_date, match_time, court_id,
+          CASE WHEN winner_id IS NOT NULL THEN COALESCE(confirmed_at, match_date) END,
+          confirmed_at, tournament_id, round, bracket_slot, group_id
+        FROM tournament_matches ORDER BY id;
+      `);
 
-    db.exec(`DROP TABLE matches; ALTER TABLE matches_new RENAME TO matches;`);
-    if (hasTable('tournament_matches')) db.exec(`DROP TABLE tournament_matches;`);
-    if (hasTable('pickup_matches'))     db.exec(`DROP TABLE pickup_matches;`);
+      db.exec(`DROP TABLE matches; ALTER TABLE matches_new RENAME TO matches;`);
+      if (hasTable('tournament_matches')) db.exec(`DROP TABLE tournament_matches;`);
+      if (hasTable('pickup_matches'))     db.exec(`DROP TABLE pickup_matches;`);
+    });
+    consolidateMatches();
     db.pragma('foreign_keys = ON');
   }
 
