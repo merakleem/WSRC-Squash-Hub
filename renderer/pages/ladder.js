@@ -318,15 +318,11 @@ export async function renderLadder() {
     modal.open('How the Ladder Works', isElo ? `
       <div class="info-modal-section">
         <h4>Play a match to get ranked</h4>
-        <p>The ladder is everyone who has played. Until you play your first match you're unranked, and every match after that moves you: you gain rating points for a win and lose them for a defeat. The winner gains exactly what the loser gives up, so the ladder never inflates.</p>
+        <p>Record your first match to join the ladder. Starting positions are carried over from last season's results. New members' starting positions are based on their Club Locker rating.</p>
       </div>
       <div class="info-modal-section">
         <h4>Who you beat matters</h4>
         <p>Beating someone rated well above you is worth a lot. Beating someone well below you is worth very little, and losing to them costs you a lot. Evenly matched games move both players by a moderate amount either way.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Starting rating</h4>
-        <p>Players carried over from the previous season started at a rating based on where they finished it. New members start from their Club Locker rating.</p>
       </div>` : `
       <div class="info-modal-section">
         <h4>Starting positions</h4>
