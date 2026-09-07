@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}
+iframe{position:absolute;top:0;left:0;border:0;visibility:hidden}</style>
+</head>
+<body>
+<pre id="log"></pre>
+<script type="module">
+// The league page is styled by the lg- block, but its markup reuses classes
+// (.match-row, .matchup-block, .std-container, .score-display) that older pages
+// styled first. Those rules still reach these elements for every property the
+// lg- rules do not name, which is what made the rendered page disagree with the
+// design. These checks pin both halves: that nothing legacy paints an lg-
+// element, and that the mobile layout is the one the design asks for.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+
+function frame(width, as) {
+  return new Promise((resolve) => {
+    const f = document.createElement('iframe');
+    f.width = width; f.height = 1400;
+    f.src = `league-detail-frame.html?as=${as}`;
+    f.onload = () => {
+      const tick = () => (f.contentWindow.__ready ? resolve(f) : setTimeout(tick, 25));
+      tick();
+    };
+    document.body.appendChild(f);
+  });
+}
+const css = (w, sel, prop) => {
+  const el = w.document.querySelector(sel);
+  return el ? w.getComputedStyle(el)[prop] : null;
+};
+const TRANSPARENT = (v) => v === 'rgba(0, 0, 0, 0)' || v === 'transparent';
+
+// ===== no legacy rule reaches an lg- element =====
+const mob = await frame(390, 'player');
+const desk = await frame(1280, 'player');
+const admin = await frame(390, 'admin');
+
+for (const [label, f] of [['mobile', mob], ['desktop', desk]]) {
+  const w = f.contentWindow;
+  log.textContent += `\nNO LEGACY STYLING LEAKS IN (${label})\n`;
+  ok('the score is plain text, not a bordered pill',
+    TRANSPARENT(css(w, '.lg-match .score-display', 'backgroundColor'))
+    && css(w, '.lg-match .score-display', 'borderTopWidth') === '0px'
+    && css(w, '.lg-match .score-display', 'minWidth') === '0px',
+    css(w, '.lg-match .score-display', 'backgroundColor'));
+  ok('a division group has no box around it',
+    css(w, '.matchup-block.lg-group', 'borderLeftWidth') === '0px'
+    && css(w, '.matchup-block.lg-group', 'borderRightWidth') === '0px');
+  ok('its label is bare text, not a grey title bar',
+    TRANSPARENT(css(w, '.matchup-title.lg-group-title', 'backgroundColor'))
+    && css(w, '.matchup-title.lg-group-title', 'paddingTop') === '0px'
+    && css(w, '.matchup-title.lg-group-title', 'borderBottomWidth') === '0px');
+  ok('the court label is muted and normal weight, not small bold blue',
+    css(w, '.lg-match .match-court-label', 'color') === 'rgb(107, 126, 147)'
+    && css(w, '.lg-match .match-court-label', 'fontWeight') === '400'
+    && css(w, '.lg-match .match-court-label', 'textDecorationLine') === 'none',
+    css(w, '.lg-match .match-court-label', 'fontWeight'));
+  // Saving a score adds .winner before the row is repainted as scored, and the
+  // legacy rule turned the name green in exactly that gap. Reproduced here by
+  // taking the scored class off a row that keeps its winner.
+  ok('a winner is never green, even mid-save', (() => {
+    const row = w.document.querySelector('.lg-match.lg-match-scored');
+    row.classList.remove('lg-match-scored');
+    const c = w.getComputedStyle(row.querySelector('.match-player.winner')).color;
+    row.classList.add('lg-match-scored');
+    return c === 'rgb(28, 43, 58)';
+  })());
+  ok('names are not flex boxes, so long ones can ellipsize',
+    css(w, '.lg-match .match-p1', 'textAlign') === 'left');
+  ok('the score reads 3-1 with an en dash and no spaces',
+    /^\d–\d$/.test(w.document.querySelector('.lg-match .score-display')?.textContent || ''),
+    w.document.querySelector('.lg-match .score-display')?.textContent);
+  ok('nothing overflows the viewport sideways',
+    w.document.documentElement.scrollWidth <= w.document.documentElement.clientWidth,
+    `${w.document.documentElement.scrollWidth} > ${w.document.documentElement.clientWidth}`);
+}
+
+// ===== mobile is the design's layout, not the desktop one squeezed =====
+{
+  const w = mob.contentWindow;
+  log.textContent += '\nMOBILE LAYOUT\n';
+  ok('the tab bar stops being a box, so its halves separate',
+    css(w, '.lg-tabbar', 'display') === 'contents');
+  ok('the tabs get their own card',
+    css(w, '.lg-tabs', 'backgroundColor') === 'rgb(255, 255, 255)'
+    && css(w, '.lg-tabs', 'borderTopWidth') === '1px');
+  ok('the division pills are a row of their own, not inside that card',
+    w.document.querySelector('.lg-pills')?.getBoundingClientRect().top
+      >= w.document.querySelector('.lg-tabs')?.getBoundingClientRect().bottom,
+    `pills ${Math.round(w.document.querySelector('.lg-pills')?.getBoundingClientRect().top)} vs tabs ${Math.round(w.document.querySelector('.lg-tabs')?.getBoundingClientRect().bottom)}`);
+  ok('and they scroll rather than wrapping the row taller',
+    css(w, '.lg-pills', 'flexWrap') === 'nowrap');
+  ok('a week header lays out as a grid, so its date never wraps alone',
+    css(w, '.lg-week-header', 'display') === 'grid');
+  ok('the week number and the date sit on separate lines', (() => {
+    const n = w.document.querySelector('.lg-week-num').getBoundingClientRect();
+    const d = w.document.querySelector('.lg-week-date').getBoundingClientRect();
+    return d.top >= n.bottom - 2;
+  })());
+  ok('with the chevron beside both, not wrapped below', (() => {
+    const c = w.document.querySelector('.lg-week .week-chevron').getBoundingClientRect();
+    const d = w.document.querySelector('.lg-week-date').getBoundingClientRect();
+    return c.left > d.right;
+  })());
+  ok('a match becomes a stacked card', css(w, '.match-row.lg-match', 'display') === 'grid');
+  ok('with the names on their own line under the time', (() => {
+    const t = w.document.querySelector('.lg-match .match-court-label').getBoundingClientRect();
+    const p = w.document.querySelector('.lg-match .lg-players').getBoundingClientRect();
+    return p.top >= t.bottom - 2;
+  })());
+  ok('and the score opposite the time, not below it', (() => {
+    const t = w.document.querySelector('.lg-match .match-court-label').getBoundingClientRect();
+    const a = w.document.querySelector('.lg-match .match-actions').getBoundingClientRect();
+    return Math.abs(a.top - t.top) < 12 && a.left > t.left;
+  })());
+}
+
+// ===== an admin's controls need a line of their own =====
+{
+  const w = admin.contentWindow;
+  log.textContent += '\nMOBILE, AS AN ADMIN\n';
+  ok('the Players tab says it is admin-only',
+    /ADMIN/.test(w.document.querySelector('[data-lg-tab="players"]')?.textContent || ''));
+  ok('score controls drop below the names rather than crushing them', (() => {
+    const p = w.document.querySelector('.lg-match .lg-players').getBoundingClientRect();
+    const a = w.document.querySelector('.lg-match .match-actions').getBoundingClientRect();
+    return a.top >= p.bottom - 2;
+  })());
+  ok('nothing overflows sideways with them there',
+    w.document.documentElement.scrollWidth <= w.document.documentElement.clientWidth,
+    `${w.document.documentElement.scrollWidth} > ${w.document.documentElement.clientWidth}`);
+}
+
+// ===== desktop keeps the layout it already had =====
+{
+  const w = desk.contentWindow;
+  log.textContent += '\nDESKTOP IS UNCHANGED\n';
+  ok('the tab bar is still one bar', css(w, '.lg-tabbar', 'display') === 'flex');
+  ok('with the pills inside it',
+    w.document.querySelector('.lg-pills')?.parentElement?.classList.contains('lg-tabbar'));
+  ok('and a match is still one row', css(w, '.match-row.lg-match', 'display') === 'flex');
+}
+
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+</script>
+</body>
+</html>
