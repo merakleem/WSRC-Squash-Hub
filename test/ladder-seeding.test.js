@@ -41,12 +41,20 @@ ok('the pivot rating comes in at the middle of the ladder',
   seed({ unplayed: true, clubLockerRating: P }) === cfg.elo_base_rating);
 ok('a rating below the pivot comes in below the middle',
   seed({ unplayed: true, clubLockerRating: P - 1 }) === cfg.elo_base_rating - S);
-ok('an unrated player comes in at the middle, having nothing to estimate from',
-  seed({ unplayed: true, clubLockerRating: null }) === cfg.elo_base_rating);
+// No rating is not the same as an average rating: it is no information, and the
+// foot of the ladder is where that belongs.
+ok('an unrated player comes in at the foot, not the middle',
+  seed({ unplayed: true, clubLockerRating: null }) === cfg.elo_seed_bottom,
+  String(seed({ unplayed: true, clubLockerRating: null })));
+ok('which is below where the weakest rated newcomer would come in',
+  seed({ unplayed: true, clubLockerRating: null }) < seed({ unplayed: true, clubLockerRating: 2.5 }),
+  `${seed({ unplayed: true, clubLockerRating: null })} vs ${seed({ unplayed: true, clubLockerRating: 2.5 })}`);
+ok('an empty rating counts as unrated, not as a zero',
+  seed({ unplayed: true, clubLockerRating: '' }) === cfg.elo_seed_bottom);
 ok('a nonsense rating is treated as unrated',
-  seed({ unplayed: true, clubLockerRating: 'abc' }) === cfg.elo_base_rating);
+  seed({ unplayed: true, clubLockerRating: 'abc' }) === cfg.elo_seed_bottom);
 ok('a position cannot seed someone who has not played',
-  seed({ previousPosition: 1, ladderSize: 10, unplayed: true, clubLockerRating: null }) === cfg.elo_base_rating);
+  seed({ previousPosition: 1, ladderSize: 10, unplayed: true, clubLockerRating: null }) === cfg.elo_seed_bottom);
 
 console.log('\nBOTH NUMBERS ARE SETTINGS');
 ok('the pivot is overridable', elo.config({ elo_club_locker_pivot: '4' }).elo_club_locker_pivot === 4);
@@ -111,7 +119,7 @@ ok('and a strong newcomer enters near the top, as the rating implied',
 
 console.log('\nTHE SETTINGS MOVE THE ENTRY POINT');
 set({ elo_club_locker_scale: 0 });
-ok('with no scale every rating enters at the middle',
+ok('with no scale every rated player enters at the middle',
   ratingOf('Nia Newcomer') === cfg.elo_base_rating, String(ratingOf('Nia Newcomer')));
 set({ elo_club_locker_scale: 400 });
 ok('a bigger scale spreads new players further apart',
