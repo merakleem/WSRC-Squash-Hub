@@ -6,6 +6,7 @@ const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
 const { sendBatch, isConfigured: emailConfigured, appUrl } = require('../lib/email');
+const { clubToday } = require('../lib/clock');
 const sanitizeHtml = require('sanitize-html');
 
 const router = express.Router();
@@ -30,10 +31,50 @@ router.get('/leagues', wrap(async (req, res) => {
   `).all();
   const countMap = {};
   for (const row of matchCounts) countMap[row.league_id] = row;
+
+  // Week progress, for the card's segmented bar. One grouped query rather than
+  // one per league. "Elapsed" is measured against the club's today, not SQLite's
+  // UTC now, so an evening viewer in Winnipeg doesn't see the week tick over a
+  // day early.
+  const weekRows = db.prepare(`
+    SELECT w.league_id,
+           COUNT(*) AS total_weeks,
+           SUM(CASE WHEN w.date < @today THEN 1 ELSE 0 END) AS weeks_elapsed,
+           MAX(w.date) AS last_week_date
+    FROM weeks w
+    GROUP BY w.league_id
+  `).all({ today: clubToday() });
+  const weekMap = {};
+  for (const row of weekRows) weekMap[row.league_id] = row;
+
+  // The signed-in player's own division, for the "You · Division 2" chip. Only
+  // ever their own row: nobody else's placement is sent to a client, and this
+  // is the whole list in one query rather than a fetch per card.
+  const myDivision = {};
+  const playerId = req.session?.playerId;
+  if (playerId) {
+    const rows = db.prepare(`
+      SELECT lp.league_id, d.level
+      FROM league_players lp
+      JOIN divisions d ON d.id = lp.division_id
+      WHERE lp.player_id = ?
+    `).all(playerId);
+    for (const row of rows) myDivision[row.league_id] = row.level;
+  }
+
   res.json(leagues.map((l) => {
     const counts = countMap[l.id];
     const status = counts && counts.total > 0 && counts.done === counts.total ? 'completed' : 'active';
-    return { ...l, player_ids: memberMap[l.id] || [], status };
+    const weeks = weekMap[l.id];
+    return {
+      ...l,
+      player_ids: memberMap[l.id] || [],
+      status,
+      total_weeks: weeks?.total_weeks || 0,
+      weeks_elapsed: weeks?.weeks_elapsed || 0,
+      last_week_date: weeks?.last_week_date || null,
+      my_division_level: myDivision[l.id] ?? null,
+    };
   }));
 }));
 

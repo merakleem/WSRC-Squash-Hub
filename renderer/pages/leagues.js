@@ -3,18 +3,37 @@ import { esc, formatShortDate, toast, modal } from '../utils.js';
 import { startCreateLeague } from './createLeague.js';
 
 // ===== LEAGUES PAGE =====
+
+// The filter pills are page-local and deliberately not persisted: coming back
+// to Leagues always starts on All, so nothing is ever hidden by a choice made
+// in a previous visit.
+let _filter = 'all';
+
+const CAL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
+const PEOPLE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+  <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
+
 export async function renderLeagues() {
-  document.getElementById('pageTitle').textContent = 'Leagues';
   document.getElementById('topbarActions').innerHTML = isAdmin() ? `
     <button class="btn btn-primary" id="btnCreateLeague">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-      New League
+      <span class="lgl-new-long">New League</span><span class="lgl-new-short">New</span>
     </button>` : '';
 
   state.leagues = await window.api.getLeagues();
   const content = document.getElementById('mainContent');
 
+  const activeCount = state.leagues.filter((l) => l.status === 'active').length;
+  const doneCount = state.leagues.length - activeCount;
+  document.getElementById('pageTitle').innerHTML = state.leagues.length === 0
+    ? 'Leagues'
+    : `Leagues <span class="lgl-count">${activeCount} active &middot; ${doneCount} completed</span>`;
+
   if (state.leagues.length === 0) {
+    // The club has no leagues at all, which is a different message from a
+    // filter that happens to match nothing.
     content.innerHTML = `
       <div class="table-card">
         <div class="empty-state">
@@ -22,63 +41,179 @@ export async function renderLeagues() {
           <p>${isAdmin() ? 'Create your first league to get started.' : 'No leagues have been created yet.'}</p>
         </div>
       </div>`;
-  } else if (isAdmin()) {
-    content.innerHTML = `<div class="league-grid">${state.leagues.map(leagueCardHTML).join('')}</div>`;
   } else {
-    const playerId = state.currentUser?.playerId;
-    const mine = state.leagues.filter((l) => (l.player_ids || []).includes(playerId));
-    const other = state.leagues.filter((l) => !(l.player_ids || []).includes(playerId));
-    let html = '';
-    if (mine.length > 0) {
-      html += `<div class="leagues-section-label">My Leagues</div><div class="league-grid">${mine.map(leagueCardHTML).join('')}</div>`;
-    }
-    if (other.length > 0) {
-      html += `<div class="leagues-section-label${mine.length > 0 ? ' leagues-section-label--gap' : ''}">Other Leagues</div><div class="league-grid">${other.map(leagueCardHTML).join('')}</div>`;
-    }
-    content.innerHTML = html;
+    content.innerHTML = `
+      <div class="lgl-page">
+        <div class="lgl-filters" id="lglFilters">${_filtersHTML()}</div>
+        <div class="lgl-groups" id="lglGroups">${_groupsHTML()}</div>
+      </div>`;
+    _wireFilters();
+    _wireCards();
   }
-
-  content.querySelectorAll('[data-action="view"]').forEach((btn) => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); openLeague(Number(btn.dataset.id)); });
-  });
-  content.querySelectorAll('.league-card').forEach((card) => {
-    card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
-  });
 
   if (isAdmin()) {
     document.getElementById('btnCreateLeague')?.addEventListener('click', startCreateLeague);
   }
 }
 
+const FILTERS = [['all', 'All'], ['active', 'Active'], ['completed', 'Completed']];
+
+function _filtersHTML() {
+  return FILTERS.map(([key, label]) =>
+    `<button class="lgl-pill${key === _filter ? ' lgl-pill--on' : ''}" data-filter="${key}"
+       aria-pressed="${key === _filter}">${label}</button>`).join('');
+}
+
+/**
+ * The grid, grouped and filtered.
+ *
+ * Admins see Active / Completed; a player sees My Leagues / Other Leagues, the
+ * same split as before. Empty groups are dropped, so a filter narrows the page
+ * to the headings that still have cards under them.
+ */
+function _groupsHTML() {
+  const shown = state.leagues.filter((l) => _filter === 'all' || l.status === _filter);
+
+  const playerId = state.currentUser?.playerId;
+  const groups = isAdmin()
+    ? [['Active', shown.filter((l) => l.status === 'active')],
+       ['Completed', shown.filter((l) => l.status === 'completed')]]
+    : [['My Leagues', shown.filter((l) => (l.player_ids || []).includes(playerId))],
+       ['Other Leagues', shown.filter((l) => !(l.player_ids || []).includes(playerId))]];
+
+  const withCards = groups.filter(([, items]) => items.length > 0);
+  if (withCards.length === 0) {
+    return `
+      <div class="lgl-empty">
+        <strong>No leagues here</strong>
+        <span>Nothing matches this filter.</span>
+      </div>`;
+  }
+
+  return withCards.map(([label, items]) => `
+    <section class="lgl-group">
+      <div class="lgl-group-head">
+        <span class="lgl-group-label">${label}</span>
+        <span class="lgl-group-count">${items.length}</span>
+        <span class="lgl-group-rule"></span>
+      </div>
+      <div class="lgl-grid">${items.map(leagueCardHTML).join('')}</div>
+    </section>`).join('');
+}
+
+// Dates are read at local noon so a date-only string can't slide into the
+// previous day in a timezone behind UTC - the same trick formatShortDate uses.
+function _atNoon(dateStr) {
+  return dateStr ? new Date(`${String(dateStr).slice(0, 10)}T12:00:00`) : null;
+}
+
+/** "Wednesdays" - the day of the week a league is played on, from its start. */
+function _weekdayName(dateStr) {
+  const d = _atNoon(dateStr);
+  return d ? `${d.toLocaleDateString('en-US', { weekday: 'long' })}s` : '';
+}
+
+/** "Sep 9" - month and day only, for the week range where the year is implied. */
+function _monthDay(dateStr) {
+  const d = _atNoon(dateStr);
+  return d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+}
+
 function leagueCardHTML(league) {
+  const done = league.status === 'completed';
+  const playerId = state.currentUser?.playerId;
+  const mine = !isAdmin() && playerId != null && (league.player_ids || []).includes(playerId);
+
+  const structure = league.setup_type === 'modern'
+    ? `${league.num_divisions} division${league.num_divisions !== 1 ? 's' : ''} &middot; ${(league.player_ids || []).length} players`
+    : `${league.num_teams} teams &middot; ${league.num_divisions} divisions &middot; ${league.num_teams * league.num_divisions} players`;
+
+  const weekday = _weekdayName(league.start_date);
+  const dateLine = `${done ? 'Ran from' : 'Started'} ${formatShortDate(league.start_date)}${weekday ? ` &middot; ${weekday}` : ''}`;
+
+  const totalWeeks = Number(league.total_weeks) || 0;
+  const elapsed = Number(league.weeks_elapsed) || 0;
+
+  // A league with no weeks scheduled yet has nothing to chart, so the block is
+  // dropped and the body simply ends on the meta lines.
+  let progressHTML = '';
+  if (totalWeeks > 0) {
+    // Clamped so a league whose last week has passed but which nothing has
+    // marked completed reads "Week 10 of 10" rather than "Week 11 of 10".
+    const current = Math.min(elapsed, totalWeeks - 1);
+    const ticks = Array.from({ length: totalWeeks }, (_, i) => {
+      const mod = done || i < elapsed ? ' lgl-tick--past' : i === current ? ' lgl-tick--now' : '';
+      return `<span class="lgl-tick${mod}"></span>`;
+    }).join('');
+    progressHTML = `
+      <div class="lgl-progress">
+        <div class="lgl-progress-head">
+          <span class="lgl-week${done ? ' lgl-week--done' : ''}">${done ? 'Finished' : `Week ${current + 1} of ${totalWeeks}`}</span>
+          <span class="lgl-progress-right">
+            <span class="lgl-range">${_monthDay(league.start_date)} &ndash; ${_monthDay(league.last_week_date)}</span>
+            <span class="lgl-foot-m">${_footNoteHTML(league, mine, totalWeeks)}</span>
+          </span>
+        </div>
+        <div class="lgl-bar">${ticks}</div>
+      </div>`;
+  }
+
   return `
-    <div class="league-card" data-id="${league.id}">
-      <div class="league-card-header">
-        <h3>${esc(league.name)}</h3>
-        <span class="badge badge-${league.status}">${esc(league.status)}</span>
-      </div>
-      <div class="league-card-meta">
-        <div class="meta-row">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-          </svg>
-          Starts ${formatShortDate(league.start_date)}
+    <div class="lgl-card${done ? ' lgl-card--done' : ''}" data-id="${league.id}">
+      <div class="lgl-body">
+        <div class="lgl-card-head">
+          <h3 class="lgl-name">${esc(league.name)}</h3>
+          <span class="lgl-status lgl-status--${done ? 'done' : 'active'}">${done ? 'Completed' : 'Active'}</span>
         </div>
-        <div class="meta-row">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-          ${league.setup_type === 'modern'
-            ? `${league.num_divisions} Division${league.num_divisions !== 1 ? 's' : ''}`
-            : `${league.num_teams} teams &times; ${league.num_divisions} divisions &middot; ${league.num_teams * league.num_divisions} players`}
+        <div class="lgl-meta">
+          <span class="lgl-meta-row">${CAL_ICON}${dateLine}</span>
+          <span class="lgl-meta-row">${PEOPLE_ICON}${structure}</span>
         </div>
+        ${progressHTML}
       </div>
-      <div class="league-card-footer">
-        <button class="btn btn-primary btn-sm" data-action="view" data-id="${league.id}">View League</button>
+      <div class="lgl-foot">
+        ${_footNoteHTML(league, mine, totalWeeks)}
+        <span class="lgl-view">View league <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
       </div>
     </div>`;
+}
+
+/**
+ * The small note on the left of the footer: which division you are in on your
+ * own leagues, otherwise how long the league runs.
+ *
+ * The division comes down with the list; when it doesn't, the chip still says
+ * you are in the league rather than firing a request per card.
+ */
+function _footNoteHTML(league, mine, totalWeeks) {
+  if (mine) {
+    return league.my_division_level != null
+      ? `<span class="lgl-chip">You &middot; Division ${league.my_division_level}</span>`
+      : `<span class="lgl-chip">You're in this league</span>`;
+  }
+  return totalWeeks > 0 ? `<span class="lgl-weeks">${totalWeeks} weeks</span>` : '<span></span>';
+}
+
+function _wireFilters() {
+  document.getElementById('lglFilters')?.querySelectorAll('[data-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.filter === _filter) return;
+      _filter = btn.dataset.filter;
+      // Only the pills and the grid depend on the filter, so the rest of the
+      // page - and the scroll position - is left alone.
+      document.getElementById('lglFilters').innerHTML = _filtersHTML();
+      document.getElementById('lglGroups').innerHTML = _groupsHTML();
+      _wireFilters();
+      _wireCards();
+    });
+  });
+}
+
+// The whole card is the click target; there are no buttons inside it.
+function _wireCards() {
+  document.getElementById('lglGroups')?.querySelectorAll('.lgl-card[data-id]').forEach((card) => {
+    card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
+  });
 }
 
 async function openLeague(id) {

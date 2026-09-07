@@ -636,6 +636,236 @@ tbody td {
   padding-top: 14px;
 }
 
+
+/* ===== LEAGUES LIST ===== */
+/* The Leagues index. Everything above under LEAGUE CARDS now belongs to the
+   Tournaments page, which shares those classes; this page owns lgl- only. */
+
+.lgl-page { display: flex; flex-direction: column; gap: 26px; }
+
+/* The count line beside the page title, e.g. "3 active · 2 completed". */
+.lgl-count {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 10px;
+  white-space: nowrap;
+}
+
+/* The New League button carries both a long and a short label; the mobile
+   topbar hides button text by default, so the short one is switched back on
+   there with an extra class to outrank that rule. */
+.lgl-new-short { display: none; }
+
+/* ── Filter pills ── */
+.lgl-filters { display: flex; align-items: center; gap: 8px; }
+.lgl-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: #4a5568;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.lgl-pill:hover { border-color: #b9c4d4; color: var(--text); }
+.lgl-pill--on,
+.lgl-pill--on:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* ── Groups ── */
+.lgl-groups { display: flex; flex-direction: column; gap: 26px; }
+.lgl-group { display: flex; flex-direction: column; gap: 14px; }
+.lgl-group-head { display: flex; align-items: center; gap: 10px; }
+.lgl-group-label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.lgl-group-count { font-size: 12px; color: #93a2b5; }
+.lgl-group-rule { flex: 1; height: 1px; background: #e2e6ee; }
+
+.lgl-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* ── Card ── */
+.lgl-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow 150ms ease, transform 150ms ease, border-color 150ms ease;
+}
+.lgl-card--done { opacity: .82; }
+/* Lift on pointer devices only: on a touch screen the hover state sticks after
+   a tap and the card stays raised. */
+@media (hover: hover) {
+  .lgl-card:hover {
+    box-shadow: 0 8px 24px rgba(20,30,60,.10);
+    border-color: var(--border);
+    transform: translateY(-1px);
+  }
+}
+
+.lgl-body { display: flex; flex-direction: column; gap: 14px; padding: 20px 20px 16px; flex: 1; }
+.lgl-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.lgl-name {
+  margin: 0;
+  font-family: 'Barlow', sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--primary);
+  text-wrap: pretty;
+}
+.lgl-card--done .lgl-name { color: #4a5568; }
+.lgl-status {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.lgl-status--active { background: #d5f5e3; color: #155e3a; }
+.lgl-status--done { background: #eef0f4; color: var(--text-muted); }
+
+.lgl-meta { display: flex; flex-direction: column; gap: 7px; font-size: 13px; color: var(--text-muted); }
+.lgl-meta-row { display: flex; align-items: center; gap: 8px; }
+.lgl-meta-row svg { width: 14px; height: 14px; flex-shrink: 0; color: #93a2b5; }
+
+/* ── Week progress ── */
+/* margin-top:auto pins the bar to the bottom of the body, so cards of unequal
+   name length still line their bars up across a row. */
+.lgl-progress { display: flex; flex-direction: column; gap: 6px; margin-top: auto; }
+.lgl-progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.lgl-week { font-weight: 600; color: var(--primary); }
+.lgl-week--done { color: var(--text-muted); }
+.lgl-foot-m { display: none; }
+.lgl-bar { display: flex; gap: 4px; }
+.lgl-tick { flex: 1; height: 6px; border-radius: 3px; background: #e2e6ee; }
+.lgl-tick--past { background: var(--win); }
+.lgl-tick--now { background: var(--accent); }
+
+/* ── Footer ── */
+.lgl-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--divider);
+  background: #fafbfd;
+}
+.lgl-chip {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #eaefff;
+  color: #3550c8;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.lgl-weeks { font-size: 11.5px; font-weight: 600; color: #93a2b5; }
+.lgl-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #3550c8;
+}
+.lgl-view svg { width: 13px; height: 13px; }
+
+/* ── A filter that matched nothing (distinct from having no leagues at all) ── */
+.lgl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 48px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  text-align: center;
+}
+.lgl-empty strong { font-family: 'Barlow', sans-serif; font-size: 17px; font-weight: 700; }
+.lgl-empty span { font-size: 13px; color: var(--text-muted); }
+
+@media (max-width: 1150px) {
+  .lgl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 768px) {
+  .topbar-actions .btn .lgl-new-long { display: none; }
+  .topbar-actions .btn .lgl-new-short { display: inline; }
+
+  .lgl-page,
+  .lgl-groups { gap: 20px; }
+  .lgl-group { gap: 10px; }
+  .lgl-group-head { gap: 8px; padding: 0 2px; }
+  .lgl-group-label { font-size: 11px; }
+  .lgl-group-count { font-size: 11.5px; }
+  .lgl-group-rule { display: none; }
+
+  .lgl-filters { gap: 6px; }
+  .lgl-pill { height: 32px; padding: 0 13px; font-size: 12.5px; }
+
+  /* minmax(0,...) rather than 1fr: a grid item's min-width is auto, so the
+     single wrapping meta line would otherwise push the card wider than the
+     screen and scroll the page sideways. */
+  .lgl-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .lgl-body { padding: 16px; gap: 12px; }
+  .lgl-name { font-size: 17px; }
+
+  /* The two meta lines run together as one wrapping sentence, without icons. */
+  .lgl-meta { display: block; font-size: 12.5px; }
+  .lgl-meta-row { display: inline; }
+  .lgl-meta-row svg { display: none; }
+  .lgl-meta-row:first-child::after { content: ' \00b7  '; }
+
+  /* The footer strip goes; its note moves up beside the week count, as plain
+     text rather than a chip. */
+  .lgl-progress-head { font-size: 11.5px; }
+  .lgl-range { display: none; }
+  .lgl-foot-m { display: inline; }
+  .lgl-foot-m .lgl-chip,
+  .lgl-foot-m .lgl-weeks {
+    padding: 0;
+    background: none;
+    color: inherit;
+    font-size: inherit;
+    font-weight: 600;
+  }
+  .lgl-bar { gap: 3px; }
+  .lgl-tick { height: 5px; }
+  .lgl-foot { display: none; }
+}
 /* ===== MODAL ===== */
 .modal-overlay {
   display: none;
