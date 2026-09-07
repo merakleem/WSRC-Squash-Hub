@@ -96,16 +96,23 @@ function getCompletedMatches(range = null) {
   return rows.sort((a, b) => (a.sort_key || '').localeCompare(b.sort_key || '') || 0);
 }
 
-/** Each player's most recent match day, for the ladder's inactivity rules. */
-function getLastMatchDates() {
+/**
+ * Each player's most recent match day, for the ladder's inactivity rule.
+ *
+ * `asOf` (YYYY-MM-DD) ignores anything played after that date, so a past
+ * season's ladder judges activity by what had happened at the time rather than
+ * by what has happened since.
+ */
+function getLastMatchDates(asOf = null) {
   const rows = getDB().prepare(`
     SELECT player_id, MAX(d) AS last_date FROM (
       SELECT ${EFF_P1} AS player_id, m.played_at AS d FROM matches m ${EFF_JOIN} WHERE ${COUNTS}
       UNION ALL
       SELECT ${EFF_P2},               m.played_at    FROM matches m ${EFF_JOIN} WHERE ${COUNTS}
     ) WHERE player_id IS NOT NULL AND d IS NOT NULL
+      ${asOf ? 'AND substr(d, 1, 10) <= @asOf' : ''}
     GROUP BY player_id
-  `).all();
+  `).all(asOf ? { asOf } : {});
   return Object.fromEntries(rows.map((r) => [r.player_id, String(r.last_date).slice(0, 10)]));
 }
 

@@ -334,40 +334,47 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
 
   const targetRange = seasonsLib.seasonRange(seasonKey, monthDay);
 
-  // Who appears at all: you need a match in the previous season, or one in this
-  // season. Sit out a whole season and you drop off the ladder; play a single
-  // game and you are back on it, at the rating you left with. Nothing decays,
-  // so a return is never punished beyond the time already missed.
-  const prevKey = monthDay === '01-01'
-    ? String(targetYear - 1)
-    : `${targetYear - 1}/${String(targetYear % 100).padStart(2, '0')}`;
-  const prevRange = seasonsLib.seasonRange(prevKey, monthDay);
-  const firstYear = seasonsLib.seasonStartYear(seasonModel.getFirstSeasonKey());
-  // The club's first rated season has no season before it to have played in, so
-  // nobody is hidden on the strength of a season that never existed.
-  const hasPreviousSeason = firstYear != null && targetYear - 1 >= firstYear;
+  // The point the standings are measured to: today for a live season, the
+  // season's own end for one that has finished. Both the inactivity cutoff and
+  // the movement comparison below read from here, so a past season is judged by
+  // where things stood then rather than by what has happened since.
+  const measuredAt = asOfDate
+    || (targetRange.end < new Date().toISOString().slice(0, 10)
+        ? targetRange.end
+        : new Date().toISOString().slice(0, 10));
 
-  const playedPrev = new Set();
-  if (hasPreviousSeason) {
-    for (const m of getCompletedMatches(prevRange)) {
-      playedPrev.add(m.eff_p1_id);
-      playedPrev.add(m.eff_p2_id);
-    }
+  // Who appears at all: you drop off the ladder once a full year has passed with
+  // no activity - a year since your last match, or since you joined if you have
+  // never played one. A single game puts you straight back on at the rating you
+  // left with; nothing decays, so a return is never punished beyond the time
+  // already missed.
+  //
+  // Measured against the later of the two dates, because a player row can be
+  // created after a result has already been entered for them.
+  const cutoff = _yearBefore(measuredAt);
+  const lastMatch = getLastMatchDates(measuredAt);
+  const lastActive = {};
+  for (const p of players) {
+    const joined = _joinDay(p, firstMatch);
+    const lastPlayed = lastMatch[p.id] || '';
+    lastActive[p.id] = joined > lastPlayed ? joined : lastPlayed;
   }
 
   const rows = [];
   for (const p of players) {
-    const activeThisSeason = (played[p.id] || 0) > 0;
-    const hidden = hasPreviousSeason && !activeThisSeason && !playedPrev.has(p.id);
+    // No date at all on either side means nothing is known about them; that is
+    // not evidence of a year away, so they stay on.
+    const seen = lastActive[p.id];
+    const hidden = !!seen && seen <= cutoff;
     if (hidden && !includeHidden) continue;
 
     rows.push({
       ...p,
       hidden_for_inactivity: hidden,
+      last_active: seen || null,
       rating: Math.round(ratings[p.id]),
       seed_rating: Math.round(seedsForTarget[p.id]),
       rating_change: Math.round(ratings[p.id] - seedsForTarget[p.id]),
-      returning: hasPreviousSeason && activeThisSeason && !playedPrev.has(p.id),
       matches_played: played[p.id] || 0,
       season_wins: wins[p.id] || 0,
       season_losses: losses[p.id] || 0,
@@ -383,12 +390,6 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
   // season's first week that means movement since it began, rather than no
   // movement at all, which is what comparing against a date before the season
   // existed used to produce.
-  // Measured to the same point the standings are: today for a live season,
-  // the season's own end for one that has finished.
-  const measuredAt = asOfDate
-    || (targetRange.end < new Date().toISOString().slice(0, 10)
-        ? targetRange.end
-        : new Date().toISOString().slice(0, 10));
   const weekAgo = _daysAgo(7);
   const since = weekAgo > targetRange.start ? weekAgo : targetRange.start;
   const priorPos = {};
@@ -423,6 +424,13 @@ function _dayBefore(iso) {
 
 function _daysAgo(n) {
   return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+}
+
+/** The same calendar date a year earlier, for the ladder's inactivity cutoff. */
+function _yearBefore(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /**
