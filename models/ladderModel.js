@@ -60,14 +60,18 @@ function _joinDay(player, firstMatchDates) {
 }
 
 /**
- * Where a player slots into a ranking on the day they join: immediately above
- * the highest-placed member rated below them, which is the same club_locker_rating
- * comparison that seeded the ladder originally.
+ * Where a player slots into a ranking on the day they join: below every member
+ * rated at least as highly as they are.
+ *
+ * Which is the whole rule, and it is meant to be sayable out loud - a member
+ * asking why they sit where they do should get an answer in one sentence. A
+ * lower-rated member who has climbed above that point keeps their place: they
+ * played for it.
  *
  * Unrated members are skipped rather than treated as the lowest rating. The
  * original seed could put them all at the bottom because nothing had been
  * played yet, but they climb like anyone else, and by now one of them sits at
- * #2. Counting that as "rated below" would drop every rated arrival straight
+ * #2. Treating that as "rated below" would drop every rated arrival straight
  * in beneath them, near the top of the ladder.
  *
  * An arriving player with no rating has nothing to compare on, so they start at
@@ -76,12 +80,22 @@ function _joinDay(player, firstMatchDates) {
 function _joinIndex(ranking, player, playerMap) {
   const rating = player.club_locker_rating;
   if (rating == null) return ranking.length;
-  for (let i = 0; i < ranking.length; i++) {
+
+  // Search from the bottom for the lowest-placed member rated at least as highly,
+  // and slot in underneath them.
+  //
+  // Scanning from the top instead - stopping at the first member rated below
+  // the arrival - looks equivalent but is not, because positions stop matching
+  // ratings as soon as matches are played. A 3.9 who has climbed to #35 would
+  // be the first member "rated below" a 4.2 arriving later, putting that
+  // arrival at #35 and so above every 4.4 who happens to sit further down. That
+  // is how a newcomer ended up over three higher-rated members without playing.
+  for (let i = ranking.length - 1; i >= 0; i--) {
     const otherRating = playerMap[ranking[i]]?.club_locker_rating;
     if (otherRating == null) continue;
-    if (Number(otherRating) < Number(rating)) return i;
+    if (Number(otherRating) >= Number(rating)) return i + 1;
   }
-  return ranking.length;
+  return 0;
 }
 
 /**

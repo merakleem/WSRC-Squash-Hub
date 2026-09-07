@@ -56,7 +56,7 @@ ok('a blank setting falls back to the default',
 
 console.log('\nON A LADDER');
 // A club with a season of history, then two arrivals who have played nothing:
-// one rated the same as an established player, one rated well above.
+// one rated mid-table, one rated above everybody.
 set({ season_start_md: '09-01' });
 const add = (id, name, rating, created) =>
   db.prepare('INSERT INTO players (id,name,club_locker_rating,created_at) VALUES (?,?,?,?)')
@@ -73,8 +73,13 @@ for (const day of ['10-02', '10-09', '10-16', '11-06', '11-13']) {
   match(1, 2, `2025-${day}`);
   match(3, 2, `2025-${day}`);
 }
+// A proven player rated below the newcomers, so a heavy penalty has somewhere
+// to push them.
+add(6, 'Lou Low', 3.4, '2025-09-02');
+match(6, 2, '2025-11-20');
+
 // Two newcomers arrive before the rating era opens on 2026-09-01.
-add(4, 'Nia Newcomer', 4.2, '2026-08-20');
+add(4, 'Nia Newcomer', 4.45, '2026-08-20');
 add(5, 'Hugh Highrated', 4.6, '2026-08-20');
 
 const ladderNow = () => ladder.computeEloLadder(seasonModel.getCurrentSeasonKey(), seasonModel.getSettings());
@@ -179,6 +184,48 @@ ok('her match deltas add up to her rating change',
   `shown ${sumShown}, actual ${seeded.rating - seeded.seed_rating}`);
 ok('and an amplified win is reported at its amplified value',
   niaDeltas.some((v) => v > 25), JSON.stringify(niaDeltas));
+
+console.log('\nWHERE A NEWCOMER SLOTS IN');
+// The positional ladder, which seeds the ratings. Once matches have been
+// played, position no longer tracks rating, and that is where the old rule
+// came apart: it inserted an arrival above the first member it met rated below
+// them, which could be someone who had climbed - vaulting the arrival over a
+// block of higher-rated members who happened to sit lower down.
+db.prepare('DELETE FROM matches').run();
+db.prepare('DELETE FROM players').run();
+set({ elo_unproven_dock: 0, elo_provisional_matches: 0 });
+
+add(10, 'Hank High', 4.6, '2025-09-02');
+add(11, 'Wendy Winner', 3.9, '2025-09-02');   // low rating, will climb
+add(12, 'Ursula Upper', 4.5, '2025-09-02');   // high rating, will not play
+add(13, 'Vic Upper', 4.4, '2025-09-02');      // high rating, will not play
+// Wendy beats the two above her and ends up over both.
+match(11, 13, '2025-10-02');
+match(11, 12, '2025-10-09');
+
+const order = () => ladder.getLadder().map((r) => r.name);
+const climbed = order();
+ok('a lower-rated member can climb above higher-rated ones by winning',
+  climbed.indexOf('Wendy Winner') < climbed.indexOf('Ursula Upper'), climbed.join(' > '));
+
+// Now a 4.2 arrives, having played nobody.
+add(14, 'Nate New', 4.2, '2026-01-05');
+const after = order();
+const at = (n) => after.indexOf(n);
+ok('the newcomer lands below every member rated above them',
+  at('Nate New') > at('Ursula Upper') && at('Nate New') > at('Vic Upper') && at('Nate New') > at('Hank High'),
+  after.join(' > '));
+ok('and below the lower-rated member who played their way up',
+  at('Nate New') > at('Wendy Winner'), after.join(' > '));
+ok('nobody already on the ladder is reordered by their arrival',
+  after.filter((n) => n !== 'Nate New').join(' > ') === climbed.join(' > '),
+  after.join(' > '));
+
+// A newcomer rated above everyone still starts at the top: they are not being
+// punished for a rating, only stopped from jumping people rated above them.
+add(15, 'Tara Top', 4.9, '2026-01-06');
+ok('a newcomer rated above everyone starts at the top',
+  order()[0] === 'Tara Top', order().join(' > '));
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
 process.exit(fails ? 1 : 0);
