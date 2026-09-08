@@ -275,8 +275,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         navigate('leagueDetail', { league });
         restored = true;
       } else if (saved.page === 'playerProfile' && saved.playerId) {
-        const player = state.players.find((p) => p.id === saved.playerId);
-        if (player) { navigate('playerProfile', { player }); restored = true; }
+        // The list row is a name and an id; the profile is its history, its
+        // ladder standing and the club's seasons. Handing over the row rendered
+        // a page with none of that, and a phone reloads the tab every time it
+        // comes back to the app - so on a phone this was the usual way in.
+        await openPlayerProfile(saved.playerId, { pushHistory: false });
+        restored = true;
       } else if (saved.page === 'tournamentDetail' && saved.tournamentId != null) {
         navigate('tournamentDetail', { tournamentId: saved.tournamentId });
         restored = true;
