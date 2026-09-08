@@ -6384,7 +6384,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 2px 12px 12px;
+  /* Room between the court tabs and the first time, so 6:00 is not jammed
+     up against them. */
+  padding: 14px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -6393,8 +6395,8 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 54px;
-  padding: 0 14px;
+  min-height: 54px;
+  padding: 7px 14px;
   border-radius: 11px;
   flex-shrink: 0;
   box-sizing: border-box;
@@ -6428,6 +6430,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-mslot--mine .cb-mslot-l { color: #23306b; }
 .cb-mslot--league .cb-mslot-l { color: #6f5716; }
 .cb-mslot--other .cb-mslot-l { color: #6b7e93; }
+/* A match row: who is playing on one line, what it is in small type under it. */
+.cb-mslot-l1, .cb-mslot-l2 { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-mslot-l2 { margin-top: 1px; font-size: 10.5px; font-weight: 600; letter-spacing: .03em; color: #a48a4a; }
 .cb-mslot-m { flex-shrink: 0; font-size: 15px; font-weight: 700; color: #3550c8; }
 .cb-mslot--sel .cb-mslot-m { font-size: 11px; }
 .cb-mslot--mine .cb-mslot-m, .cb-mslot--league .cb-mslot-m, .cb-mslot--other .cb-mslot-m {
@@ -6570,6 +6575,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 /* --- My Bookings (mobile card) --- */
 .cb-mmine-card { padding: 13px 0 6px; gap: 2px; margin-top: 3px; }
 .cb-mmine-card .cb-court-head { padding: 0 13px 10px; }
+/* With nothing booked the card holds one line; give it the room a list would
+   have had, so it does not read as a heading with a stray sentence under it. */
+.cb-mmine-card .cb-rail-empty { padding: 22px 13px 28px; }
 .cb-mmine-list { display: flex; flex-direction: column; }
 .cb-mmine-row { display: flex; align-items: center; gap: 12px; padding: 10px 13px; border-top: 1px solid #f2f5f9; }
 /* The same boxed date tile as the desktop list, sized down for the row. */

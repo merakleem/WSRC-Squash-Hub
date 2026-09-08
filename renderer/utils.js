@@ -170,3 +170,10 @@ export function clubTodayStr(at) {
 export function clubNowMin(at) {
   return clubNow(at).minutes;
 }
+
+/** "Merak Lee" -> "M. Lee": first initial and last name, for tight spaces. */
+export function abbrevName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return parts[0] || '';
+  return `${parts[0][0]}. ${parts[parts.length - 1]}`;
+}

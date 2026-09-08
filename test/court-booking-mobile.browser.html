@@ -31,12 +31,16 @@ state.players = [{ id:42, name:'Merak Lee' }];
 const t=(m)=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 const today = new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const courts=[1,2,3,4,5].map(i=>({id:i,name:i===5?'Doubles Court':'Court '+i,active:1,sort_order:i}));
-const mk=(id,courtId,s,d,title,opts={})=>({id,courtId,startTime:t(s),durationMinutes:d,title,source:opts.source||'custom',players:opts.players||[],name:title,info:'',color:'#3550c8',bookingTypeId:null,repeatGroupId:null,date:today});
+const mk=(id,courtId,s,d,title,opts={})=>({id,courtId,startTime:t(s),durationMinutes:d,title,source:opts.source||'custom',players:opts.players||[],name:title,info:opts.info||'',color:'#3550c8',bookingTypeId:null,repeatGroupId:null,date:today});
 const slots=[
   mk(1,1,17*60,60,'Merak Lee',{players:[{id:42,name:'Merak Lee'}]}),
   mk(2,1,18*60+30,90,'League Match',{source:'league'}),
   mk(3,1,20*60+30,60,'Sofia Duarte',{players:[{id:7,name:'Sofia Duarte'}]}),
   mk(4,2,17*60+30,60,'Priya Raman',{players:[{id:8,name:'Priya Raman'}]}),
+  // Court 3: a league night. 45-minute matches back to back, so the second
+  // starts at 9:15 - on no 30-minute step at all.
+  mk(5,3,20*60+30,45,'League Match',{source:'league',info:'Merak Lee vs Sofia Duarte'}),
+  mk(6,3,21*60+15,45,'League Match',{source:'league',info:'Priya Raman vs Alex Hupé'}),
 ];
 const calls=[];
 window.api = {
@@ -45,6 +49,7 @@ window.api = {
   getMyBookings: async()=>[],
   createReservation: async(d)=>{ calls.push(['reserve',d]); return { reservationId:'r1', expiresAt: Date.now()+300000 }; },
   deleteReservation: async()=>({}),
+  releaseReservation: async()=>({}),
 };
 window.navigate=()=>{};
 const { renderCourtBooking } = await import('../renderer/pages/courtBooking.js');
@@ -76,6 +81,23 @@ ok('tab tap changes the page', $$('.cb-mtab')[1].classList.contains('cb-mtab--on
 ok('the new page shows its own bookings', !!$('.cb-mslot--other') && $('.cb-mslot--other').querySelector('.cb-mslot-l').textContent==='Priya Raman');
 ok("and not the old court's", !$('.cb-mslot--league'));
 
+// ---- a league night: every match shows, at its real time ----
+$$('.cb-mtab')[2].click(); await tick(300);
+const night=$$('.cb-mslot--league');
+ok('both matches are rows, the 9:15 one included', night.length===2, night.length);
+ok('each at its own time, not snapped to a step', /8:30/.test(night[0]?.querySelector('.cb-mslot-t').textContent) && /9:15/.test(night[1]?.querySelector('.cb-mslot-t').textContent),
+  night.map(r=>r.querySelector('.cb-mslot-t').textContent).join('|'));
+ok('a match row says who is playing, short', night[0]?.querySelector('.cb-mslot-l1')?.textContent==='M. Lee vs S. Duarte' && night[1]?.querySelector('.cb-mslot-l1')?.textContent==='P. Raman vs A. Hupé',
+  night.map(r=>r.querySelector('.cb-mslot-l1')?.textContent).join('|'));
+ok('and what it is underneath', night.every(r=>r.querySelector('.cb-mslot-l2')?.textContent==='League match'));
+const openAt=$$('.cb-mslot[data-mstart]').map(r=>Number(r.dataset.mstart));
+ok('the steps the matches cover are not offered', !openAt.includes(21*60) && !openAt.includes(21*60+30), openAt.filter(m=>m>=20*60&&m<=22*60).map(t).join(','));
+ok('the ones around them still are', openAt.includes(20*60) && openAt.includes(22*60));
+const order=$$('.cb-mslot').map(r=>r.querySelector('.cb-mslot-t').textContent).join(',');
+ok('rows read in time order', order.indexOf('8:30')<order.indexOf('9:15'));
+$$('.cb-mtab')[1].click(); await tick(300);   // back to Court 2 for the reservation checks below
+
+
 // ---- open tap books on the shown court ----
 $('.cb-mslot[data-mstart]').click(); await tick(250);
 const rsv=calls.find(c=>c[0]==='reserve');
@@ -87,7 +109,7 @@ ok('the tapped row shows Selected', $('.cb-mslot--sel')?.querySelector('.cb-mslo
 $$('.cb-mtab')[0].click(); await tick();
 ok('sheet stays open on another page', !!$('.cb-panel'));
 ok('selection not highlighted on this page', !$('.cb-mslot--sel'));
-document.getElementById('cbPanelCancel')?.click(); await tick(250);
+document.getElementById('cbPanelCancel')?.click(); await tick(700);   // let the sheet finish closing before touching the list
 
 // ---- own booking opens the edit sheet ----
 $('.cb-mslot[data-mbid]')?.click(); await tick(250);
@@ -100,6 +122,12 @@ document.getElementById('cbPrevDay').click(); await tick(250);
 ok('yesterday shows no rows', $$('.cb-mslot').length===0);
 ok('and says so', $('.cb-mempty')?.textContent==='No times left on this day.');
 ok('the court page carried over', $('.cb-mtab').classList.contains('cb-mtab--on'));
+
+// ---- My Bookings with nothing booked ----
+$('.cb-tab[data-tab="mine"]').click(); await tick(300);
+const empty=$('.cb-mmine-card .cb-rail-empty');
+ok('the empty My Bookings tab says so', empty?.textContent==='No upcoming bookings.', empty?.textContent);
+ok('with room above and below the line, not jammed against the card', empty && parseFloat(getComputedStyle(empty).paddingTop)>=20 && parseFloat(getComputedStyle(empty).paddingBottom)>=20, empty && getComputedStyle(empty).padding);
 } catch (e) { fails++; out.push('  THREW  '+e.message+'\n'+(e.stack||'').split('\n').slice(0,4).join('\n')); }
 document.getElementById('log').textContent = out.join('\n')+'\n\n'+(fails? fails+' FAILED':'ALL '+out.length+' PASSED');
 document.title = fails? 'FAIL':'PASS';
