@@ -173,7 +173,7 @@ await settle(); await settle();
 ok('a bare row makes the page go and fetch the profile', calls.some((c) => c[0] === 'navigate' && c[1] === 'playerProfile'));
 ok('and it then shows the matches', /1 match played/.test($('.pp-season-count')?.textContent || ''), $('.pp-season-count')?.textContent);
 ok('the rank', /#4/.test($('#mainContent').textContent));
-ok('and the season picker', !!$('#ppSeasonSelect'));
+ok('and the season picker', !!$$('.pp-season-select').at(-1));
 
 // If what comes back still has no history, that is the server's answer: the
 // page renders it and stops asking. The first version asked again every time,
@@ -186,6 +186,22 @@ await settle(); await settle(); await settle();
 ok('a bare answer is asked for once, then rendered as it is',
   calls.filter((c) => c[0] === 'navigate').length === 1, String(calls.filter((c) => c[0] === 'navigate').length) + ' navigations');
 ok('and the page is still standing', $('#pageTitle').textContent === 'Ann Answerless', $('#pageTitle').textContent);
+
+log.textContent += '\nTHE PICKER YOU CAN SEE ON A PHONE WORKS\n';
+// The picker is rendered twice; the mobile copy is the later one in the DOM.
+await show({ ...PROFILE(61, 'Pia Picker'), seasons: [
+  { key: '2026/27', id: '2026/27', name: '2026/27', is_current: true },
+  { key: '2025/26', id: '2025/26', name: '2025/26', is_current: false },
+] }, { role: 'player', playerId: 7 });
+const pickers = $$('.pp-season-select');
+ok('the season picker is in the page twice, desktop and mobile', pickers.length === 2, String(pickers.length));
+const mobilePicker = pickers.at(-1);
+mobilePicker.value = 'all'; change(mobilePicker); await settle();
+ok('changing the mobile copy changes the page', /All time/i.test($('.pp-card-label')?.textContent || ''), $('.pp-card-label')?.textContent);
+ok('and every copy now agrees', $$('.pp-season-select').every((s) => s.value === 'all'), $$('.pp-season-select').map((s) => s.value).join('|'));
+const desktopPicker = $$('.pp-season-select')[0];
+desktopPicker.value = '2026/27'; change(desktopPicker); await settle();
+ok('as does changing the desktop copy', $$('.pp-season-select').every((s) => s.value === '2026/27'), $$('.pp-season-select').map((s) => s.value).join('|'));
 
 log.textContent += '\nOPENS ON THE SEASON LAST PLAYED\n';
 // A season starts on a fixed day whether anyone has played yet or not. On that
@@ -202,13 +218,13 @@ const inSeason = (id, name, key) => {
   return pr;
 };
 await show(inSeason(41, 'Lena Lastyear', '2025/26'), { role: 'player', playerId: 7 });
-ok('with nothing yet in the new season, it opens on the one they played', $('#ppSeasonSelect')?.value === '2025/26', $('#ppSeasonSelect')?.value);
+ok('with nothing yet in the new season, it opens on the one they played', $$('.pp-season-select').at(-1)?.value === '2025/26', $$('.pp-season-select').at(-1)?.value);
 ok('so their record is on screen', /1 match played/.test($('.pp-season-count')?.textContent || ''), $('.pp-season-count')?.textContent);
-ok('while the new season is still offered', [...($('#ppSeasonSelect')?.options || [])].some((o) => o.value === '2026/27'));
+ok('while the new season is still offered', [...($$('.pp-season-select').at(-1)?.options || [])].some((o) => o.value === '2026/27'));
 await show(inSeason(42, 'Noor Now', '2026/27'), { role: 'player', playerId: 7 });
-ok('once they have played in the new season, it opens there', $('#ppSeasonSelect')?.value === '2026/27', $('#ppSeasonSelect')?.value);
+ok('once they have played in the new season, it opens there', $$('.pp-season-select').at(-1)?.value === '2026/27', $$('.pp-season-select').at(-1)?.value);
 await show({ ...EMPTY_PROFILE(43, 'Ezra Empty'), seasons: SEASONS }, { role: 'player', playerId: 7 });
-ok('and with no matches anywhere, it stays on the current season', $('#ppSeasonSelect')?.value === '2026/27', $('#ppSeasonSelect')?.value);
+ok('and with no matches anywhere, it stays on the current season', $$('.pp-season-select').at(-1)?.value === '2026/27', $$('.pp-season-select').at(-1)?.value);
 
 document.title = failed ? `FAIL ${failed}` : 'PASS';
 log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';

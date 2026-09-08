@@ -1710,7 +1710,7 @@ export function renderPlayerProfile() {
   ];
   const seasonPillHTML = seasonOptions.length < 2 ? '' : `
     <div class="pp-season-pick">
-      <select id="ppSeasonSelect" aria-label="Season">
+      <select class="pp-season-select" aria-label="Season">
         ${seasonOptions.map((o) => `<option value="${o.value}" ${String(activeSeason ?? 'all') === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
@@ -2038,12 +2038,16 @@ export function renderPlayerProfile() {
     renderPlayerProfile();
   });
 
-  document.getElementById('ppSeasonSelect')?.addEventListener('change', (e) => {
+  // The picker is in the page twice - the desktop header and the mobile block,
+  // one of them hidden by CSS - so the handler goes on every copy. It used to
+  // find one by id, which was always the desktop copy: on a phone the picker
+  // you could see did nothing.
+  document.querySelectorAll('.pp-season-select').forEach((sel) => sel.addEventListener('change', (e) => {
     const raw = e.target.value;
     _profileSeason = raw === 'all' ? null : raw === 'none' ? 'none' : raw;
     _profileSeasonFor = p.id;
     renderPlayerProfile();
-  });
+  }));
 }
 
 // ===== PROFILE HELPERS =====
