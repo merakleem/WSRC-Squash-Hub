@@ -175,6 +175,18 @@ ok('and it then shows the matches', /1 match played/.test($('.pp-season-count')?
 ok('the rank', /#4/.test($('#mainContent').textContent));
 ok('and the season picker', !!$('#ppSeasonSelect'));
 
+// If what comes back still has no history, that is the server's answer: the
+// page renders it and stops asking. The first version asked again every time,
+// and against a stub that answers everything with [] it spun the tab forever.
+CURRENT = { id: 32, name: 'Ann Answerless' };          // never grows a history array
+state.currentPlayer = { id: 32, name: 'Ann Answerless' };
+calls.length = 0;
+mod.renderPlayerProfile();
+await settle(); await settle(); await settle();
+ok('a bare answer is asked for once, then rendered as it is',
+  calls.filter((c) => c[0] === 'navigate').length === 1, String(calls.filter((c) => c[0] === 'navigate').length) + ' navigations');
+ok('and the page is still standing', $('#pageTitle').textContent === 'Ann Answerless', $('#pageTitle').textContent);
+
 log.textContent += '\nOPENS ON THE SEASON LAST PLAYED\n';
 // A season starts on a fixed day whether anyone has played yet or not. On that
 // day every profile opened on the new, empty season and read as if the history
