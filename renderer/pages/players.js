@@ -1471,6 +1471,8 @@ function openMessagePlayerModal(playerId, playerName) {
 // selection must never be trusted for a different player.
 let _profileSeason = null;
 let _profileSeasonFor = null;
+// The one player id the profile has already re-fetched for; see renderPlayerProfile.
+let _profileRefetchedFor = null;
 // Desktop panel and the Results source filter. Reset with the season selection
 // so a stale tab never opens on a different player.
 let _profileTab = 'results';
@@ -1491,11 +1493,16 @@ export function renderPlayerProfile() {
   // A players-list row can reach here in place of the profile payload, and it
   // renders as a player with no matches, no rank and no seasons. The payload
   // always carries a history array, so its absence means the page was given
-  // the wrong object: fetch the right one rather than draw a blank.
-  if (!Array.isArray(p.history)) {
+  // the wrong object: fetch the right one rather than draw a blank. Once only -
+  // if what comes back has no history either, that is what the server has, and
+  // asking again would spin: the first version of this looped a test page's
+  // stubbed API forever and wedged the tab.
+  if (!Array.isArray(p.history) && _profileRefetchedFor !== p.id) {
+    _profileRefetchedFor = p.id;
     openPlayerProfile(p.id, { pushHistory: false });
     return;
   }
+  if (Array.isArray(p.history)) _profileRefetchedFor = null;
 
   const adminMode = isAdmin();
   document.getElementById('pageTitle').textContent = p.name;
