@@ -1,5 +1,5 @@
 import { state } from '../state.js';
-import { esc, toast, clubTodayStr, clubNowMin } from '../utils.js';
+import { esc, toast, clubTodayStr, clubNowMin, abbrevName } from '../utils.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // The grid stops at 11pm to match the admin schedule page, which uses the same
@@ -498,11 +498,6 @@ function _buildGrid() {
 // 30-minute rows. Picking the court first, then scanning its day, replaced the
 // time-first rail: a page per court reads like the paper sheet on the wall.
 
-function _mBookingAt(courtId, m) {
-  return getCourtSlots(cb.date, courtId)
-    .find(s => m < s.startMin + s.durationMinutes && m + SLOT_MIN > s.startMin) || null;
-}
-
 // The 30-minute steps on offer: today from the next boundary at or after now,
 // other future dates from opening, past dates none at all.
 function _mMins() {
@@ -524,18 +519,36 @@ function _buildMobileBooking() {
     `<button class="cb-mtab${c.id === cb.mCourt ? ' cb-mtab--on' : ''}" data-mcourt="${c.id}">${esc(c.name)}</button>`
   ).join('');
 
+  // Rows come from two lists merged in time order: every booking on this court
+  // that has not yet ended, one row each at its real start, and the 30-minute
+  // steps nothing covers. Driving rows from the grid alone lost any booking that
+  // did not start on a step - a 7:15 league match sat in a gap between the 6:30
+  // and 8:00 ones, and the page read as if that time simply did not exist.
   const mins = _mMins();
-  const rows = mins.map(m => {
-    const bk = _mBookingAt(cb.mCourt, m);
-    // A booking is one row, at its first listed step; the later steps it
-    // covers are skipped, so an hour booking is one row, not two.
-    const first = bk && (bk.startMin >= mins[0] ? bk.startMin === m : m === mins[0]);
-    if (bk && !first) return null;
+  const from = mins.length ? mins[0] : null;
+  const slots = from == null ? [] : getCourtSlots(cb.date, cb.mCourt)
+    .filter(bk => bk.startMin + bk.durationMinutes > from);
+  const openSteps = mins.filter(m => !slots.some(bk => m < bk.startMin + bk.durationMinutes && m + SLOT_MIN > bk.startMin));
+  const entries = [
+    ...slots.map(bk => ({ min: bk.startMin, bk })),
+    ...openSteps.map(m => ({ min: m, bk: null })),
+  ].sort((a, b) => a.min - b.min || (a.bk ? -1 : 1));
+
+  const rows = entries.map(({ min: m, bk }) => {
     const sel = !bk && cb.panel === 'book' && cb.courtId === cb.mCourt && cb.panelStartMin === m;
     const mine = !!bk && isMine(bk);
     const league = !!bk && bk.source && bk.source !== 'custom';
     const kind = bk ? (mine ? 'mine' : league ? 'league' : 'other') : sel ? 'sel' : 'open';
-    const label = bk ? (mine ? 'You' : bk.title) : 'Open';
+    // A league or tournament row leads with who is playing - initial and
+    // surname each, so two names fit on a phone - and says what it is beneath.
+    // Its title is the fallback when the names are not known yet.
+    const pair = league && /\svs\s/.test(bk.info || '') ? bk.info.split(/\s+vs\s+/).map(abbrevName).join(' vs ') : null;
+    const what = league ? (bk.source === 'tournament' ? 'Tournament' : 'League match') : null;
+    const labelHTML = bk
+      ? (mine ? 'You'
+        : pair ? `<span class="cb-mslot-l1">${esc(pair)}</span><span class="cb-mslot-l2">${esc(what)}</span>`
+        : esc(bk.title))
+      : 'Open';
     const mark = bk
       ? `${fmtShort(bk.startMin)}–${fmtShort(bk.startMin + bk.durationMinutes)}`
       : sel ? 'Selected' : '+';
@@ -544,10 +557,10 @@ function _buildMobileBooking() {
       : ` data-mstart="${m}"`;
     return `<div class="cb-mslot cb-mslot--${kind}"${attrs}>
       <span class="cb-mslot-t">${fmtPill(m)}</span>
-      <span class="cb-mslot-l">${esc(label)}</span>
+      <span class="cb-mslot-l">${labelHTML}</span>
       <span class="cb-mslot-m">${esc(mark)}</span>
     </div>`;
-  }).filter(Boolean).join('');
+  }).join('');
 
   const dots = cb.courts.map(c =>
     `<span class="cb-mdot${c.id === cb.mCourt ? ' cb-mdot--on' : ''}"></span>`).join('');

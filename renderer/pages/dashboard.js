@@ -1,13 +1,7 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal, formatShortDate } from '../utils.js';
+import { esc, toast, modal, formatShortDate, abbrevName } from '../utils.js';
 
 // ===== DASHBOARD HELPERS =====
-function abbrevName(name) {
-  const parts = (name || '').trim().split(/\s+/);
-  if (parts.length === 1) return name;
-  return parts[0][0] + '. ' + parts[parts.length - 1];
-}
-
 function timeAgo(utcStr) {
   if (!utcStr) return '';
   const ms = Date.now() - new Date(utcStr.replace(' ', 'T') + 'Z').getTime();
