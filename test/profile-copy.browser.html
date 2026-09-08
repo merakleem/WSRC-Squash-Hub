@@ -155,6 +155,49 @@ const proseNodes = $$('#mainContent *').filter((el) => !el.children.length);
 const withDash = proseNodes.filter((el) => el.textContent.includes('—') && el.textContent.trim() !== '—');
 ok('the profile page has none', withDash.length === 0, withDash.map((e) => e.textContent.trim()).join(' | '));
 
+log.textContent += '\nA LIST ROW INSTEAD OF THE PROFILE\n';
+// Refreshing the page used to restore the profile from the players list, whose
+// rows are a name and an id. The page then drew a player with nothing: no
+// matches, no rank, no seasons. The renderer now recognises the wrong object
+// and fetches the right one, whoever handed it over.
+CURRENT = { ...PROFILE(31, 'Rae Reloaded'), seasons: [
+  { key: '2026/27', id: '2026/27', name: '2026/27', is_current: true },
+  { key: '2025/26', id: '2025/26', name: '2025/26', is_current: false },
+] };
+CURRENT.history[0].season_key = '2025/26';
+state.currentUser = { role: 'player', playerId: 7 };
+state.currentPlayer = { id: 31, name: 'Rae Reloaded' };   // the bare list row
+calls.length = 0;
+mod.renderPlayerProfile();
+await settle(); await settle();
+ok('a bare row makes the page go and fetch the profile', calls.some((c) => c[0] === 'navigate' && c[1] === 'playerProfile'));
+ok('and it then shows the matches', /1 match played/.test($('.pp-season-count')?.textContent || ''), $('.pp-season-count')?.textContent);
+ok('the rank', /#4/.test($('#mainContent').textContent));
+ok('and the season picker', !!$('#ppSeasonSelect'));
+
+log.textContent += '\nOPENS ON THE SEASON LAST PLAYED\n';
+// A season starts on a fixed day whether anyone has played yet or not. On that
+// day every profile opened on the new, empty season and read as if the history
+// had gone. The current season is still the default once there is something
+// of theirs in it.
+const SEASONS = [
+  { key: '2026/27', id: '2026/27', name: '2026/27', is_current: true },
+  { key: '2025/26', id: '2025/26', name: '2025/26', is_current: false },
+];
+const inSeason = (id, name, key) => {
+  const pr = { ...PROFILE(id, name), seasons: SEASONS };
+  pr.history = pr.history.map((m) => ({ ...m, season_key: key }));
+  return pr;
+};
+await show(inSeason(41, 'Lena Lastyear', '2025/26'), { role: 'player', playerId: 7 });
+ok('with nothing yet in the new season, it opens on the one they played', $('#ppSeasonSelect')?.value === '2025/26', $('#ppSeasonSelect')?.value);
+ok('so their record is on screen', /1 match played/.test($('.pp-season-count')?.textContent || ''), $('.pp-season-count')?.textContent);
+ok('while the new season is still offered', [...($('#ppSeasonSelect')?.options || [])].some((o) => o.value === '2026/27'));
+await show(inSeason(42, 'Noor Now', '2026/27'), { role: 'player', playerId: 7 });
+ok('once they have played in the new season, it opens there', $('#ppSeasonSelect')?.value === '2026/27', $('#ppSeasonSelect')?.value);
+await show({ ...EMPTY_PROFILE(43, 'Ezra Empty'), seasons: SEASONS }, { role: 'player', playerId: 7 });
+ok('and with no matches anywhere, it stays on the current season', $('#ppSeasonSelect')?.value === '2026/27', $('#ppSeasonSelect')?.value);
+
 document.title = failed ? `FAIL ${failed}` : 'PASS';
 log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
 </script>

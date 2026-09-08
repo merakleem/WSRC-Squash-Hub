@@ -1488,6 +1488,15 @@ export function renderPlayerProfile() {
   const p = state.currentPlayer;
   if (!p) { window.navigate('players'); return; }
 
+  // A players-list row can reach here in place of the profile payload, and it
+  // renders as a player with no matches, no rank and no seasons. The payload
+  // always carries a history array, so its absence means the page was given
+  // the wrong object: fetch the right one rather than draw a blank.
+  if (!Array.isArray(p.history)) {
+    openPlayerProfile(p.id, { pushHistory: false });
+    return;
+  }
+
   const adminMode = isAdmin();
   document.getElementById('pageTitle').textContent = p.name;
   const acctStatus = p.accountStatus || 'none'; // 'verified' | 'pending' | 'none'
@@ -1580,7 +1589,17 @@ export function renderPlayerProfile() {
   const seasonKeys = seasons.map((sn) => sn.key);
   const hasUnassigned = allHistory.some((m) => m.season_key == null);
 
-  const defaultSeason = seasons.find((sn) => sn.is_current)?.key
+  // The current season is the default while there is something of theirs in
+  // it. Otherwise the page opens on the last season they played - history is
+  // newest first, so that is the first key in it - because a new season begins
+  // on a fixed day whether or not anyone has played yet, and on that day every
+  // profile opening blank read as the history being gone.
+  const currentKey = seasons.find((sn) => sn.is_current)?.key ?? null;
+  const playedIn = (key) => key != null && allHistory.some((m) => m.season_key === key);
+  const lastPlayedKey = allHistory.map((m) => m.season_key).find((k) => seasonKeys.includes(k)) ?? null;
+  const defaultSeason = playedIn(currentKey) ? currentKey
+    : lastPlayedKey
+    ?? currentKey
     ?? seasonKeys[0]
     ?? (hasUnassigned ? 'none' : null);
 
