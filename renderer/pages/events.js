@@ -277,7 +277,7 @@ function _factsHTML(e) {
           <div class="ev-bar"><span class="ev-bar-fill${e.full ? ' ev-bar-fill--full' : ''}" style="width:${pct}%"></span></div>` : ''}
       </div>
       <div class="ev-facts-rows">
-        <div class="ev-facts-row"><span>Guests</span><b>${e.guests_allowed === 0 ? 'Not allowed' : `Up to ${e.guests_allowed} per member`}</b></div>
+        ${e.guests_allowed === 0 && !isAdmin() ? '' : `<div class="ev-facts-row"><span>Guests</span><b>${e.guests_allowed === 0 ? 'Not allowed' : `Up to ${e.guests_allowed} per member`}</b></div>`}
         <div class="ev-facts-row"><span>Capacity</span><b>${e.max_people == null ? 'No limit' : `${e.max_people} people`}</b></div>
       </div>
     </div>`;
