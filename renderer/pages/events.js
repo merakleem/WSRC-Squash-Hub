@@ -46,9 +46,11 @@ function _whenLong(e) {
   const base = `${_DAYS_SHORT[d.getDay()]} ${d.getDate()} ${_MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
   return e.start_time ? `${base} · ${_timeRange(e)}` : base;
 }
-// Shown wherever the event is, so a member knows why a friend cannot see it.
+// An admin's marker only. A member who can see the event is a member, and the
+// people it is kept from never see it at all, so the tag would only tell them
+// what they already are.
 function _membersOnlyPill(e, onHero = false) {
-  return e.members_only ? `<span class="chip ${onHero ? 'chip--hero' : 'chip--members'} ev-members-pill">Members only</span>` : '';
+  return e.members_only && isAdmin() ? `<span class="chip ${onHero ? 'chip--hero' : 'chip--members'} ev-members-pill">Members only</span>` : '';
 }
 function _monthKey(e) {
   const d = _d(e.event_date);
