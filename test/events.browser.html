@@ -48,6 +48,8 @@ ok('league-linked counts say registered', cards[3].textContent.includes('9 regis
 ok('past-free spots lines', cards[0].textContent.includes('13 spots left') && cards[1].textContent.includes('32 of 32') && cards[2].textContent.includes('No limit'));
 ok('ME leads the stack when signed up', cards[2].querySelector('.ev-av').textContent==='ME');
 ok('date line omits missing time', cards[3].textContent.includes('Tue 1 Dec') && !cards[3].textContent.includes('· null'));
+ok('a start and end read as a span', cards[0].textContent.includes('7:00 pm – 9:00 pm'), cards[0].querySelector('.ev-card-when')?.textContent);
+ok('a members-only event says so on its card', !!cards[2].querySelector('.ev-members-pill') && !cards[0].querySelector('.ev-members-pill'));
 ok('first event selected with hero', text('.ev-hero-name')==='Back to the Bunker' && $('.ev-card--sel')===cards[0]);
 ok('facts read the capacity', text('.ev-facts-cap')==='13 spots left of 40' && text('.ev-facts-n')==='27');
 ok('progress bar shows for capped events', !!$('.ev-bar'));
@@ -119,16 +121,23 @@ ok('search finds the league', $$('.ev-search-row').length===1 && $('.ev-search-r
 $('.ev-search-row').click(); await tick(60);
 ok('picking a link shows the chosen row', text('.ev-linked-name')==='Winter League 2027');
 ok('picking a link disables guests', $('#evfGuests').disabled && $('#evfGuests').value==='0');
-$('#evfTime').value='19:30'; $('#evfTime').dispatchEvent(new Event('input',{bubbles:true}));
+$('#evfTime').value='19:30'; $('#evfTime').dispatchEvent(new Event('input',{bubbles:true})); await tick(30);
+ok('a start with no end cannot be saved', $('#evSave').disabled && text('#evfTimeHint').includes('both'), text('#evfTimeHint'));
+$('#evfEndTime').value='19:00'; $('#evfEndTime').dispatchEvent(new Event('input',{bubbles:true})); await tick(30);
+ok('nor an end before the start', $('#evSave').disabled && text('#evfTimeHint').includes('after'), text('#evfTimeHint'));
+$('#evfEndTime').value='21:00'; $('#evfEndTime').dispatchEvent(new Event('input',{bubbles:true})); await tick(30);
+ok('a proper span saves', !$('#evSave').disabled && text('#evfTimeHint')==='');
+$('#evfMembersOnly').checked=true; $('#evfMembersOnly').dispatchEvent(new Event('change',{bubbles:true}));
 calls.length=0;
 $('#evSave').click(); await tick(300);
 const made=calls.find(c=>c[0]==='createEvent');
-ok('create posts the full body', made && made[1].name==='Quiz Night' && made[1].event_date==='2026-11-20' && made[1].start_time==='19:30' && made[1].guests_allowed===0 && made[1].league_id===4 && made[1].tournament_id===null, made&&JSON.stringify(made[1]));
+ok('create posts the full body', made && made[1].name==='Quiz Night' && made[1].event_date==='2026-11-20' && made[1].start_time==='19:30' && made[1].end_time==='21:00' && made[1].members_only===true && made[1].guests_allowed===0 && made[1].league_id===4 && made[1].tournament_id===null, made&&JSON.stringify(made[1]));
 
 // modal: edit + two-click delete
 await tick(150);
 $('#evEdit')?.click(); await tick(80);
 ok('edit prefills the form', $('#evfName')?.value==='Back to the Bunker' && $('#evfDate')?.value==='2026-09-18', $('#evfName')?.value);
+ok('including the end time and the members-only box', $('#evfEndTime')?.value==='21:00' && $('#evfMembersOnly')?.checked===false, $('#evfEndTime')?.value);
 ok('delete asks first', text('#evDelete')==='Delete event');
 $('#evDelete').click(); await tick(40);
 ok('then confirms', text('#evDelete')==='Confirm delete' && $('#evDelete').classList.contains('btn-danger'));

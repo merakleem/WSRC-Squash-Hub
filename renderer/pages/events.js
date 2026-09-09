@@ -29,17 +29,26 @@ function _time12(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
   return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
 }
-// "Fri 18 Sep · 7:00 pm" for cards.
+// "7:00 pm" or "7:00 pm – 9:00 pm"; a time is always a span or nothing.
+function _timeRange(e) {
+  if (!e.start_time) return '';
+  return e.end_time ? `${_time12(e.start_time)} – ${_time12(e.end_time)}` : _time12(e.start_time);
+}
+// "Fri 18 Sep · 7:00 pm – 9:00 pm" for cards.
 function _when(e) {
   const d = _d(e.event_date);
   const base = `${_DAYS_SHORT[d.getDay()]} ${d.getDate()} ${_MONTHS_SHORT[d.getMonth()]}`;
-  return e.start_time ? `${base} · ${_time12(e.start_time)}` : base;
+  return e.start_time ? `${base} · ${_timeRange(e)}` : base;
 }
 // "Thu 15 Oct 2026 · 6:30 pm" for the hero.
 function _whenLong(e) {
   const d = _d(e.event_date);
   const base = `${_DAYS_SHORT[d.getDay()]} ${d.getDate()} ${_MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
-  return e.start_time ? `${base} · ${_time12(e.start_time)}` : base;
+  return e.start_time ? `${base} · ${_timeRange(e)}` : base;
+}
+// Shown wherever the event is, so a member knows why a friend cannot see it.
+function _membersOnlyPill(e, onHero = false) {
+  return e.members_only ? `<span class="chip ${onHero ? 'chip--hero' : 'chip--members'} ev-members-pill">Members only</span>` : '';
 }
 function _monthKey(e) {
   const d = _d(e.event_date);
@@ -185,7 +194,7 @@ function _cardHTML(e) {
       </div>
       <div class="ev-card-mid">
         <span class="ev-card-name">${esc(e.name)}</span>
-        <div class="ev-card-meta">${_typeChip(e.link, false)}<span class="ev-card-when">${esc(_when(e))}</span></div>
+        <div class="ev-card-meta">${_typeChip(e.link, false)}<span class="ev-card-when">${esc(_when(e))}</span>${_membersOnlyPill(e)}</div>
         <div class="ev-card-people">
           <div class="ev-avs">${_avatarStack(e, 'ev-av--card')}</div>
           <span class="ev-card-count">${e.total} ${_attendWord(e)}</span>
@@ -236,7 +245,7 @@ function _heroHTML(e) {
           </button>` : ''}
       </div>
       <span class="ev-hero-name">${esc(e.name)}</span>
-      <span class="ev-hero-when">${esc(_whenLong(e))}</span>
+      <span class="ev-hero-when">${esc(_whenLong(e))}</span>${_membersOnlyPill(e, true)}
       ${e.description?.trim() ? `<span class="ev-hero-desc">${esc(e.description)}</span>` : ''}
       ${e.link ? `
         <button class="ev-hero-link" id="evGoLink">
@@ -407,10 +416,19 @@ function _modalHTML() {
               <input class="ev-input" id="evfDate" type="date" value="${esc(f.date)}">
             </label>
             <label class="ev-field">
-              <span>Start time <i class="ev-optional">(optional)</i></span>
-              <input class="ev-input" id="evfTime" type="time" value="${esc(f.time)}">
+              <span>Time <i class="ev-optional">(optional)</i></span>
+              <div class="ev-time-range">
+                <input class="ev-input" id="evfTime" type="time" value="${esc(f.time)}" aria-label="Start time">
+                <span class="ev-time-dash">–</span>
+                <input class="ev-input" id="evfEndTime" type="time" value="${esc(f.endTime)}" aria-label="End time">
+              </div>
+              <em id="evfTimeHint">${esc(_timeHint(f))}</em>
             </label>
           </div>
+          <label class="ev-field ev-field--check">
+            <input type="checkbox" id="evfMembersOnly"${f.membersOnly ? ' checked' : ''}>
+            <span>Members only<em>Only club members see this event and can sign up.</em></span>
+          </label>
           <div class="ev-field-cols">
             <label class="ev-field">
               <span>Guests allowed</span>
@@ -599,12 +617,13 @@ function _openModal(mode) {
     ev.modal = { mode: 'edit', id: e.id };
     ev.form = {
       name: e.name, description: e.description || '', date: e.event_date,
-      time: e.start_time || '', guests: e.guests_allowed, max: e.max_people == null ? '' : String(e.max_people),
+      time: e.start_time || '', endTime: e.end_time || '', membersOnly: !!e.members_only,
+      guests: e.guests_allowed, max: e.max_people == null ? '' : String(e.max_people),
       linked: e.link ? { ...e.link } : null,
     };
   } else {
     ev.modal = { mode: 'create' };
-    ev.form = { name: '', description: '', date: '', time: '', guests: 0, max: '', linked: null };
+    ev.form = { name: '', description: '', date: '', time: '', endTime: '', membersOnly: false, guests: 0, max: '', linked: null };
   }
   _paint();
   document.getElementById('evfName')?.focus();
@@ -615,6 +634,16 @@ function _closeModal() {
   ev.form = null;
   ev.confirmDelete = false;
   _paint();
+}
+
+// Why the form cannot be saved yet, as far as the time goes; empty when it can.
+function _timeHint(f) {
+  if (!!f.time !== !!f.endTime) return 'Enter both a start and an end time, or neither.';
+  if (f.time && f.endTime <= f.time) return 'The end time must be after the start.';
+  return '';
+}
+function _formValid(f) {
+  return !!(f.name.trim() && f.date) && !_timeHint(f);
 }
 
 function _wireModal(content) {
@@ -634,13 +663,17 @@ function _wireModal(content) {
     el?.addEventListener('input', () => {
       f[key] = el.value;
       const save = document.getElementById('evSave');
-      if (save) save.disabled = !(f.name.trim() && f.date) || ev.busy;
+      if (save) save.disabled = !_formValid(f) || ev.busy;
+      const hint = document.getElementById('evfTimeHint');
+      if (hint) hint.textContent = _timeHint(f);
     });
   };
   bind('evfName', 'name');
   bind('evfDesc', 'description');
   bind('evfDate', 'date');
   bind('evfTime', 'time');
+  bind('evfEndTime', 'endTime');
+  document.getElementById('evfMembersOnly')?.addEventListener('change', (evt) => { f.membersOnly = evt.target.checked; });
   bind('evfGuests', 'guests');
   bind('evfMax', 'max');
 
@@ -681,13 +714,15 @@ function _wireModal(content) {
   });
 
   document.getElementById('evSave')?.addEventListener('click', async () => {
-    if (ev.busy || !(f.name.trim() && f.date)) return;
+    if (ev.busy || !_formValid(f)) return;
     ev.busy = true;
     const body = {
       name: f.name.trim(),
       description: f.description,
       event_date: f.date,
       start_time: f.time || null,
+      end_time: f.endTime || null,
+      members_only: !!f.membersOnly,
       guests_allowed: f.linked ? 0 : Math.max(0, parseInt(f.guests, 10) || 0),
       max_people: f.max === '' ? null : Math.max(1, parseInt(f.max, 10) || 1),
       league_id: f.linked?.type === 'league' ? f.linked.id : null,

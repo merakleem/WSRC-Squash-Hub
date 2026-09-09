@@ -9,7 +9,7 @@ const router = express.Router();
 // and a three-face preview all come from the model in one place.
 router.get('/events', requireAuth, wrap(async (req, res) => {
   const scope = req.query.scope === 'past' ? 'past' : 'upcoming';
-  res.json(eventModel.listEvents({ scope, today: clubToday(), viewerId: req.session.playerId }));
+  res.json(eventModel.listEvents({ scope, today: clubToday(), viewerId: req.session.playerId, isAdmin: req.session.role === 'admin' }));
 }));
 
 // The linkables search sits above /events/:id so "linkables" is never read as an id.

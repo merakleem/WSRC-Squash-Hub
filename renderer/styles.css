@@ -588,6 +588,7 @@ h1, h2, h3, h4, h5, h6,
 }
 .chip--league     { background: #eaefff; color: #3550c8; }
 .chip--tournament { background: #fdf1e2; color: #9a5b12; }
+.chip--members    { background: #eef1f6; color: #4a5568; }
 .chip--hero { padding: 3px 9px; background: rgba(255, 255, 255, .14); color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; }
 
 /* Segmented tabs: one active, the rest quiet. */
@@ -9340,6 +9341,13 @@ body.is-viewing-as .app-container { height: 100%; }
 .ev-field > em { font-style: normal; font-size: 11.5px; color: #93a2b5; }
 .ev-optional { font-style: normal; font-weight: 400; color: #93a2b5; }
 .ev-field-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ev-time-range { display: flex; align-items: center; gap: 8px; }
+.ev-time-range .ev-input { flex: 1; min-width: 0; }
+.ev-time-dash { color: #93a2b5; flex-shrink: 0; }
+.ev-field--check { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
+.ev-field--check input { margin: 3px 0 0; width: 16px; height: 16px; accent-color: #1e2758; flex-shrink: 0; }
+.ev-field--check span { display: flex; flex-direction: column; gap: 2px; }
+.ev-members-pill { margin-left: 8px; vertical-align: middle; }
 .ev-input {
   padding: 10px 12px;
   border: 1px solid #dce3ed;

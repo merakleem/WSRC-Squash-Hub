@@ -81,6 +81,8 @@ function initDB(dbPath) {
     // Events: club happenings players sign up for, optionally pointing at a
     // league or tournament so registration has one front door.
     `CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', event_date TEXT NOT NULL, start_time TEXT, guests_allowed INTEGER NOT NULL DEFAULT 0, max_people INTEGER, league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL, tournament_id INTEGER REFERENCES tournaments(id) ON DELETE SET NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+    `ALTER TABLE events ADD COLUMN end_time TEXT`,
+    `ALTER TABLE events ADD COLUMN members_only INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS event_signups (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE, guests INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(event_id, player_id))`,
   ];
 
