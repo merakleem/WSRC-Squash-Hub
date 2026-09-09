@@ -1206,7 +1206,7 @@ function _wireImport() {
     r.readAsText(f);
   });
   document.getElementById('plCsvTemplate')?.addEventListener('click', () => {
-    _download('wsrc-players-template.csv', 'name,email,phone,member_number,club_locker_rating,is_member,exclude_from_ladder,is_tester\nSofia Duarte,sofia@example.com,(555) 0100,1042,3.5,yes,no,no');
+    _download('wsrc-players-template.csv', 'name,email,phone,member_number,club_locker_rating,is_member,exclude_from_ladder,is_tester\n');
   });
   document.getElementById('plCsvChange')?.addEventListener('click', () => { p.imp = null; _renderPanel(); });
   document.querySelectorAll('#plPanel [data-col]').forEach((sel) => sel.addEventListener('change', () => {
