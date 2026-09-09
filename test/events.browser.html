@@ -49,7 +49,7 @@ ok('past-free spots lines', cards[0].textContent.includes('13 spots left') && ca
 ok('ME leads the stack when signed up', cards[2].querySelector('.ev-av').textContent==='ME');
 ok('date line omits missing time', cards[3].textContent.includes('Tue 1 Dec') && !cards[3].textContent.includes('· null'));
 ok('a start and end read as a span', cards[0].textContent.includes('7:00 pm – 9:00 pm'), cards[0].querySelector('.ev-card-when')?.textContent);
-ok('a members-only event says so on its card', !!cards[2].querySelector('.ev-members-pill') && !cards[0].querySelector('.ev-members-pill'));
+ok('a player sees no Members only tag, even on a members-only event', !$('.ev-members-pill'));
 ok('first event selected with hero', text('.ev-hero-name')==='Back to the Bunker' && $('.ev-card--sel')===cards[0]);
 ok('facts read the capacity', text('.ev-facts-cap')==='13 spots left of 40' && text('.ev-facts-n')==='27');
 ok('progress bar shows for capped events', !!$('.ev-bar'));
@@ -100,6 +100,7 @@ ok('past events hide the bar', !$('.ev-bar'));
 state.currentUser = { role:'admin', playerId:null };
 renderEvents(); await tick(250);
 ok('admins get New event', !!$('#evNew'));
+ok('admins see the Members only chip on that event', $$('.ev-card')[2]?.querySelector('.ev-members-pill')?.textContent==='Members only' && !$$('.ev-card')[0]?.querySelector('.ev-members-pill'));
 ok('admins get Edit on the hero', !!$('#evEdit'));
 ok('admin roster shows columns', !!$('.ev-roster-cols') && !!$('.ev-row-no'));
 ok('admin footer has Print and Export', !!$('#evPrintBtn') && !!$('#evExportBtn'));
