@@ -849,21 +849,21 @@ function _formHTML() {
         </div>` : ''}
       <div class="pl-fgrid">
         <label class="pl-field pl-field--full"><span>Full name <em>*</em></span>
-          <input data-f="name" value="${esc(f.name)}" placeholder="e.g. Sofia Duarte" autofocus>
+          <input data-f="name" value="${esc(f.name)}" autofocus>
           <span class="pl-field-err" id="plErrName" hidden>Name is required.</span>
         </label>
         <label class="pl-field"><span>Email</span>
-          <input data-f="email" type="email" value="${esc(f.email)}" placeholder="name@example.com">
+          <input data-f="email" type="email" value="${esc(f.email)}">
           <span class="pl-field-err" id="plErrEmail" hidden></span>
         </label>
         <label class="pl-field"><span>Phone</span>
-          <input data-f="phone" value="${esc(f.phone)}" placeholder="(555) 010-0000">
+          <input data-f="phone" value="${esc(f.phone)}">
         </label>
         <label class="pl-field"><span>Member number</span>
-          <input data-f="member_number" value="${esc(f.member_number)}" placeholder="e.g. 1042">
+          <input data-f="member_number" value="${esc(f.member_number)}">
         </label>
         <label class="pl-field"><span>Club Locker rating</span>
-          <input data-f="club_locker_rating" type="number" step="0.01" min="0" value="${esc(String(f.club_locker_rating))}" placeholder="e.g. 3.50">
+          <input data-f="club_locker_rating" type="number" step="0.01" min="0" value="${esc(String(f.club_locker_rating))}">
         </label>
       </div>
       <div class="pl-toggles">
@@ -1006,7 +1006,7 @@ function _draftsHTML() {
       </div>
       <div class="pl-pastebox" id="plPasteBox" ${p.pasteOpen ? '' : 'hidden'}>
         <span class="pl-hint">Columns in order: name, email, phone, member #, rating. Tab or comma separated.</span>
-        <textarea id="plPasteText" rows="4" placeholder="Sofia Duarte&#9;sofia@example.com&#9;555-0100&#9;1042&#9;3.5"></textarea>
+        <textarea id="plPasteText" rows="4" placeholder="One player per line: name, email, phone, member number, rating"></textarea>
         <div class="pl-pastebox-foot"><button class="btn btn-primary btn-sm" id="plPasteApply">Add to rows</button></div>
       </div>
       <div class="pl-dgrid-card">
