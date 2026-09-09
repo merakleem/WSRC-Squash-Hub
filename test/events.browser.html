@@ -52,6 +52,12 @@ ok('a start and end read as a span', cards[0].textContent.includes('7:00 pm – 
 ok('a player sees no Members only tag, even on a members-only event', !$('.ev-members-pill'));
 ok('first event selected with hero', text('.ev-hero-name')==='Back to the Bunker' && $('.ev-card--sel')===cards[0]);
 ok('facts read the capacity', text('.ev-facts-cap')==='13 spots left of 40' && text('.ev-facts-n')==='27');
+// A player is told about guests only when they can bring one; "Not allowed"
+// is a setting, and only the admin needs to see a setting.
+ok('a player sees the guest allowance when there is one', $$('.ev-facts-row').some(r=>r.textContent.includes('Guests') && r.textContent.includes('Up to 2')));
+cards[1].click(); await tick(80);
+ok('and no Guests line at all when there is none', !$$('.ev-facts-row').some(r=>r.textContent.includes('Guests')), $$('.ev-facts-row').map(r=>r.textContent).join('|'));
+cards[0].click(); await tick(80);
 ok('progress bar shows for capped events', !!$('.ev-bar'));
 
 // sign-up flow with a guest
@@ -100,6 +106,9 @@ ok('past events hide the bar', !$('.ev-bar'));
 state.currentUser = { role:'admin', playerId:null };
 renderEvents(); await tick(250);
 ok('admins get New event', !!$('#evNew'));
+$$('.ev-card')[1].click(); await tick(80);
+ok('an admin still sees Guests · Not allowed on that event', $$('.ev-facts-row').some(r=>r.textContent.includes('Guests') && r.textContent.includes('Not allowed')));
+$$('.ev-card')[0].click(); await tick(80);
 ok('admins see the Members only chip on that event', $$('.ev-card')[2]?.querySelector('.ev-members-pill')?.textContent==='Members only' && !$$('.ev-card')[0]?.querySelector('.ev-members-pill'));
 ok('admins get Edit on the hero', !!$('#evEdit'));
 ok('admin roster shows columns', !!$('.ev-roster-cols') && !!$('.ev-row-no'));
