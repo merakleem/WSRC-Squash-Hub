@@ -41,6 +41,17 @@ function _link(db, e) {
 // The shape every event goes out as: raw row + aggregates + the viewer's own
 // signup + the linked competition, all resolved server-side so no two screens
 // can do the capacity math differently.
+// Whether this viewer may see a members-only event. Admins always; a player
+// only if their row says so - read fresh, so revoking membership takes effect
+// on the next request. The check lives here rather than in the page because
+// the page's hidden card would be cosmetic: this is the boundary.
+function _canSeeMembersOnly(db, viewerId, isAdmin) {
+  if (isAdmin) return true;
+  if (viewerId == null) return false;
+  const row = db.prepare('SELECT is_member FROM players WHERE id = ?').get(viewerId);
+  return !!row?.is_member;
+}
+
 function _shape(db, e, viewerId) {
   const { members_count, guests_count } = _counts(db, e.id);
   const total = members_count + guests_count;
@@ -61,6 +72,8 @@ function _shape(db, e, viewerId) {
     description: e.description || '',
     event_date: e.event_date,
     start_time: e.start_time || null,
+    end_time: e.end_time || null,
+    members_only: !!e.members_only,
     guests_allowed: e.guests_allowed,
     max_people: e.max_people,
     members_count,
@@ -74,14 +87,15 @@ function _shape(db, e, viewerId) {
   };
 }
 
-function listEvents({ scope, today, viewerId }) {
+function listEvents({ scope, today, viewerId, isAdmin = false }) {
   const db = getDB();
+  const seesMembersOnly = _canSeeMembersOnly(db, viewerId, isAdmin);
   const past = scope === 'past';
   const rows = db.prepare(
     past
       ? `SELECT * FROM events WHERE event_date < ? ORDER BY event_date DESC, start_time ASC, id ASC`
       : `SELECT * FROM events WHERE event_date >= ? ORDER BY event_date ASC, start_time ASC, id ASC`
-  ).all(today);
+  ).all(today).filter((e) => !e.members_only || seesMembersOnly);
   return rows.map((e) => _shape(db, e, viewerId));
 }
 
@@ -89,6 +103,8 @@ function getEvent(id, { viewerId, isAdmin }) {
   const db = getDB();
   const e = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
   if (!e) return null;
+  // A members-only event does not exist for anyone else, by id either.
+  if (e.members_only && !_canSeeMembersOnly(db, viewerId, isAdmin)) return null;
   const shaped = _shape(db, e, viewerId);
   shaped.attendees = db.prepare(`
     SELECT s.player_id, p.name, p.member_number, s.guests, s.created_at
@@ -105,10 +121,16 @@ function getEvent(id, { viewerId, isAdmin }) {
   return shaped;
 }
 
-function _validateFields({ name, event_date, start_time, guests_allowed, max_people, league_id, tournament_id }) {
+function _validateFields({ name, event_date, start_time, end_time, members_only, guests_allowed, max_people, league_id, tournament_id }) {
   if (!name || !String(name).trim()) throw _validationError('Name is required.');
   if (!event_date || !/^\d{4}-\d{2}-\d{2}$/.test(event_date)) throw _validationError('A date is required.');
   if (start_time != null && start_time !== '' && !/^\d{2}:\d{2}$/.test(start_time)) throw _validationError('Start time must be HH:MM.');
+  if (end_time != null && end_time !== '' && !/^\d{2}:\d{2}$/.test(end_time)) throw _validationError('End time must be HH:MM.');
+  // A time is a span or nothing: a start with no end reads as an event with no
+  // finish, and an end alone is meaningless.
+  const hasStart = !!start_time, hasEnd = !!end_time;
+  if (hasStart !== hasEnd) throw _validationError('Enter both a start and an end time, or neither.');
+  if (hasStart && end_time <= start_time) throw _validationError('The end time must be after the start.');
   const guests = Number(guests_allowed) || 0;
   if (guests < 0) throw _validationError('Guests allowed cannot be negative.');
   const max = max_people == null || max_people === '' ? null : Number(max_people);
@@ -118,6 +140,8 @@ function _validateFields({ name, event_date, start_time, guests_allowed, max_peo
     name: String(name).trim(),
     event_date,
     start_time: start_time || null,
+    end_time: end_time || null,
+    members_only: members_only ? 1 : 0,
     // A linked event never takes guests: people register themselves.
     guests_allowed: (league_id || tournament_id) ? 0 : guests,
     max_people: max,
@@ -130,9 +154,9 @@ function createEvent(fields) {
   const db = getDB();
   const f = _validateFields(fields);
   const r = db.prepare(`
-    INSERT INTO events (name, description, event_date, start_time, guests_allowed, max_people, league_id, tournament_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(f.name, String(fields.description || ''), f.event_date, f.start_time, f.guests_allowed, f.max_people, f.league_id, f.tournament_id);
+    INSERT INTO events (name, description, event_date, start_time, end_time, members_only, guests_allowed, max_people, league_id, tournament_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(f.name, String(fields.description || ''), f.event_date, f.start_time, f.end_time, f.members_only, f.guests_allowed, f.max_people, f.league_id, f.tournament_id);
   return db.prepare('SELECT * FROM events WHERE id = ?').get(r.lastInsertRowid);
 }
 
@@ -142,10 +166,10 @@ function updateEvent(id, fields) {
   if (!existing) throw _validationError('Event not found.', 404);
   const f = _validateFields(fields);
   db.prepare(`
-    UPDATE events SET name = ?, description = ?, event_date = ?, start_time = ?,
+    UPDATE events SET name = ?, description = ?, event_date = ?, start_time = ?, end_time = ?, members_only = ?,
       guests_allowed = ?, max_people = ?, league_id = ?, tournament_id = ?
     WHERE id = ?
-  `).run(f.name, String(fields.description || ''), f.event_date, f.start_time, f.guests_allowed, f.max_people, f.league_id, f.tournament_id, id);
+  `).run(f.name, String(fields.description || ''), f.event_date, f.start_time, f.end_time, f.members_only, f.guests_allowed, f.max_people, f.league_id, f.tournament_id, id);
   return db.prepare('SELECT * FROM events WHERE id = ?').get(id);
 }
 
@@ -162,6 +186,9 @@ function _writeSignup(eventId, playerId, guests, today, { mustExist }) {
     const e = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!e) throw _validationError('Event not found.', 404);
     if (e.event_date < today) throw _validationError('This event has already happened.', 409);
+    if (e.members_only && !_canSeeMembersOnly(db, playerId, false)) {
+      throw _validationError('This event is for club members.', 403);
+    }
     if (g < 0 || g > e.guests_allowed) {
       throw _validationError(e.guests_allowed === 0
         ? 'This event does not take guests.'

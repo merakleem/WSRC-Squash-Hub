@@ -12,10 +12,12 @@ let fails = 0;
 const ok = (n, c, x = '') => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== '' ? ` [${x}]` : '')); };
 
 db.prepare("INSERT INTO players (name, member_number) VALUES ('Ann A','M-1'),('Bob B','M-2'),('Cy C','M-3'),('Dee D','M-4')").run();
+// Ann and Bob are members; Cy and Dee are not.
+db.prepare('UPDATE players SET is_member = 1 WHERE id IN (1, 2)').run();
 db.prepare("INSERT INTO leagues (name, start_date, num_teams, num_divisions) VALUES ('Autumn League', '2026-10-01', 8, 2)").run();
 const TODAY = '2026-09-04';
 
-const e1 = M.createEvent({ name: 'Social', event_date: '2026-09-20', start_time: '19:00', guests_allowed: 1, max_people: 4 });
+const e1 = M.createEvent({ name: 'Social', event_date: '2026-09-20', start_time: '19:00', end_time: '22:00', guests_allowed: 1, max_people: 4 });
 M.signUp(e1.id, 1, 1, TODAY);
 M.signUp(e1.id, 2, 0, TODAY);
 try { M.signUp(e1.id, 3, 1, TODAY); ok('over-capacity refused', false); }
@@ -57,6 +59,31 @@ const ex = M.exportRows(e1.id);
 ok('export rows', ex.rows.length === 1 && ex.rows[0].name === 'Ann A');
 const links = M.searchLinkables('aut');
 ok('linkables search', links.length === 1 && links[0].meta.includes('2 divisions'));
+
+
+console.log('A TIME IS A SPAN OR NOTHING');
+const refuse = (label, fields, re) => { try { M.createEvent(fields); ok(label, false, 'accepted'); } catch (err) { ok(label, re.test(err.message), err.message); } };
+refuse('an end time with no start is refused', { name: 'X', event_date: '2026-11-01', end_time: '21:00' }, /both a start and an end/);
+refuse('a start with no end is refused', { name: 'X', event_date: '2026-11-01', start_time: '19:00' }, /both a start and an end/);
+refuse('an end before the start is refused', { name: 'X', event_date: '2026-11-01', start_time: '19:00', end_time: '18:00' }, /after the start/);
+const span = M.createEvent({ name: 'Span', event_date: '2026-11-01', start_time: '19:00', end_time: '21:00' });
+ok('a proper span is stored and shaped', span.start_time === '19:00' && span.end_time === '21:00');
+ok('no time at all is still fine', M.createEvent({ name: 'Untimed', event_date: '2026-11-02' }).end_time === null);
+
+console.log('MEMBERS ONLY IS ENFORCED ON THE SERVER');
+const mo = M.createEvent({ name: 'Members Social', event_date: '2026-11-05', members_only: true, guests_allowed: 1 });
+ok('the flag is stored', !!mo.members_only);
+const names = (list) => list.map((e) => e.name);
+ok('a non-member does not see it in the list', !names(M.listEvents({ scope: 'upcoming', today: TODAY, viewerId: 3 })).includes('Members Social'));
+ok('a member does', names(M.listEvents({ scope: 'upcoming', today: TODAY, viewerId: 1 })).includes('Members Social'));
+ok('an admin does', names(M.listEvents({ scope: 'upcoming', today: TODAY, viewerId: null, isAdmin: true })).includes('Members Social'));
+ok('a non-member cannot fetch it by id either', M.getEvent(mo.id, { viewerId: 3, isAdmin: false }) === null);
+ok('a member can', M.getEvent(mo.id, { viewerId: 1, isAdmin: false })?.name === 'Members Social');
+try { M.signUp(mo.id, 3, 0, TODAY); ok('a non-member cannot sign up', false, 'accepted'); }
+catch (err) { ok('a non-member cannot sign up', err.status === 403 && /club members/.test(err.message), err.message); }
+M.signUp(mo.id, 1, 0, TODAY);
+ok('a member can sign up', M.getEvent(mo.id, { viewerId: 1, isAdmin: false }).my_signup !== null);
+ok('an open event is unchanged for everyone', names(M.listEvents({ scope: 'upcoming', today: TODAY, viewerId: 3 })).includes('Span'));
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
 process.exit(fails ? 1 : 0);
