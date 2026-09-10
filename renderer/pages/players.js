@@ -2100,13 +2100,17 @@ function _quickLinksHTML(upcomingCount, tournCount) {
 const PHOTO_MAX_PX = 512;
 const PHOTO_QUALITY = 0.82;
 
+// One plain message for anything the browser cannot decode - an iPhone HEIC
+// is the usual case - rather than an explanation.
+const PHOTO_FORMAT_ERROR = 'That file format is not accepted.';
+
 function _shrinkPhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onerror = () => reject(new Error(PHOTO_FORMAT_ERROR));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error('That file could not be read as an image.'));
+      img.onerror = () => reject(new Error(PHOTO_FORMAT_ERROR));
       img.onload = () => {
         // Centre square crop, since every surface draws the photo in a circle.
         const side = Math.min(img.width, img.height);

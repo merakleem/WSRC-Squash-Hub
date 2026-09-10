@@ -281,12 +281,16 @@ export async function renderSchedule() {
     if (!idxs.length) return null;
     const lo = Math.min(...idxs), hi = Math.max(...idxs);
     const isCustom = s.source === 'custom';
-    const playerNames = (s.players || []).map((p) => p.name).filter(Boolean);
-    const typeName = s.bookingTypeId ? (typeById.get(s.bookingTypeId)?.name || 'Booking') : 'Standard';
+    // A typed booking is called by its type and lists everyone on it. A
+    // player's own booking is called by the booker and lists who they are
+    // with. An untyped booking with no booker keeps its old label, if any.
+    const booker = (s.players || []).find((p) => p.id === s.bookedBy) || null;
+    const others = (s.players || []).filter((p) => p !== booker).map((p) => p.name).filter(Boolean);
+    const typeName = s.bookingTypeId ? (typeById.get(s.bookingTypeId)?.name || 'Booking') : null;
     const color = isCustom ? (s.bookingTypeId ? (s.color || '#3550c8') : '#3550c8') : (s.color || '#3550c8');
-    const title = isCustom ? (s.name || playerNames[0] || typeName) : s.title;
+    const title = isCustom ? (typeName || booker?.name || s.name || others[0] || 'Standard') : s.title;
     const info = isCustom
-      ? ((s.name ? playerNames.join(', ') : playerNames.slice(1).join(', ')) || s.info || '')
+      ? ((typeName || booker || s.name ? others.join(', ') : others.slice(1).join(', ')) || s.info || '')
       : (s.info || '');
     return { ...s, startMin, endMin: startMin + s.durationMinutes, lo, hi, color, title, info, isCustom };
   }).filter((s) => s && s.startMin >= DAY_START - 24 * 60 && topFor(s.startMin) < BASE_GRID_H && topFor(s.endMin) > 0);

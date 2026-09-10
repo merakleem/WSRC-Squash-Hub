@@ -105,6 +105,25 @@ function isMine(slot) {
   return pid != null && Array.isArray(slot.players) && slot.players.some(p => p.id === pid);
 }
 
+// Being on a booking colours it yours; only having made it lets you change it.
+// A booking the club made has no booker, so nobody but the admin edits it.
+function bookedByMe(slot) {
+  const pid = state.currentUser?.playerId;
+  return pid != null && slot?.bookedBy === pid;
+}
+
+// The line under a booking's title: who it is with. A player's booking is
+// titled by its booker, so this lists everyone else ("with S. Duarte"); a club
+// booking is titled by its type, so this lists everyone on it.
+function _subLine(slot, { short = false } = {}) {
+  const names = (slot.players || [])
+    .filter(p => p.id !== slot.bookedBy)
+    .map(p => short ? abbrevName(p.name) : p.name)
+    .filter(Boolean);
+  if (!names.length) return '';
+  return slot.bookedBy ? `with ${names.join(', ')}` : names.join(', ');
+}
+
 // A booking spanning several courts arrives as one row carrying every court it
 // covers. Matching only its first court left the others looking free while the
 // server still refused to book them.
@@ -426,13 +445,18 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
     const mine = isMine(s);
     const league = !mine && s.source && s.source !== 'custom';
     const kind = mine ? 'mine' : league ? 'league' : 'other';
-    const canEdit = mine && !isPast && !_isMultiCourt(s);
+    const canEdit = bookedByMe(s) && !isPast && !_isMultiCourt(s);
     const editing = cb.panel === 'edit' && String(cb.panelBooking?.id) === String(s.id);
+    // A half-hour block has room for two lines, so there the people share the
+    // title line; anything longer gives them a line of their own.
+    const sub = _subLine(s, { short: true });
+    const tall = s.durationMinutes > SLOT_MIN;
     return `
       <div class="cb-block cb-block--${kind}${canEdit ? ' cb-block--editable' : ''}${editing ? ' cb-block--editing' : ''}"
         data-bid="${s.id}" data-court="${courtId}"${s.source && s.source !== 'custom' ? ` data-match="${s.id}"` : ''}
         style="top:${topFor(s.startMin) + 1}px;height:${Math.max(h - 3, 16)}px">
-        <span class="cb-block-title">${esc(mine ? 'You' : s.title)}</span>
+        <span class="cb-block-title">${esc(s.title)}${sub && !tall ? ` <span class="cb-block-sub-inline">· ${esc(sub)}</span>` : ''}</span>
+        ${sub && tall ? `<span class="cb-block-sub">${esc(sub)}</span>` : ''}
         <span class="cb-block-time">${fmtRange(s.startMin, s.durationMinutes)}</span>
         ${canEdit ? '<span class="cb-block-edit">Edit</span>' : ''}
       </div>`;
@@ -544,16 +568,17 @@ function _buildMobileBooking() {
     // Its title is the fallback when the names are not known yet.
     const pair = league && /\svs\s/.test(bk.info || '') ? bk.info.split(/\s+vs\s+/).map(abbrevName).join(' vs ') : null;
     const what = league ? (bk.source === 'tournament' ? 'Tournament' : 'League match') : null;
+    const sub = bk && !league ? _subLine(bk, { short: true }) : '';
     const labelHTML = bk
-      ? (mine ? 'You'
-        : pair ? `<span class="cb-mslot-l1">${esc(pair)}</span><span class="cb-mslot-l2">${esc(what)}</span>`
+      ? (pair ? `<span class="cb-mslot-l1">${esc(pair)}</span><span class="cb-mslot-l2">${esc(what)}</span>`
+        : sub ? `<span class="cb-mslot-l1">${esc(bk.title)}</span><span class="cb-mslot-l2 cb-mslot-l2--who">${esc(sub)}</span>`
         : esc(bk.title))
       : 'Open';
     const mark = bk
       ? `${fmtShort(bk.startMin)}–${fmtShort(bk.startMin + bk.durationMinutes)}`
       : sel ? 'Selected' : '+';
     const attrs = bk
-      ? (mine ? ` data-mbid="${esc(String(bk.id))}"` : '')
+      ? (bookedByMe(bk) && !_isMultiCourt(bk) ? ` data-mbid="${esc(String(bk.id))}"` : '')
       : ` data-mstart="${m}"`;
     return `<div class="cb-mslot cb-mslot--${kind}"${attrs}>
       <span class="cb-mslot-t">${fmtPill(m)}</span>
@@ -598,9 +623,10 @@ function _buildMyBookingsDesktop() {
 
   const cards = cb.myBookings.map(b => {
     const d = new Date(b.date + 'T12:00:00');
-    const others = _otherNames(b);
     const editing = cb.panel === 'edit' && String(cb.panelBooking?.id) === String(b.id);
     const confirming = String(cb.listConfirm) === String(b.id);
+    const own = bookedByMe(b);
+    const sub = _subLine(b) || (own ? 'Just you' : '');
     return `
       <div class="cb-mine-card${editing ? ' cb-mine-card--editing' : ''}" data-bid="${b.id}">
         <div class="cb-mine-row">
@@ -609,14 +635,15 @@ function _buildMyBookingsDesktop() {
             <span class="cb-date-tile-n">${d.getDate()}</span>
           </div>
           <div class="cb-mine-detail">
-            <div class="cb-mine-court">${esc(b.courtName)}${b.date === todayStr() ? '<span class="cb-today-pill">Today</span>' : ''}</div>
-            <div class="cb-mine-when">${esc(fmtLongDate(b.date))} · ${fmtRange(b.startMin, b.durationMinutes)}</div>
-            <div class="cb-mine-with">${others.length ? `With ${esc(others.join(', '))}` : 'Just you'}</div>
+            <div class="cb-mine-court">${esc(b.title)}${b.date === todayStr() ? '<span class="cb-today-pill">Today</span>' : ''}</div>
+            <div class="cb-mine-when">${esc(b.courtName)} · ${esc(fmtLongDate(b.date))} · ${fmtRange(b.startMin, b.durationMinutes)}</div>
+            ${sub ? `<div class="cb-mine-with">${esc(sub)}</div>` : ''}
           </div>
+          ${own ? `
           <div class="cb-mine-actions">
             ${b.courtCount > 1 ? '' : `<button class="cb-mine-edit" data-edit="${b.id}">Edit</button>`}
             <button class="cb-mine-del" data-del="${b.id}" aria-label="Cancel booking">${ICON.trash}</button>
-          </div>
+          </div>` : ''}
         </div>
         ${confirming ? `
         <div class="cb-inline-confirm">
@@ -650,10 +677,11 @@ function _buildMyBookingsMobile() {
           <span class="cb-date-tile-n">${d.getDate()}</span>
         </div>
         <div class="cb-mmine-detail">
-          <div class="cb-mmine-court">${esc(b.courtName)}</div>
-          <div class="cb-mmine-when">${fmtRange(b.startMin, b.durationMinutes)}${b.date === todayStr() ? ' · Today' : ''}</div>
+          <div class="cb-mmine-court">${esc(b.title)}</div>
+          <div class="cb-mmine-when">${esc(b.courtName)} · ${fmtRange(b.startMin, b.durationMinutes)}${b.date === todayStr() ? ' · Today' : ''}</div>
+          ${_subLine(b, { short: true }) ? `<div class="cb-mmine-who">${esc(_subLine(b, { short: true }))}</div>` : ''}
         </div>
-        ${b.courtCount > 1 ? '' : `<button class="cb-mine-edit" data-edit="${b.id}">Edit</button>`}
+        ${b.courtCount > 1 || !bookedByMe(b) ? '' : `<button class="cb-mine-edit" data-edit="${b.id}">Edit</button>`}
       </div>`;
   }).join('');
 

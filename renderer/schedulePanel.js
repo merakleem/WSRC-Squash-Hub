@@ -124,7 +124,6 @@ export async function openBookingPanel(opts) {
     start: Math.max(DAY_START, Math.min(start ?? DAY_START, DAY_END - STEP)),
     dur: Math.max(STEP, dur),
     typeId: editSlot ? (editSlot.bookingTypeId || null) : null,
-    name: editSlot ? (editSlot.name || '') : '',
     chosen: editSlot ? (editSlot.players || []).map((x) => ({ id: x.id, name: x.name })) : [],
     search: '',
     dows: [new Date(dy, dm - 1, dd).getDay()],
@@ -212,9 +211,10 @@ function courtsHint() {
   if (isContiguous()) return `One booking across ${p.courtIds.length} courts`;
   return p.mode === 'edit' ? 'Courts must sit side by side' : 'Separate bookings for non-adjacent courts';
 }
-// What the block will be called: the label, else the first player, else the type.
+// What the block will be called: its type, else the first player. The type is
+// the label; there is no separate free-text one any more.
 function savedTitle() {
-  return p.name.trim() || p.chosen[0]?.name || typeOf(p.typeId)?.name || 'Standard';
+  return typeOf(p.typeId)?.name || p.chosen[0]?.name || 'Standard';
 }
 
 function searchResults() {
@@ -245,7 +245,7 @@ function headHTML() {
   const isEdit = p.mode === 'edit';
   const names = p.courtIds.map(courtName).filter(Boolean);
   const title = isEdit
-    ? (p.name || p.editSlot?.title || 'Booking')
+    ? (p.editSlot?.title || 'Booking')
     : (names.length > 1 ? `${names.length} courts` : names[0] || 'Pick a court');
 
   return `
@@ -327,14 +327,6 @@ function detailsHTML() {
     <div class="sch-panel-section">
       <span class="sch-panel-label">Booking type</span>
       <div class="sch-chiprow">${typeChips}</div>
-    </div>
-
-    <div class="sch-panel-section">
-      <div class="sch-panel-labelrow">
-        <span class="sch-panel-label">Label</span>
-        <span class="sch-panel-optional">Optional</span>
-      </div>
-      <input class="sch-panel-input" id="schPanelName" value="${esc(p.name)}" placeholder="e.g. Junior training" autocomplete="off">
     </div>
 
     <div class="sch-panel-section">
@@ -526,10 +518,6 @@ function wire(aside) {
     paint();
   }));
 
-  // Typing never repaints the panel; only what depends on it.
-  const nameEl = aside.querySelector('#schPanelName');
-  nameEl?.addEventListener('input', () => { p.name = nameEl.value; repaintFoot(); });
-
   const searchEl = aside.querySelector('#schPanelSearch');
   searchEl?.addEventListener('input', () => {
     p.search = searchEl.value;
@@ -577,7 +565,8 @@ function bookingData() {
     startTime: minToTime(p.start),
     durationMinutes: p.dur,
     bookingTypeId: p.typeId,
-    name: p.name.trim() || null,
+    // The type is the label now. Saving clears any label an older booking had.
+    name: null,
     info: null,
     playerIds: p.chosen.map((x) => x.id),
   };
