@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal, formatShortDate, abbrevName } from '../utils.js';
+import { esc, toast, modal, formatShortDate, abbrevName, playerInitials, clubNow, clubTodayStr } from '../utils.js';
 
 // ===== DASHBOARD HELPERS =====
 function timeAgo(utcStr) {
@@ -61,70 +61,308 @@ function buildActivityHTML(activity, isAdmin = false) {
 }
 
 // ===== CLUB ACTIVITY PAGE =====
-export async function renderClubActivity(days = 7) {
+// The feed of recorded matches, grouped by day. Players get the feed; admins
+// also get a name search, match-type filters, who submitted each result, and
+// delete on ladder matches. Built to the club-activity design handoff.
+const CA_PAGE = 8;
+const CA_AVATAR_COLORS = ['#1e2758', '#2f6f8f', '#7a4b9a', '#3d7a5a', '#a1543c', '#4a5b8c', '#8a6a1f', '#5c6b7a'];
+const CA_FILTERS = [
+  { key: 'all',        name: 'All',         what: 'match' },
+  { key: 'pickup',     name: 'Ladder',      what: 'ladder match',     dot: '#5b7cf9' },
+  { key: 'league',     name: 'Leagues',     what: 'league match',     dot: '#0f7b3f' },
+  { key: 'tournament', name: 'Tournaments', what: 'tournament match', dot: '#c9a227' },
+];
+const CA_ICON = {
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="#7e8c9a" stroke-width="2.2" class="ca-search-icon" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.2-4.2"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  up: '<svg viewBox="0 0 12 12" aria-hidden="true" class="ca-up"><path d="M6 3 L10.2 8.6 L1.8 8.6 Z" fill="currentColor"/></svg>',
+};
+const ca = { all: null, query: '', filter: 'all', limit: CA_PAGE, loading: false, confirmId: null, onScroll: null, toastTimer: null };
+
+// When a match happened, at the club. A stored timestamp is UTC when it
+// carries a time; a bare date is a bare date, with no time to show.
+function _caWhen(str) {
+  const s = String(str || '');
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(s)) {
+    return clubNow(new Date(s.replace(' ', 'T').slice(0, 19) + 'Z'));
+  }
+  return { date: s.slice(0, 10), minutes: null };
+}
+function _caTime(minutes) {
+  if (minutes == null) return '';
+  const h = Math.floor(minutes / 60), mi = minutes % 60;
+  return `${h % 12 || 12}:${String(mi).padStart(2, '0')} ${h >= 12 ? 'pm' : 'am'}`;
+}
+function _caShiftDay(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+function _caDayLabel(date, today) {
+  if (date === today) return 'Today';
+  if (date === _caShiftDay(today, -1)) return 'Yesterday';
+  return new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+}
+function _caDaySub(date) {
+  return new Date(date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function _caShape(m) {
+  const p1Won = m.won_side != null ? m.won_side === 1 : m.winner_id === m.player1_id;
+  const side = (one) => ({
+    id: one ? (m.eff_p1_id ?? m.player1_id) : (m.eff_p2_id ?? m.player2_id),
+    name: one ? m.p1_name : m.p2_name,
+    pos: one ? m.p1_pos : m.p2_pos,
+    score: one ? m.player1_score : m.player2_score,
+  });
+  const w = side(p1Won), l = side(!p1Won);
+  const { date, minutes } = _caWhen(m.confirmed_at);
+  const tag = m.source === 'league' ? (m.league_name || 'League')
+    : m.source === 'tournament' ? [m.tournament_name || 'Tournament', _roundLabels[m.round] || m.round || ''].filter(Boolean).join(' · ')
+    : 'Ladder';
+  return {
+    id: m.id, source: m.source, winners: [w], losers: [l],
+    score: `${w.score}–${l.score}`, date, minutes, tag,
+    moved: m.places_moved > 0 ? m.places_moved : 0,
+    by: m.submitted_by_name || '',
+  };
+}
+
+const _caNameText = (p) => (p.pos ? `(#${p.pos}) ` : '') + abbrevName(p.name);
+const _caSide = (list) => list.map(_caNameText).join(' & ');
+
+function _caMatching() {
+  const q = ca.query.trim().toLowerCase();
+  const filter = isAdmin() ? ca.filter : 'all';
+  return (ca.all || [])
+    .filter((m) => filter === 'all' || m.source === filter)
+    .filter((m) => !q || [...m.winners, ...m.losers].some((p) => String(p.name || '').toLowerCase().includes(q)));
+}
+
+function _caRowHTML(m, admin) {
+  const avatars = [...m.winners.map((p) => ({ ...p, win: true })), ...m.losers.map((p) => ({ ...p, win: false }))]
+    .map((p) => `<span class="ca-av${p.win ? '' : ' ca-av--lost'}" title="${esc(p.name)}" style="background:${CA_AVATAR_COLORS[Math.abs(Number(p.id) || 0) % CA_AVATAR_COLORS.length]}">${esc(playerInitials(p.name))}</span>`)
+    .join('');
+  const moved = m.moved
+    ? `<span class="ca-moved">${CA_ICON.up}${esc(abbrevName(m.winners[0].name))} up ${m.moved} place${m.moved !== 1 ? 's' : ''}</span>` : '';
+  const by = admin && m.source !== 'tournament'
+    ? `<span class="ca-by">Submitted by ${esc(abbrevName(m.by) || 'Admin')}</span>` : '';
+  const del = admin && m.source === 'pickup'
+    ? `<button class="ca-del" data-del="${m.id}" aria-label="Delete this ladder match" title="Delete">${CA_ICON.trash}</button>` : '';
+  return `
+    <article class="ca-row" data-match="${m.id}">
+      <div class="ca-avs">${avatars}</div>
+      <div class="ca-text">
+        <div class="ca-line1">
+          <span class="ca-winner">${esc(_caSide(m.winners))}</span>
+          <span class="ca-beat">beat</span>
+          <span class="ca-loser">${esc(_caSide(m.losers))}</span>
+          <span class="ca-score">${esc(m.score)}</span>
+        </div>
+        <div class="ca-line2">
+          <span class="ca-tag ca-tag--${esc(m.source)}"><span class="ca-tag-dot"></span>${esc(m.tag)}</span>
+          ${moved}${by}
+        </div>
+      </div>
+      <div class="ca-right">
+        <span class="ca-time">${esc(_caTime(m.minutes))}</span>
+        ${del}
+      </div>
+    </article>`;
+}
+
+function _caFeedHTML() {
+  const admin = isAdmin();
+  const q = ca.query.trim();
+  const filter = admin ? ca.filter : 'all';
+  const matching = _caMatching();
+  const shown = matching.slice(0, ca.limit);
+  const hasMore = matching.length > ca.limit;
+  const hasQuery = !!q || filter !== 'all';
+  const f = CA_FILTERS.find((x) => x.key === filter);
+  const n = matching.length;
+  const countText = `${n} ${f.what}${n !== 1 ? 'es' : ''}${q ? ` for “${q}”` : ''}`;
+
+  const today = clubTodayStr();
+  const byDay = new Map();
+  for (const m of shown) {
+    if (!byDay.has(m.date)) byDay.set(m.date, []);
+    byDay.get(m.date).push(m);
+  }
+  const sections = [...byDay.entries()].map(([date, items]) => {
+    const label = _caDayLabel(date, today);
+    const recent = label === 'Today' || label === 'Yesterday';
+    const sub = recent ? _caDaySub(date) : `${_caDaySub(date)} · ${items.length} match${items.length !== 1 ? 'es' : ''}`;
+    return `
+      <section class="ca-day">
+        <div class="ca-day-head"><span class="ca-day-label">${esc(label)}</span><span class="ca-day-sub">${esc(sub)}</span></div>
+        <div class="ca-card">${items.map((m) => _caRowHTML(m, admin)).join('')}</div>
+      </section>`;
+  }).join('');
+
+  const tail = hasMore
+    ? `<div class="ca-more" role="status"><span class="ca-spinner"></span>Loading older matches…</div>`
+    : (shown.length > CA_PAGE ? `<div class="ca-end">No more matches</div>` : '');
+
+  const empty = shown.length === 0 ? `
+    <div class="ca-card ca-empty">
+      <strong class="ca-empty-title">${q ? `No matches for “${esc(q)}”` : `No ${filter === 'all' ? '' : f.name.toLowerCase() + ' '}matches yet`}</strong>
+      <span class="ca-empty-sub">${hasQuery ? 'Try a different name or widen the filters.' : 'Matches will appear here as they are recorded.'}</span>
+      ${hasQuery ? '<button class="ca-empty-clear" data-clear>Clear search and filters</button>' : ''}
+    </div>` : '';
+
+  return `
+    <div class="ca-countline">
+      <span class="ca-count" role="status">${esc(countText)}</span>
+      ${hasQuery ? '<button class="ca-clear" data-clear>Clear</button>' : ''}
+    </div>
+    ${sections}${tail}${empty}`;
+}
+
+function _caToolbarHTML() {
+  if (!isAdmin()) return '';
+  const chips = CA_FILTERS.map((f) => {
+    const on = f.key === ca.filter;
+    return `<button class="ca-chip${on ? ' ca-chip--on' : ''}" data-filter="${f.key}" aria-pressed="${on}">
+      <span class="ca-chip-dot" style="background:${f.dot || (on ? 'rgba(255,255,255,.6)' : '#b9c4d4')}"></span>${f.name}</button>`;
+  }).join('');
+  return `
+    <div class="ca-toolbar">
+      <div class="ca-search">
+        ${CA_ICON.search}
+        <input type="search" class="ca-search-input" id="caSearch" value="${esc(ca.query)}" placeholder="Search by player name" aria-label="Search by player name" autocomplete="off">
+      </div>
+      <div class="ca-chips" role="group" aria-label="Filter by match type">${chips}</div>
+    </div>`;
+}
+
+function _caLoadMore() {
+  if (ca.loading || _caMatching().length <= ca.limit) return;
+  ca.loading = true;
+  requestAnimationFrame(() => {
+    ca.limit += CA_PAGE;
+    ca.loading = false;
+    _caRenderFeed();
+  });
+}
+
+// Eight rows may not reach the bottom of a tall window, and a list that
+// cannot scroll would never ask for more. So after each render, if the page
+// still has room and there is more, the next page comes on its own.
+function _caFillIfShort() {
+  const content = document.getElementById('mainContent');
+  if (!content || !content.querySelector('.ca-feed')) return;
+  if (content.scrollHeight <= content.clientHeight + 160) _caLoadMore();
+}
+
+function _caRenderFeed() {
+  const feed = document.getElementById('caFeed');
+  if (!feed) return;
+  feed.innerHTML = _caFeedHTML();
+  _caWireFeed();
+  _caFillIfShort();
+}
+
+function _caWireFeed() {
+  const content = document.getElementById('mainContent');
+  content.querySelectorAll('[data-clear]').forEach((b) => b.addEventListener('click', () => {
+    ca.query = ''; ca.filter = 'all'; ca.limit = CA_PAGE;
+    _caRender();
+  }));
+  content.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
+    ca.confirmId = Number(b.dataset.del);
+    _caRenderDialog();
+  }));
+}
+
+function _caRender() {
+  const content = document.getElementById('mainContent');
+  content.innerHTML = `${_caToolbarHTML()}<div class="ca-feed" id="caFeed">${_caFeedHTML()}</div>`;
+
+  const search = document.getElementById('caSearch');
+  search?.addEventListener('input', () => { ca.query = search.value; ca.limit = CA_PAGE; _caRenderFeed(); });
+  content.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+    ca.filter = b.dataset.filter; ca.limit = CA_PAGE;
+    _caRender();
+  }));
+  _caWireFeed();
+  _caFillIfShort();
+}
+
+function _caRenderDialog() {
+  document.getElementById('caDialog')?.remove();
+  const m = (ca.all || []).find((x) => x.id === ca.confirmId);
+  if (!m) return;
+  const label = _caDayLabel(m.date, clubTodayStr());
+  const when = (label === 'Today' || label === 'Yesterday') ? label.toLowerCase() : label;
+  const time = _caTime(m.minutes);
+  const summary = `${m.winners.map((p) => abbrevName(p.name)).join(' & ')} beat ${m.losers.map((p) => abbrevName(p.name)).join(' & ')} ${m.score}, ${when}${time ? ` at ${time}` : ''}.`;
+  const wrap = document.createElement('div');
+  wrap.id = 'caDialog';
+  wrap.innerHTML = `
+    <div class="ca-backdrop" data-cancel></div>
+    <div class="ca-dialog" role="dialog" aria-modal="true" aria-label="Delete ladder match">
+      <div class="ca-dialog-body">
+        <span class="ca-dialog-title">Delete this ladder match?</span>
+        <span class="ca-dialog-text">${esc(summary)}</span>
+        <span class="ca-dialog-note">This cannot be undone. Ladder positions will be recalculated.</span>
+      </div>
+      <div class="ca-dialog-foot">
+        <button class="ca-dialog-cancel" data-cancel>Cancel</button>
+        <button class="ca-dialog-confirm" id="caConfirmDelete">Delete match</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  wrap.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', () => { ca.confirmId = null; wrap.remove(); }));
+  wrap.querySelector('#caConfirmDelete').addEventListener('click', async () => {
+    const id = ca.confirmId;
+    try {
+      await window.api.deletePickupMatch(id);
+      ca.all = ca.all.filter((x) => x.id !== id);
+      ca.confirmId = null;
+      wrap.remove();
+      _caRenderFeed();
+      _caToast('Ladder match deleted');
+    } catch (err) {
+      toast(err.message || 'Failed to delete.', 'error');
+    }
+  });
+}
+
+function _caToast(text) {
+  const host = document.querySelector('.main-wrapper') || document.body;
+  host.querySelector('.ca-toast')?.remove();
+  const el = document.createElement('div');
+  el.className = 'ca-toast';
+  el.setAttribute('role', 'status');
+  el.textContent = text;
+  host.appendChild(el);
+  clearTimeout(ca.toastTimer);
+  ca.toastTimer = setTimeout(() => el.remove(), 2400);
+}
+
+export async function renderClubActivity() {
   document.getElementById('pageTitle').textContent = 'Club Activity';
   document.getElementById('topbarActions').innerHTML = '';
 
   const content = document.getElementById('mainContent');
+  content.classList.add('ca-page');
   content.innerHTML = `<div class="ca-loading">Loading…</div>`;
+  ca.query = ''; ca.filter = 'all'; ca.limit = CA_PAGE; ca.loading = false; ca.confirmId = null;
+  document.getElementById('caDialog')?.remove();
 
-  const activity = await window.api.getActivity(days);
+  // The feed is paged here rather than by date: search and filters work over
+  // every recorded match, not just the ones scrolled into view.
+  const rows = await window.api.getActivity(3650);
+  ca.all = (rows || []).map(_caShape);
 
-  const admin = isAdmin();
-  const itemsHTML = (activity && activity.length > 0) ? activity.map((m) => {
-    const { winnerName, loserName, winnerLabel, loserLabel, winnerScore, loserScore, submittedByText, placesMovedText } = _activityDetails(m, admin);
-    const movesUp     = placesMovedText ? `<div class="ca-item-moves">${esc(placesMovedText)}</div>` : '';
-    const submittedBy = submittedByText ? `<div class="ca-item-by">${esc(submittedByText)}</div>` : '';
-    const deleteBtn   = (admin && m.source === 'pickup')
-      ? `<button class="ca-delete-btn" data-id="${m.id}">Delete</button>` : '';
-    return `
-      <div class="ca-item" data-match="${m.id}">
-        <div class="ca-item-main">
-          <span class="ca-winner">${esc(winnerLabel)}${esc(winnerName)}</span>
-          <span class="ca-verb"> beat </span>
-          <span class="ca-loser">${esc(loserLabel)}${esc(loserName)}</span>
-          <span class="ca-score"> ${winnerScore}–${loserScore}</span>
-        </div>
-        <div class="ca-item-meta">
-          <span class="ca-time">${esc(timeAgo(m.confirmed_at))}</span>
-          ${movesUp}${submittedBy}${deleteBtn}
-        </div>
-      </div>`;
-  }).join('') : `<div class="ca-empty">No activity in the past ${days} day${days !== 1 ? 's' : ''}.</div>`;
-
-  const loadMoreDays   = days === 7 ? 30 : days === 30 ? 90 : days === 90 ? 365 : null;
-  const loadMoreLabel  = loadMoreDays === 30 ? 'Load last 30 days' : loadMoreDays === 90 ? 'Load last 90 days' : loadMoreDays === 365 ? 'Load last year' : null;
-  const loadMoreHTML   = loadMoreLabel
-    ? `<div class="ca-load-more"><button class="btn btn-secondary" id="btnLoadMore">${loadMoreLabel}</button></div>`
-    : '';
-
-  content.innerHTML = `
-    <div class="ca-wrap section">
-      <div class="section-title">
-        Last ${days} day${days !== 1 ? 's' : ''}
-        <span class="divider"></span>
-        <span class="ca-count">${activity.length} match${activity.length !== 1 ? 'es' : ''}</span>
-      </div>
-      <div class="ca-list">${itemsHTML}</div>
-      ${loadMoreHTML}
-    </div>`;
-
-  if (loadMoreLabel) {
-    document.getElementById('btnLoadMore').addEventListener('click', () => renderClubActivity(loadMoreDays));
-  }
-
-  content.querySelectorAll('.ca-delete-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!confirm('Delete this ladder match? This cannot be undone.')) return;
-      try {
-        await window.api.deletePickupMatch(Number(btn.dataset.id));
-        toast('Ladder match deleted.', 'success');
-        renderClubActivity(days);
-      } catch (err) {
-        toast(err.message || 'Failed to delete.', 'error');
-      }
-    });
-  });
+  if (ca.onScroll) content.removeEventListener('scroll', ca.onScroll);
+  ca.onScroll = () => {
+    if (!content.querySelector('.ca-feed')) return;
+    if (content.scrollTop + content.clientHeight >= content.scrollHeight - 160) _caLoadMore();
+  };
+  content.addEventListener('scroll', ca.onScroll, { passive: true });
+  _caRender();
 }
 
 // ===== CLUB SETTINGS =====

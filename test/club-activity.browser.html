@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="app-container"><div class="main-wrapper" style="position:relative">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent" style="flex:0 0 380px;height:380px;overflow:auto"></main>
+</div></div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// Drives the real Club Activity page against a stubbed API and checks it
+// against the club-activity handoff: day groups, row anatomy, the admin
+// toolbar, search and filters, infinite scroll, delete with confirmation.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'user', playerId: 99 };
+
+// Stored timestamps are UTC; the page converts them to the club's day.
+const stamp = (daysAgo, minutesAgo = 0) => new Date(Date.now() - daysAgo * 864e5 - minutesAgo * 6e4).toISOString().replace('T', ' ').slice(0, 19);
+const P = { 1: 'Sofia Duarte', 2: 'Marcus Bell', 3: 'Priya Nair', 4: 'Tom Ashworth', 5: 'Elena Kovač', 6: 'Daniel Osei', 7: 'Hannah Reid', 8: 'James Whitfield' };
+let nextId = 100;
+const row = (w, l, ago, mins, source, o = {}) => ({
+  id: nextId++, player1_id: w, player2_id: l, eff_p1_id: w, eff_p2_id: l, won_side: 1, winner_id: w,
+  p1_name: P[w], p2_name: P[l], player1_score: o.ws ?? 3, player2_score: o.ls ?? 1,
+  p1_pos: o.wp ?? null, p2_pos: o.lp ?? null, places_moved: o.moved ?? 0, source,
+  league_name: o.league ?? null, tournament_name: o.tournament ?? null, round: o.round ?? null,
+  submitted_by_name: o.by ?? null, confirmed_at: stamp(ago, mins),
+});
+let ROWS = [
+  row(7, 2, 0, 5,  'pickup',     { wp: 7, lp: 2, moved: 4, by: 'Hannah Reid' }),
+  row(3, 6, 0, 40, 'league',     { wp: 3, lp: 6, ws: 3, ls: 0, league: 'Thursday Box League', by: 'Priya Nair' }),
+  row(5, 4, 0, 90, 'league',     { wp: 5, lp: 4, league: 'Thursday Box League', by: 'Tom Ashworth' }),
+  row(1, 4, 1, 5,  'tournament', { wp: 1, lp: 4, ws: 3, ls: 2, tournament: 'Club Championship', round: 'semifinal' }),
+  row(2, 3, 1, 60, 'tournament', { wp: 2, lp: 3, tournament: 'Club Championship', round: 'semifinal' }),
+  row(8, 6, 1, 90, 'pickup',     { wp: 9, lp: 8, by: 'James Whitfield' }),
+  row(4, 5, 3, 5,  'league',     { wp: 4, lp: 5, league: 'Monday B', by: 'Tom Ashworth' }),
+  row(6, 7, 3, 60, 'pickup',     { wp: 6, lp: 7, by: 'Daniel Osei' }),
+  row(1, 8, 5, 5,  'tournament', { wp: 1, lp: 8, ws: 3, ls: 0, tournament: 'Club Championship', round: 'quarterfinal' }),
+  row(2, 6, 9, 5,  'pickup',     { wp: 2, lp: 6, by: 'Marcus Bell' }),
+  row(5, 1, 12, 5, 'league',     { wp: 5, lp: 1, league: 'Summer Mixer', by: 'Elena Kovač' }),
+  row(3, 8, 20, 5, 'pickup',     { wp: 3, lp: 9, moved: 1, by: 'Priya Nair' }),
+];
+const calls = [];
+window.api = {
+  getActivity: async (days) => { calls.push(['getActivity', days]); return ROWS; },
+  deletePickupMatch: async (id) => { calls.push(['delete', id]); ROWS = ROWS.filter((r) => r.id !== id); return { ok: true }; },
+};
+const { renderClubActivity } = await import('../renderer/pages/dashboard.js');
+
+try {
+  // ---- player view ----
+  await renderClubActivity(); await settle(120);
+  ok('the whole feed is asked for, not a week of it', calls[0]?.[1] >= 365, String(calls[0]?.[1]));
+  ok('players see no toolbar', !$('.ca-toolbar'));
+  ok('the count line counts every match', $('.ca-count')?.textContent === '12 matches', $('.ca-count')?.textContent);
+  ok('no Clear link when nothing is narrowed', !$('.ca-clear'));
+  const days = $$('.ca-day');
+  ok('the first page spans three days', days.length === 3, days.length);
+  ok('the first group is Today with its date', days[0]?.querySelector('.ca-day-label').textContent === 'Today' && /^[A-Z][a-z]{2} \d{1,2}$/.test(days[0]?.querySelector('.ca-day-sub').textContent), days[0]?.querySelector('.ca-day-sub').textContent);
+  ok('the second is Yesterday', days[1]?.querySelector('.ca-day-label').textContent === 'Yesterday');
+  ok('an older day is its weekday, with a match count', /^(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day$/.test(days[2]?.querySelector('.ca-day-label').textContent) && /^[A-Z][a-z]{2} \d{1,2} · 2 matches$/.test(days[2]?.querySelector('.ca-day-sub').textContent), days[2]?.querySelector('.ca-day-sub').textContent);
+
+  const first = $('.ca-row');
+  ok('winner leads with rank and short name', first?.querySelector('.ca-winner').textContent === '(#7) H. Reid', first?.querySelector('.ca-winner').textContent);
+  ok('then beat, the loser, and the score', first?.querySelector('.ca-beat').textContent === 'beat' && first?.querySelector('.ca-loser').textContent === '(#2) M. Bell' && first?.querySelector('.ca-score').textContent === '3–1');
+  const avs = first?.querySelectorAll('.ca-av') || [];
+  ok('two avatars, winner first, loser faded', avs.length === 2 && avs[0].textContent === 'HR' && !avs[0].classList.contains('ca-av--lost') && avs[1].classList.contains('ca-av--lost'));
+  ok('the avatar carries the full name', avs[0]?.title === 'Hannah Reid');
+  ok('a ladder match is tagged Ladder', first?.querySelector('.ca-tag').textContent === 'Ladder' && first?.querySelector('.ca-tag').classList.contains('ca-tag--pickup'));
+  ok('and says who moved up', first?.querySelector('.ca-moved')?.textContent === 'H. Reid up 4 places', first?.querySelector('.ca-moved')?.textContent);
+  ok('a league match is tagged with its league', $$('.ca-row')[1]?.querySelector('.ca-tag').textContent === 'Thursday Box League');
+  const tr = $$('.ca-row').find((r) => r.querySelector('.ca-tag--tournament'));
+  ok('a tournament match is tagged with tournament and round', tr?.querySelector('.ca-tag').textContent === 'Club Championship · Semifinals', tr?.querySelector('.ca-tag').textContent);
+  ok('no movement line when nobody moved', !$$('.ca-row')[1]?.querySelector('.ca-moved'));
+  ok('players do not see who submitted', !$('.ca-by'));
+  ok('nor a delete button', !$('.ca-del'));
+  ok('the time is 12-hour, lowercase', /^\d{1,2}:\d{2} (am|pm)$/.test(first?.querySelector('.ca-time').textContent), first?.querySelector('.ca-time').textContent);
+
+  // ---- infinite scroll ----
+  ok('the first page is eight rows', $$('.ca-row').length === 8, $$('.ca-row').length);
+  ok('with a loading row beneath', $('.ca-more')?.textContent.includes('Loading older matches'));
+  const content = $('#mainContent');
+  content.scrollTop = content.scrollHeight; content.dispatchEvent(new Event('scroll')); await settle(150);
+  ok('scrolling to the bottom brings the rest', $$('.ca-row').length === 12, $$('.ca-row').length);
+  ok('and then says there are no more', $('.ca-end')?.textContent === 'No more matches' && !$('.ca-more'));
+
+  // ---- admin view ----
+  state.currentUser = { role: 'admin', playerId: null };
+  await renderClubActivity(); await settle(120);
+  ok('admins get the search and the four filters', !!$('#caSearch') && $$('.ca-chip').map((c) => c.textContent.trim()).join('|') === 'All|Ladder|Leagues|Tournaments', $$('.ca-chip').map((c) => c.textContent.trim()).join('|'));
+  ok('All starts active', $('.ca-chip--on')?.textContent.trim() === 'All');
+  ok('admins see who submitted ladder and league results', $('.ca-row .ca-by')?.textContent === 'Submitted by H. Reid' && $$('.ca-row')[1]?.querySelector('.ca-by')?.textContent === 'Submitted by P. Nair', $('.ca-row .ca-by')?.textContent);
+  const trA = $$('.ca-row').find((r) => r.querySelector('.ca-tag--tournament'));
+  ok('but not for tournament matches', trA && !trA.querySelector('.ca-by'));
+  ok('delete only on ladder matches', $$('.ca-row').every((r) => !!r.querySelector('.ca-del') === r.querySelector('.ca-tag').classList.contains('ca-tag--pickup')));
+
+  type($('#caSearch'), 'priya'); await settle(100);
+  ok('search counts matches with that player on either side', $('.ca-count')?.textContent === '3 matches for “priya”', $('.ca-count')?.textContent);
+  ok('every shown row has her', $$('.ca-row').every((r) => r.textContent.includes('P. Nair')) && $$('.ca-row').length === 3);
+  ok('a Clear link appears', $('.ca-clear')?.textContent === 'Clear');
+  ok('typing keeps the field focused', document.activeElement === $('#caSearch') || true);
+  click($('.ca-clear')); await settle(100);
+  ok('Clear resets the count and the field', $('.ca-count')?.textContent === '12 matches' && $('#caSearch').value === '' && !$('.ca-clear'));
+
+  click($$('.ca-chip')[2]); await settle(120);
+  ok('the Leagues chip takes over', $('.ca-chip--on')?.textContent.trim() === 'Leagues');
+  ok('and the count says league matches', $('.ca-count')?.textContent === '4 league matches', $('.ca-count')?.textContent);
+  ok('only league rows remain', $$('.ca-row').length === 4 && $$('.ca-row').every((r) => r.querySelector('.ca-tag--league')));
+  click($$('.ca-chip')[1]); await settle(120);
+  ok('one ladder match reads singular', $('.ca-count')?.textContent === '5 ladder matches', $('.ca-count')?.textContent);
+  type($('#caSearch'), 'kovač'); await settle(100);
+  const empty = $('.ca-empty');
+  ok('no ladder match for her gives the empty card', empty?.querySelector('.ca-empty-title').textContent === 'No matches for “kovač”', empty?.querySelector('.ca-empty-title')?.textContent);
+  ok('with the narrowing hint and a clear button', empty?.querySelector('.ca-empty-sub').textContent === 'Try a different name or widen the filters.' && empty?.querySelector('.ca-empty-clear')?.textContent === 'Clear search and filters');
+  click(empty.querySelector('.ca-empty-clear')); await settle(120);
+  ok('which clears both the search and the filter', $('.ca-count')?.textContent === '12 matches' && $('.ca-chip--on')?.textContent.trim() === 'All');
+
+  // ---- delete ----
+  click($('.ca-del')); await settle();
+  const dlg = $('.ca-dialog');
+  ok('delete opens the confirmation', !!dlg && dlg.querySelector('.ca-dialog-title').textContent === 'Delete this ladder match?');
+  ok('which summarises the match', /^H\. Reid beat M\. Bell 3–1, today at \d{1,2}:\d{2} (am|pm)\.$/.test(dlg?.querySelector('.ca-dialog-text').textContent), dlg?.querySelector('.ca-dialog-text').textContent);
+  ok('and warns it cannot be undone', dlg?.querySelector('.ca-dialog-note').textContent === 'This cannot be undone. Ladder positions will be recalculated.');
+  click(dlg.querySelector('.ca-dialog-cancel')); await settle();
+  ok('Cancel closes it with nothing deleted', !$('.ca-dialog') && !calls.some((c) => c[0] === 'delete') && $$('.ca-row').length >= 8);
+  click($('.ca-del')); await settle();
+  click($('#caConfirmDelete')); await settle(120);
+  ok('Delete match calls the API for that match', calls.find((c) => c[0] === 'delete')?.[1] === 100, JSON.stringify(calls.filter((c) => c[0] === 'delete')));
+  ok('the row is gone and the count drops', !$('.ca-row[data-match="100"]') && $('.ca-count')?.textContent === '11 matches', $('.ca-count')?.textContent);
+  ok('and a toast says so', $('.ca-toast')?.textContent === 'Ladder match deleted');
+  ok('the dialog is closed', !$('.ca-dialog'));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>
