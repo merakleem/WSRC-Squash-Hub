@@ -6232,6 +6232,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .cb-block-title { display: block; font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cb-block-time { display: block; font-size: 11px; margin-top: 1px; }
+.cb-block-sub { display: block; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-block-sub-inline { font-weight: 600; }
+.cb-block--other .cb-block-sub, .cb-block--other .cb-block-sub-inline { color: #6b7e93; }
+.cb-block--mine .cb-block-sub, .cb-block--mine .cb-block-sub-inline { color: #5566b0; }
 .cb-block--other  { background: #f1f4f8; border-left-color: #8793ab; }
 .cb-block--other .cb-block-title { color: #1c2b3a; }
 .cb-block--other .cb-block-time { color: #6b7e93; }
@@ -6434,6 +6438,8 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 /* A match row: who is playing on one line, what it is in small type under it. */
 .cb-mslot-l1, .cb-mslot-l2 { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cb-mslot-l2 { margin-top: 1px; font-size: 10.5px; font-weight: 600; letter-spacing: .03em; color: #a48a4a; }
+.cb-mslot--mine .cb-mslot-l2--who { color: #5566b0; letter-spacing: 0; }
+.cb-mslot--other .cb-mslot-l2--who { color: #93a2b5; letter-spacing: 0; }
 .cb-mslot-m { flex-shrink: 0; font-size: 15px; font-weight: 700; color: #3550c8; }
 .cb-mslot--sel .cb-mslot-m { font-size: 11px; }
 .cb-mslot--mine .cb-mslot-m, .cb-mslot--league .cb-mslot-m, .cb-mslot--other .cb-mslot-m {
@@ -6588,6 +6594,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 .cb-mmine-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cb-mmine-court { font-family: 'Barlow', sans-serif; font-size: 13.5px; font-weight: 700; color: #1c2b3a; }
 .cb-mmine-when { font-size: 12px; color: #6b7e93; }
+.cb-mmine-who { font-size: 11.5px; color: #93a2b5; }
 .cb-mmine-row .cb-mine-edit { padding: 9px 14px; font-size: 12.5px; }
 
 /* --- Booking panel --- */

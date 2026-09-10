@@ -31,27 +31,37 @@ state.players = [{ id:42, name:'Merak Lee' }];
 const t=(m)=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 const today = new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const courts=[1,2,3,4,5].map(i=>({id:i,name:i===5?'Doubles Court':'Court '+i,active:1,sort_order:i}));
-const mk=(id,courtId,s,d,title,opts={})=>({id,courtId,startTime:t(s),durationMinutes:d,title,source:opts.source||'custom',players:opts.players||[],name:title,info:opts.info||'',color:'#3550c8',bookingTypeId:null,repeatGroupId:null,date:today});
+const mk=(id,courtId,s,d,title,opts={})=>({id,courtId,startTime:t(s),durationMinutes:d,title,source:opts.source||'custom',players:opts.players||[],bookedBy:opts.bookedBy??null,name:title,info:opts.info||'',color:'#3550c8',bookingTypeId:opts.typeId??null,repeatGroupId:null,date:today});
 const slots=[
-  mk(1,1,17*60,60,'Merak Lee',{players:[{id:42,name:'Merak Lee'}]}),
+  mk(1,1,17*60,60,'Merak Lee',{players:[{id:42,name:'Merak Lee'},{id:7,name:'Sofia Duarte'}],bookedBy:42}),
   mk(2,1,18*60+30,90,'League Match',{source:'league'}),
-  mk(3,1,20*60+30,60,'Sofia Duarte',{players:[{id:7,name:'Sofia Duarte'}]}),
-  mk(4,2,17*60+30,60,'Priya Raman',{players:[{id:8,name:'Priya Raman'}]}),
+  mk(3,1,20*60+30,60,'Sofia Duarte',{players:[{id:7,name:'Sofia Duarte'}],bookedBy:7}),
+  mk(4,2,17*60+30,60,'Priya Raman',{players:[{id:8,name:'Priya Raman'}],bookedBy:8}),
+  // Court 4: bookings I am on but did not make. The club's lesson is titled by
+  // its type; Sofia's booking by Sofia. Neither is mine to change.
+  mk(7,4,18*60,60,'Private Lesson',{players:[{id:42,name:'Merak Lee'}],typeId:3}),
+  mk(8,4,19*60,60,'Sofia Duarte',{players:[{id:7,name:'Sofia Duarte'},{id:42,name:'Merak Lee'}],bookedBy:7}),
   // Court 3: a league night. 45-minute matches back to back, so the second
   // starts at 9:15 - on no 30-minute step at all.
   mk(5,3,20*60+30,45,'League Match',{source:'league',info:'Merak Lee vs Sofia Duarte'}),
   mk(6,3,21*60+15,45,'League Match',{source:'league',info:'Priya Raman vs Alex Hupé'}),
 ];
 const calls=[];
+let myRows=[];   // filled below, before the page first loads it
 window.api = {
   getCourts: async()=>courts,
   getSchedule: async()=>({courts, slots}),
-  getMyBookings: async()=>[],
+  getMyBookings: async()=>myRows,
   createReservation: async(d)=>{ calls.push(['reserve',d]); return { reservationId:'r1', expiresAt: Date.now()+300000 }; },
   deleteReservation: async()=>({}),
   releaseReservation: async()=>({}),
 };
 window.navigate=()=>{};
+myRows=[
+  {...slots[0], courtName:'Court 1', courtCount:1},
+  {...slots.find(x=>x.id===7), courtName:'Court 4', courtCount:1},
+  {...slots.find(x=>x.id===8), courtName:'Court 4', courtCount:1},
+];
 const { renderCourtBooking } = await import('../renderer/pages/courtBooking.js');
 const $=(s)=>document.querySelector(s), $$=(s)=>[...document.querySelectorAll(s)];
 const tick=(ms=150)=>new Promise(r=>setTimeout(r,ms));
@@ -66,7 +76,9 @@ ok('rows exist for today', $$('.cb-mslot').length>0, $$('.cb-mslot').length);
 
 // ---- booking rows: one row each, right kind, right texts ----
 const mine=$('.cb-mslot--mine'), league=$('.cb-mslot--league'), other=$('.cb-mslot--other');
-ok('own booking is one blue row saying You', !!mine && mine.querySelector('.cb-mslot-l').textContent==='You');
+ok('own booking is one blue row titled by me, not "You"', !!mine && mine.querySelector('.cb-mslot-l1')?.textContent==='Merak Lee', mine?.querySelector('.cb-mslot-l')?.textContent);
+ok('and says who it is with underneath', mine?.querySelector('.cb-mslot-l2')?.textContent==='with S. Duarte', mine?.querySelector('.cb-mslot-l2')?.textContent);
+ok('and is mine to open', !!mine?.dataset.mbid);
 ok('own booking mark is its range', mine?.querySelector('.cb-mslot-m').textContent==='5:00–6:00', mine?.querySelector('.cb-mslot-m').textContent);
 ok('league booking renders amber with its title', !!league && league.querySelector('.cb-mslot-l').textContent==='League Match');
 ok('a 90-minute booking is one row, not three', $$('.cb-mslot--league').length===1);
@@ -95,6 +107,15 @@ ok('the steps the matches cover are not offered', !openAt.includes(21*60) && !op
 ok('the ones around them still are', openAt.includes(20*60) && openAt.includes(22*60));
 const order=$$('.cb-mslot').map(r=>r.querySelector('.cb-mslot-t').textContent).join(',');
 ok('rows read in time order', order.indexOf('8:30')<order.indexOf('9:15'));
+
+// ---- bookings I am on but did not make ----
+$$('.cb-mtab')[3].click(); await tick(300);
+const onMe=$$('.cb-mslot--mine');
+ok('both are coloured mine, since I am on them', onMe.length===2, onMe.length);
+ok("the club's lesson is titled by its type", onMe[0]?.querySelector('.cb-mslot-l1')?.textContent==='Private Lesson', onMe[0]?.querySelector('.cb-mslot-l')?.textContent);
+ok('with the people on it underneath', onMe[0]?.querySelector('.cb-mslot-l2')?.textContent==='M. Lee', onMe[0]?.querySelector('.cb-mslot-l2')?.textContent);
+ok("Sofia's booking is titled by Sofia, with me underneath", onMe[1]?.querySelector('.cb-mslot-l1')?.textContent==='Sofia Duarte' && onMe[1]?.querySelector('.cb-mslot-l2')?.textContent==='with M. Lee', onMe[1]?.querySelector('.cb-mslot-l')?.textContent);
+ok('neither opens an edit sheet: only the booker changes a booking', onMe.every(r=>!r.dataset.mbid));
 $$('.cb-mtab')[1].click(); await tick(300);   // back to Court 2 for the reservation checks below
 
 
@@ -115,6 +136,19 @@ document.getElementById('cbPanelCancel')?.click(); await tick(700);   // let the
 $('.cb-mslot[data-mbid]')?.click(); await tick(250);
 ok('own row opens the edit sheet', !!$('.cb-panel') && document.body.textContent.includes('Cancel booking'), $('.cb-panel')?'panel':'none');
 document.getElementById('cbPanelClose')?.click(); await tick(250);
+
+// ---- My Bookings lists what I made and what I am on, and only mine can be edited ----
+$('.cb-tab[data-tab="mine"]').click(); await tick(300);
+const mrows=$$('.cb-mmine-row');
+ok('three rows in My Bookings', mrows.length===3, mrows.length);
+ok('each titled by the rule: me, the type, the booker', mrows.map(r=>r.querySelector('.cb-mmine-court').textContent).join('|')==='Merak Lee|Private Lesson|Sofia Duarte', mrows.map(r=>r.querySelector('.cb-mmine-court').textContent).join('|'));
+ok('the court moved to the line beneath', /^Court 1 · /.test(mrows[0]?.querySelector('.cb-mmine-when').textContent), mrows[0]?.querySelector('.cb-mmine-when').textContent);
+ok('and who it is with beneath that', mrows.map(r=>r.querySelector('.cb-mmine-who')?.textContent).join('|')==='with S. Duarte|M. Lee|with M. Lee', mrows.map(r=>r.querySelector('.cb-mmine-who')?.textContent).join('|'));
+ok('only the booking I made has an Edit button', mrows.map(r=>!!r.querySelector('.cb-mine-edit')).join()==='true,false,false');
+// The list is only re-read on a booking, a cancel or a pull to refresh, so
+// the empty case below gets a fresh page.
+myRows=[];
+renderCourtBooking(); await tick(300);
 
 // ---- past date: no rows, the empty line ----
 const { state: st } = await import('../renderer/state.js');

@@ -72,6 +72,7 @@ router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res
     name: player?.name || 'Court Booking',
     info: names.join(', '),
     playerIds: allIds,
+    bookedBy: req.session.playerId,
   });
   reservations.delete(String(reservationId));
   res.json(booking);
@@ -85,11 +86,27 @@ router.get('/my-bookings', requireAuth, requireMember, wrap(async (req, res) => 
   res.json(bookingModel.getUpcomingBookingsForPlayer(req.session.playerId, date, time));
 }));
 
+// Only the person who booked a court may change or cancel it. Being on the
+// booking is not enough: a player added by a friend could otherwise shorten,
+// empty or cancel the friend's booking, and a player the club put into a
+// lesson could do the same to the lesson.
+function _refuseUnlessBooker(booking, req, res) {
+  if (!booking) { res.status(404).json({ error: 'Booking not found.' }); return true; }
+  if (booking.booked_by == null) {
+    res.status(403).json({ error: 'This booking was made by the club. Ask the front desk to change it.' });
+    return true;
+  }
+  if (booking.booked_by !== req.session.playerId) {
+    res.status(403).json({ error: 'Only the person who booked this court can change it.' });
+    return true;
+  }
+  return false;
+}
+
 router.delete('/player-bookings/:id', requireAuth, requireMember, wrap(async (req, res) => {
   const db = getDB();
-  const isMember = db.prepare('SELECT 1 FROM booking_players WHERE booking_id = ? AND player_id = ?')
-    .get(Number(req.params.id), req.session.playerId);
-  if (!isMember) return res.status(403).json({ error: 'You are not part of this booking.' });
+  const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(Number(req.params.id));
+  if (_refuseUnlessBooker(booking, req, res)) return;
   await bookingModel.deleteBooking(req.params.id);
   res.json({ ok: true });
 }));
@@ -97,10 +114,7 @@ router.delete('/player-bookings/:id', requireAuth, requireMember, wrap(async (re
 router.put('/player-bookings/:id', requireAuth, requireMember, wrap(async (req, res) => {
   const db = getDB();
   const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(Number(req.params.id));
-  if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-  const isMember = db.prepare('SELECT 1 FROM booking_players WHERE booking_id = ? AND player_id = ?')
-    .get(Number(req.params.id), req.session.playerId);
-  if (!isMember) return res.status(403).json({ error: 'You are not part of this booking.' });
+  if (_refuseUnlessBooker(booking, req, res)) return;
   // A booking spanning several courts is several rows sharing a group_id. This
   // endpoint updates one row, which would leave the rest of the group on the
   // old duration, so it is refused rather than silently desynchronising them.

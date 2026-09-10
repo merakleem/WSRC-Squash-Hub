@@ -44,6 +44,7 @@ function initDB(dbPath) {
     `ALTER TABLE bookings ADD COLUMN group_id INTEGER`,
     `ALTER TABLE bookings ADD COLUMN name TEXT`,
     `ALTER TABLE bookings ADD COLUMN repeat_group_id INTEGER`,
+    `ALTER TABLE bookings ADD COLUMN booked_by INTEGER`,
     `CREATE TABLE IF NOT EXISTS booking_players (id INTEGER PRIMARY KEY AUTOINCREMENT, booking_id INTEGER NOT NULL, player_id INTEGER NOT NULL, FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE, FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE)`,
     `CREATE TABLE IF NOT EXISTS tournaments (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'groups_16', status TEXT NOT NULL DEFAULT 'group_stage', championship_date TEXT NOT NULL, match_duration_minutes INTEGER NOT NULL DEFAULT 60, buffer_minutes INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS tournament_courts (tournament_id INTEGER NOT NULL, court_id INTEGER NOT NULL, PRIMARY KEY (tournament_id, court_id), FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE, FOREIGN KEY (court_id) REFERENCES courts(id) ON DELETE CASCADE)`,
@@ -98,6 +99,20 @@ function initDB(dbPath) {
       }
     }
   }
+
+  // Who made a booking decides who may change it. Player bookings made before
+  // the column existed carry no record of that, but they are the only bookings
+  // with no type whose name is one of the players on them - the player page
+  // wrote its booker's name there - so that player is the booker. The admin's
+  // form no longer writes a name at all, so nothing newer can match. Cheap and
+  // idempotent, so it simply runs on every start.
+  db.prepare(`
+    UPDATE bookings SET booked_by = (
+      SELECT bp.player_id FROM booking_players bp JOIN players p ON p.id = bp.player_id
+      WHERE bp.booking_id = bookings.id AND p.name = bookings.name
+      ORDER BY bp.id ASC LIMIT 1)
+    WHERE booked_by IS NULL AND booking_type_id IS NULL AND name IS NOT NULL
+  `).run();
 
   // Make league_players.team_id nullable for modern leagues (SQLite requires table recreation)
   const lpCols = db.prepare(`PRAGMA table_info(league_players)`).all();

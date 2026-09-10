@@ -162,7 +162,9 @@ block('13').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.l
 await tick();
 ok('block menu opens with four items', $$('.sch-menu-item').length===4, $$('.sch-menu-item').length);
 ok('block menu selects the block', block('13').classList.contains('sch-block--sel'));
-ok('menu header names the booking', $('.sch-menu-head').textContent.includes('League · Div 1'));
+// The type is the label now, so a typed booking is named by its type, not by
+// whatever free text it once carried.
+ok('menu header names the booking by its type', $('.sch-menu-head').textContent.includes('League ·') && !$('.sch-menu-head').textContent.includes('Div 1'), $('.sch-menu-head').textContent);
 key('Escape'); await tick();
 ok('Esc closes the menu', !$('.sch-menu'));
 const colsNow=$$('.sch-court-col');
@@ -262,7 +264,7 @@ calls.length=0;
 $('#schPanelPrimary').click(); await new Promise(rr=>setTimeout(rr,150));
 ok('edit saved one wide booking', calls[0] && calls[0][0]==='updateBooking' && JSON.stringify(calls[0][2].courtIds)==='[1,2,3,4]', calls[0]&&JSON.stringify(calls[0][2]?.courtIds));
 ok('edit pushed an undo op', window.__op?.type==='update' && window.__op.id===2);
-ok('edit toast reads Saved', window.__note[0]==='Saved Junior training');
+ok('edit toast reads Saved, naming the type', window.__note[0]==='Saved Training', window.__note[0]);
 
 // ---- panel form details (steppers, players, repeat) ----
 await panel.openBookingPanel({ mode:'new', host:$('.sch-page'), courts:payload.courts,

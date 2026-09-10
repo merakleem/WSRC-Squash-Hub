@@ -98,7 +98,7 @@ function _dayOfWeek(dateStr) {
   return new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
 }
 
-function addBooking({ courtId, courtIds, date, startTime, durationMinutes, bookingTypeId, name, info, playerIds }) {
+function addBooking({ courtId, courtIds, date, startTime, durationMinutes, bookingTypeId, name, info, playerIds, bookedBy }) {
   const effectiveCourtIds = courtIds || [courtId];
   _checkAdjacency(effectiveCourtIds);
   for (const cId of effectiveCourtIds) {
@@ -109,8 +109,8 @@ function addBooking({ courtId, courtIds, date, startTime, durationMinutes, booki
   const db = getDB();
   if (effectiveCourtIds.length === 1) {
     const result = run(
-      'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null]
+      'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, booked_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, bookedBy || null]
     );
     _setBookingPlayers(db, result.lastID, playerIds);
     const booking = get(
@@ -363,6 +363,13 @@ function createRepeatBookings(baseData, repeatOptions) {
  * "Not finished" is computed from the booking's end, not its start, so a court
  * you are on right now stays in the list until you are actually off it.
  */
+// What a booking is called, for everyone who sees it. A booking with a type is
+// its type ("Private Lesson"); a player's own booking is that player's name;
+// the old free-text label only survives on bookings that have neither.
+function _bookingTitle(row) {
+  return row.type_name || row.booker_name || row.name || 'Booked';
+}
+
 function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
   const db = getDB();
   const [nowH, nowM] = String(nowTime || '00:00').split(':').map(Number);
@@ -370,10 +377,13 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
 
   const rows = db.prepare(`
     SELECT b.id, b.court_id, b.group_id, b.date, b.start_time, b.duration_minutes, b.name, b.info,
+           b.booked_by, b.booking_type_id, bt.name AS type_name, bk.name AS booker_name,
            c.name AS court_name, c.sort_order
     FROM bookings b
     JOIN booking_players bp ON bp.booking_id = b.id
     LEFT JOIN courts c ON c.id = b.court_id
+    LEFT JOIN booking_types bt ON bt.id = b.booking_type_id
+    LEFT JOIN players bk ON bk.id = b.booked_by
     WHERE bp.player_id = ?
       AND (b.date > ?
         OR (b.date = ?
@@ -430,7 +440,10 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
     date: b.date,
     startTime: b.start_time,
     durationMinutes: b.duration_minutes,
-    title: b.name || 'Court Booking',
+    bookingTypeId: b.booking_type_id || null,
+    typeName: b.type_name || null,
+    bookedBy: b.booked_by || null,
+    title: _bookingTitle(b),
     info: b.info || '',
     players: playersByBookingId.get(b.id) || [],
   }));
@@ -478,9 +491,10 @@ function getScheduleForDate(date) {
   `).all(date);
 
   const rawBookings = db.prepare(`
-    SELECT b.*, bt.name AS type_name, bt.color AS type_color
+    SELECT b.*, bt.name AS type_name, bt.color AS type_color, bk.name AS booker_name
     FROM bookings b
     LEFT JOIN booking_types bt ON bt.id = b.booking_type_id
+    LEFT JOIN players bk ON bk.id = b.booked_by
     WHERE b.date = ?
     ORDER BY b.start_time ASC
   `).all(date);
@@ -519,8 +533,10 @@ function getScheduleForDate(date) {
       startTime: b.start_time,
       durationMinutes: b.duration_minutes,
       bookingTypeId: b.booking_type_id || null,
+      typeName: b.type_name || null,
+      bookedBy: b.booked_by || null,
       name: b.name || null,
-      title: b.name || b.type_name || 'Booked',
+      title: _bookingTitle(b),
       info: b.info || '',
       color: b.type_color || '#6b7589',
       repeatGroupId: b.repeat_group_id || null,
@@ -543,8 +559,10 @@ function getScheduleForDate(date) {
         startTime: rep.start_time,
         durationMinutes: rep.duration_minutes,
         bookingTypeId: rep.booking_type_id || null,
+        typeName: rep.type_name || null,
+        bookedBy: rep.booked_by || null,
         name: rep.name || null,
-        title: rep.name || rep.type_name || 'Booked',
+        title: _bookingTitle(rep),
         info: rep.info || '',
         color: rep.type_color || '#6b7589',
         repeatGroupId: rep.repeat_group_id || null,
