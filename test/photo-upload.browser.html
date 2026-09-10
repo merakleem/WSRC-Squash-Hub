@@ -78,17 +78,17 @@ try {
   ok('the picked file is resized and sent', !!sent, JSON.stringify(calls.map((c) => c[0])) + ' ' + ($('#toastContainer')?.textContent || ''));
   ok('as a JPEG data URL for that player', sent?.[1] === 1 && /^data:image\/jpeg;base64,/.test(sent?.[2] || ''), (sent?.[2] || '').slice(0, 30));
   ok('and it comes back square', await new Promise((r) => { const im = new Image(); im.onload = () => r(im.width === 30 && im.height === 30); im.onerror = () => r(false); im.src = sent?.[2] || ''; }));
-  ok('no error toast about the image', !/could not be read as an image/i.test($('#toastContainer')?.textContent || ''), $('#toastContainer')?.textContent);
+  ok('no error toast about the format', !/not accepted/i.test($('#toastContainer')?.textContent || ''), $('#toastContainer')?.textContent);
   ok('the profile is refreshed afterwards', calls.some((c) => c[0] === 'profile' && c[1] === 1));
 
-  // An iPhone HEIC is refused up front, by name, rather than as a vague failure.
+  // A file the browser cannot decode gets one plain message.
   calls.length = 0;
   mod.openEditPlayerModal(PLAYERS[0]); await settle();
   click($('#plPhotoUpload')); await settle();
-  const heic = new DataTransfer(); heic.items.add(new File([blob], 'IMG_0412.HEIC', { type: 'image/heic' }));
+  const heic = new DataTransfer(); heic.items.add(new File([new Blob(['not an image at all'])], 'IMG_0412.HEIC', { type: 'image/heic' }));
   const input2 = $('#fPhotoFile'); input2.files = heic.files;
   input2.dispatchEvent(new Event('change', { bubbles: true })); await settle(300);
-  ok('a HEIC photo is named as the problem', /iPhone HEIC photo/.test($('#toastContainer')?.textContent || ''), $('#toastContainer')?.textContent);
+  ok('an undecodable file says the format is not accepted', /^That file format is not accepted\.$/.test($('.toast:last-child, #toastContainer > :last-child')?.textContent?.trim() || ''), $('#toastContainer')?.textContent);
   ok('and nothing is sent', !calls.some((c) => c[0] === 'photo'));
 } catch (e) {
   failed++;
