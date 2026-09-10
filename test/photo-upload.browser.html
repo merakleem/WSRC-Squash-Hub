@@ -80,6 +80,16 @@ try {
   ok('and it comes back square', await new Promise((r) => { const im = new Image(); im.onload = () => r(im.width === 30 && im.height === 30); im.onerror = () => r(false); im.src = sent?.[2] || ''; }));
   ok('no error toast about the image', !/could not be read as an image/i.test($('#toastContainer')?.textContent || ''), $('#toastContainer')?.textContent);
   ok('the profile is refreshed afterwards', calls.some((c) => c[0] === 'profile' && c[1] === 1));
+
+  // An iPhone HEIC is refused up front, by name, rather than as a vague failure.
+  calls.length = 0;
+  mod.openEditPlayerModal(PLAYERS[0]); await settle();
+  click($('#plPhotoUpload')); await settle();
+  const heic = new DataTransfer(); heic.items.add(new File([blob], 'IMG_0412.HEIC', { type: 'image/heic' }));
+  const input2 = $('#fPhotoFile'); input2.files = heic.files;
+  input2.dispatchEvent(new Event('change', { bubbles: true })); await settle(300);
+  ok('a HEIC photo is named as the problem', /iPhone HEIC photo/.test($('#toastContainer')?.textContent || ''), $('#toastContainer')?.textContent);
+  ok('and nothing is sent', !calls.some((c) => c[0] === 'photo'));
 } catch (e) {
   failed++;
   log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';

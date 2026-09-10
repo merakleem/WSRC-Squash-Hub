@@ -2100,13 +2100,20 @@ function _quickLinksHTML(upcomingCount, tournCount) {
 const PHOTO_MAX_PX = 512;
 const PHOTO_QUALITY = 0.82;
 
+// iPhones shoot HEIC, which most browsers cannot decode; the error names the
+// cause and the way round it instead of a shrug.
+function _isHeic(file) {
+  return /hei[cf]/i.test(file?.type || '') || /\.hei[cf]$/i.test(file?.name || '');
+}
+
 function _shrinkPhoto(file) {
   return new Promise((resolve, reject) => {
+    if (_isHeic(file)) return reject(new Error('That is an iPhone HEIC photo, which this browser cannot read. Save it as a JPEG first, or pick a screenshot of it.'));
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Could not read that file.'));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error('That file could not be read as an image.'));
+      img.onerror = () => reject(new Error(`That file could not be read as an image (${file.type || 'unknown type'}). Try a JPEG or PNG.`));
       img.onload = () => {
         // Centre square crop, since every surface draws the photo in a circle.
         const side = Math.min(img.width, img.height);
