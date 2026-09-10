@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- The app's exact CSP. Profile photos are resized in the browser by drawing
+     the picked file, as a data: URL, into an <img>; a CSP without img-src
+     data: refuses that image and every upload fails with "That file could
+     not be read as an image." The suite checks this meta still matches
+     index.html, so the two cannot drift apart unnoticed. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+
+try {
+  // The CSP above must be the app's, or this suite proves nothing.
+  const indexHtml = await (await fetch('../renderer/index.html')).text();
+  const appCsp = /http-equiv="Content-Security-Policy"\s+content="([^"]+)"/.exec(indexHtml)?.[1];
+  const ourCsp = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
+  ok('this suite runs under the app\'s own CSP', appCsp === ourCsp, appCsp);
+
+  const PLAYERS = [{ id: 1, name: 'Sofia Duarte', email: 'sofia@x.invalid', phone: '', member_number: '1001', club_locker_rating: 3.5, is_member: 1, exclude_from_ladder: 0, is_tester: 0, account_status: 'verified', photo_path: null, created_at: '2024-03-01 10:00:00' }];
+  const calls = [];
+  window.api = {
+    getPlayers: async () => PLAYERS.map((p) => ({ ...p })),
+    getSeasons: async () => [],
+    setPlayerPhoto: async (id, image) => { calls.push(['photo', id, image]); PLAYERS[0].photo_path = '/uploads/avatars/1-abc.jpg'; return { ok: true, photo_path: PLAYERS[0].photo_path }; },
+    deletePlayerPhoto: async () => ({ ok: true }),
+  };
+  window.navigate = () => {};
+  window.openPlayerProfile = async (id) => { calls.push(['profile', id]); };
+
+  const { state } = await import('../renderer/state.js');
+  state.currentUser = { role: 'admin' };
+  state.page = 'players';
+  const mod = await import('../renderer/pages/players.js');
+  // The module installs its own opener on import, so the stub goes on after.
+  window.openPlayerProfile = async (id) => { calls.push(['profile', id]); };
+  await mod.renderPlayers(); await settle();
+
+  // A real image file, made here: a 40x30 PNG from a canvas.
+  const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 30;
+  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#5b7cf9'; ctx.fillRect(0, 0, 40, 30);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+  const file = new File([blob], 'me.png', { type: 'image/png' });
+
+  mod.openEditPlayerModal(PLAYERS[0]); await settle();
+  ok('the edit panel offers a photo upload', !!$('#plPhotoUpload'));
+  click($('#plPhotoUpload')); await settle();
+  const input = $('#fPhotoFile');
+  ok('the photo modal opens with a file input', !!input && /Choose Image/.test($('#fPhotoChoose')?.textContent));
+
+  const dt = new DataTransfer(); dt.items.add(file);
+  input.files = dt.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle(600);
+
+  const sent = calls.find((c) => c[0] === 'photo');
+  ok('the picked file is resized and sent', !!sent, JSON.stringify(calls.map((c) => c[0])) + ' ' + ($('#toastContainer')?.textContent || ''));
+  ok('as a JPEG data URL for that player', sent?.[1] === 1 && /^data:image\/jpeg;base64,/.test(sent?.[2] || ''), (sent?.[2] || '').slice(0, 30));
+  ok('and it comes back square', await new Promise((r) => { const im = new Image(); im.onload = () => r(im.width === 30 && im.height === 30); im.onerror = () => r(false); im.src = sent?.[2] || ''; }));
+  ok('no error toast about the image', !/could not be read as an image/i.test($('#toastContainer')?.textContent || ''), $('#toastContainer')?.textContent);
+  ok('the profile is refreshed afterwards', calls.some((c) => c[0] === 'profile' && c[1] === 1));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>
