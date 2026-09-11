@@ -173,9 +173,7 @@ async function _refresh() {
 
 // ── Top bar ───────────────────────────────────────────────────────────────────
 function _topbarHTML() {
-  const n = ev.events.length;
   return `
-    <span class="ev-count">${n} ${ev.tab === 'past' ? 'past' : 'upcoming'}</span>
     ${isAdmin() ? `
       <button class="btn btn-primary" id="evNew">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>

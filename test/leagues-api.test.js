@@ -54,6 +54,12 @@ async function main() {
   // A second league that has been created but never scheduled.
   run(`INSERT INTO leagues (id, name, start_date, num_teams, num_divisions, setup_type)
        VALUES (2, 'Unscheduled', '${day(30)}', 0, 2, 'modern')`);
+  // A third whose first week is tonight: it has started, whatever the hour.
+  run(`INSERT INTO leagues (id, name, start_date, num_teams, num_divisions, setup_type)
+       VALUES (3, 'Tonight', '${day(0)}', 0, 1, 'modern')`);
+  run("INSERT INTO divisions (id, league_id, name, level) VALUES (3, 3, 'Division 1', 1)");
+  run(`INSERT INTO weeks (league_id, week_number, date) VALUES (3, 1, '${day(0)}')`);
+  run(`INSERT INTO weeks (league_id, week_number, date) VALUES (3, 2, '${day(7)}')`);
 
   const server = spawn('node', [path.join(__dirname, '..', 'server.js')], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: DB, SESSION_SECRET: 's', SITE_PASSWORD: 'pw', RESEND_API_KEY: '' },
@@ -71,7 +77,9 @@ async function main() {
     const autumn = asAdmin.find((l) => l.name === 'Autumn');
     const unscheduled = asAdmin.find((l) => l.name === 'Unscheduled');
     ok('every week is counted', autumn.total_weeks === 6, String(autumn.total_weeks));
-    ok('only the past ones count as elapsed', autumn.weeks_elapsed === 3, String(autumn.weeks_elapsed));
+    ok('the weeks whose date has arrived count as started', autumn.weeks_started === 3, String(autumn.weeks_started));
+    const tonight = asAdmin.find((l) => l.name === 'Tonight');
+    ok('a week counts from its own date, so tonight\'s league is on week 1 of 2', tonight.weeks_started === 1 && tonight.total_weeks === 2, `${tonight.weeks_started}/${tonight.total_weeks}`);
     ok('the last week is the range end', autumn.last_week_date === day(21), autumn.last_week_date);
     ok('a league with no weeks reports zero', unscheduled.total_weeks === 0, String(unscheduled.total_weeks));
     ok('and no last week', unscheduled.last_week_date === null, String(unscheduled.last_week_date));

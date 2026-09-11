@@ -147,8 +147,13 @@ function getCourtSlots(dateStr, courtId) {
 
 function getMaxEnd(slots, startMin, editId = null) {
   let end = DAY_END;
+  // Once the schedule refreshes, your own five-minute hold comes back as a
+  // "Reserved" slot at the very start you are booking. It is not a booking
+  // in your way, so it never caps the duration.
+  const ownHold = cb.reservation?.id != null ? `rsv_${cb.reservation.id}` : null;
   for (const s of slots) {
     if (editId != null && String(s.id) === String(editId)) continue;
+    if (ownHold && String(s.id) === ownHold) continue;
     if (s.startMin >= startMin && s.startMin < end) end = s.startMin;
   }
   return end;
@@ -184,6 +189,9 @@ function _panelDate() {
 // ── Entry ─────────────────────────────────────────────────────────────────────
 export function renderCourtBooking() {
   _instance++;
+  // Nothing of ours goes in the top bar, and nothing of the last page's stays.
+  const actions = document.getElementById('topbarActions');
+  if (actions) actions.innerHTML = '';
 
   if (cb.refreshInterval) clearInterval(cb.refreshInterval);
   if (cb.reservation?.timerId) clearInterval(cb.reservation.timerId);

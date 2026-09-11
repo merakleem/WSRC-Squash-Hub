@@ -31,27 +31,27 @@ const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 const FALL = {
   id: 1, name: 'Fall 2026 Wednesday League', status: 'active', setup_type: 'modern',
   start_date: '2026-09-09', num_divisions: 3, num_teams: 0,
-  player_ids: [7, 8, 9], total_weeks: 10, weeks_elapsed: 3,
+  player_ids: [7, 8, 9], total_weeks: 10, weeks_started: 4,
   last_week_date: '2026-11-18', my_division_level: 2,
 };
 // A traditional box league: teams x divisions gives the player count.
 const BOX = {
   id: 2, name: 'Thursday Box League', status: 'active', setup_type: 'traditional',
   start_date: '2026-09-10', num_divisions: 4, num_teams: 5,
-  player_ids: [11], total_weeks: 8, weeks_elapsed: 3,
+  player_ids: [11], total_weeks: 8, weeks_started: 3,
   last_week_date: '2026-11-05', my_division_level: null,
 };
 const SPRING = {
   id: 3, name: 'Spring 2026 League', status: 'completed', setup_type: 'modern',
   start_date: '2026-03-04', num_divisions: 3, num_teams: 0,
-  player_ids: [7], total_weeks: 10, weeks_elapsed: 10,
+  player_ids: [7], total_weeks: 10, weeks_started: 10,
   last_week_date: '2026-05-13', my_division_level: 2,
 };
 // Created but not yet scheduled: no weeks at all.
 const UNSCHEDULED = {
   id: 4, name: 'Winter Draft League', status: 'active', setup_type: 'modern',
   start_date: '2026-12-01', num_divisions: 2, num_teams: 0,
-  player_ids: [], total_weeks: 0, weeks_elapsed: 0,
+  player_ids: [], total_weeks: 0, weeks_started: 0,
   last_week_date: null, my_division_level: null,
 };
 

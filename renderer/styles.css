@@ -8987,7 +8987,6 @@ body.is-viewing-as .app-container { height: 100%; }
   gap: 18px;
   padding: var(--page-pad);
 }
-.ev-count { font-size: 13px; color: #6b7e93; margin-right: 4px; }
 .ev-spacer { flex: 1; }
 .ev-empty { padding: 24px 6px; font-size: 13px; color: #93a2b5; }
 

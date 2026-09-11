@@ -5,7 +5,7 @@ const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
-const { sendBatch, isConfigured: emailConfigured, appUrl } = require('../lib/email');
+const { sendBatch, isConfigured: emailConfigured, appUrl, sendMany } = require('../lib/email');
 const { clubToday } = require('../lib/clock');
 const sanitizeHtml = require('sanitize-html');
 
@@ -33,13 +33,14 @@ router.get('/leagues', wrap(async (req, res) => {
   for (const row of matchCounts) countMap[row.league_id] = row;
 
   // Week progress, for the card's segmented bar. One grouped query rather than
-  // one per league. "Elapsed" is measured against the club's today, not SQLite's
-  // UTC now, so an evening viewer in Winnipeg doesn't see the week tick over a
-  // day early.
+  // one per league. A week starts on its own date and stays current until the
+  // next week's date arrives - the same rule the league page uses - so
+  // "weeks started" counts dates on or before the club's today (not SQLite's
+  // UTC now, which is already tomorrow by a Winnipeg evening).
   const weekRows = db.prepare(`
     SELECT w.league_id,
            COUNT(*) AS total_weeks,
-           SUM(CASE WHEN w.date < @today THEN 1 ELSE 0 END) AS weeks_elapsed,
+           SUM(CASE WHEN w.date <= @today THEN 1 ELSE 0 END) AS weeks_started,
            MAX(w.date) AS last_week_date
     FROM weeks w
     GROUP BY w.league_id
@@ -71,7 +72,7 @@ router.get('/leagues', wrap(async (req, res) => {
       player_ids: memberMap[l.id] || [],
       status,
       total_weeks: weeks?.total_weeks || 0,
-      weeks_elapsed: weeks?.weeks_elapsed || 0,
+      weeks_started: weeks?.weeks_started || 0,
       last_week_date: weeks?.last_week_date || null,
       my_division_level: myDivision[l.id] ?? null,
     };
@@ -157,12 +158,17 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/\n/g, '<br>')}</p>`;
 
-  const { sent, failed } = await sendBatch(recipients.map((player) => ({
+  // Only the two fields Resend reads; anything else the client sent is dropped.
+  const files = (Array.isArray(attachments) ? attachments : [])
+    .filter((a) => a && typeof a.filename === 'string' && typeof a.content === 'string')
+    .map((a) => ({ filename: a.filename, content: a.content }));
+
+  const { sent, failed } = await sendMany(recipients.map((player) => ({
     to: [player.player_email],
     subject,
     html,
     ...(body ? { text: body } : {}),
-    ...(attachments && attachments.length ? { attachments } : {}),
+    ...(files.length ? { attachments: files } : {}),
   })));
 
   res.json({ sent, failed });

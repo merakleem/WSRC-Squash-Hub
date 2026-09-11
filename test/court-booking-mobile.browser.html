@@ -62,6 +62,11 @@ myRows=[
   {...slots.find(x=>x.id===7), courtName:'Court 4', courtCount:1},
   {...slots.find(x=>x.id===8), courtName:'Court 4', courtCount:1},
 ];
+// The page refreshes the schedule every 30 seconds; the suite catches that
+// timer so it can fire it when it wants to.
+const refreshers=[]; const realSetInterval=window.setInterval;
+window.setInterval=(fn,ms,...rest)=>{ if(ms===30000) refreshers.push(fn); return realSetInterval(fn,ms,...rest); };
+document.getElementById('topbarActions').innerHTML='<span id="leftover">1 upcoming</span>';
 const { renderCourtBooking } = await import('../renderer/pages/courtBooking.js');
 const $=(s)=>document.querySelector(s), $$=(s)=>[...document.querySelectorAll(s)];
 const tick=(ms=150)=>new Promise(r=>setTimeout(r,ms));
@@ -69,6 +74,7 @@ const tick=(ms=150)=>new Promise(r=>setTimeout(r,ms));
 renderCourtBooking(); await tick(300);
 
 // ---- structure ----
+ok('the top bar is cleared of the last page\'s leftovers', !document.getElementById('leftover') && document.getElementById('topbarActions').textContent==='');
 ok('five court tabs in club order', $$('.cb-mtab').map(x=>x.textContent).join('|')==='Court 1|Court 2|Court 3|Court 4|Doubles Court');
 ok('Court 1 selected by default', $('.cb-mtab').classList.contains('cb-mtab--on'));
 ok('five dots, first elongated', $$('.cb-mdot').length===5 && $('.cb-mdot').classList.contains('cb-mdot--on'));
@@ -125,6 +131,19 @@ const rsv=calls.find(c=>c[0]==='reserve');
 ok('tapping an open row reserves on the shown court', rsv && rsv[1].courtId===2, rsv&&JSON.stringify(rsv[1]));
 ok('the sheet opens', !!$('.cb-panel'));
 ok('the tapped row shows Selected', $('.cb-mslot--sel')?.querySelector('.cb-mslot-m').textContent==='Selected');
+
+// ---- your own hold never caps the duration ----
+// After a refresh the schedule carries the hold as a Reserved slot at the
+// very start being booked; the + button used to lock against it.
+const durBefore=$('#cbDurValue')?.textContent;
+slots.push(mk('rsv_r1',2,Number(rsv[1].startTime.slice(0,2))*60+Number(rsv[1].startTime.slice(3,5)),30,'Reserved',{source:'reservation'}));
+ok('the refresh timer was caught', refreshers.length>0);
+await refreshers.at(-1)?.(); await tick(150);
+ok('the sheet is still open after the refresh', !!$('.cb-panel') && !!$('#cbDurPlus'));
+ok('the + button is not locked by your own hold', !$('#cbDurPlus').disabled);
+$('#cbDurPlus').click(); await tick();
+ok('and adds half an hour', $('#cbDurValue')?.textContent!==durBefore, `${durBefore} -> ${$('#cbDurValue')?.textContent}`);
+slots.pop();
 
 // ---- switching court keeps the sheet open ----
 $$('.cb-mtab')[0].click(); await tick();

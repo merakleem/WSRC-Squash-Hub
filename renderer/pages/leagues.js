@@ -132,17 +132,19 @@ function leagueCardHTML(league) {
   const dateLine = `${done ? 'Ran from' : 'Started'} ${formatShortDate(league.start_date)}${weekday ? ` &middot; ${weekday}` : ''}`;
 
   const totalWeeks = Number(league.total_weeks) || 0;
-  const elapsed = Number(league.weeks_elapsed) || 0;
+  const started = Number(league.weeks_started) || 0;
 
   // A league with no weeks scheduled yet has nothing to chart, so the block is
   // dropped and the body simply ends on the meta lines.
   let progressHTML = '';
   if (totalWeeks > 0) {
-    // Clamped so a league whose last week has passed but which nothing has
-    // marked completed reads "Week 10 of 10" rather than "Week 11 of 10".
-    const current = Math.min(elapsed, totalWeeks - 1);
+    // The current week is the latest one whose date has arrived; before the
+    // first, week 1 is the one coming up. Same rule as the league page, so the
+    // two never disagree. Clamped so a league past its last week reads
+    // "Week 10 of 10" rather than "Week 11 of 10".
+    const current = Math.max(0, Math.min(started, totalWeeks) - 1);
     const ticks = Array.from({ length: totalWeeks }, (_, i) => {
-      const mod = done || i < elapsed ? ' lgl-tick--past' : i === current ? ' lgl-tick--now' : '';
+      const mod = done || i < current ? ' lgl-tick--past' : i === current ? ' lgl-tick--now' : '';
       return `<span class="lgl-tick${mod}"></span>`;
     }).join('');
     progressHTML = `
