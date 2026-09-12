@@ -36,6 +36,7 @@ const _first = (name) => String(name || '').split(/\s+/)[0];
 
 // What competition this is, in the band across the top.
 function _kicker(c) {
+  if (c.format === 'doubles' && c.type === 'ladder') return 'Doubles ladder match';
   if (c.type === 'tournament') {
     const round = { group: 'Group Stage', quarterfinal: 'Quarterfinal', semifinal: 'Semifinal', final: 'Final' }[c.round] || c.round;
     return [c.tournament_name, round].filter(Boolean).join(' · ');
@@ -84,7 +85,134 @@ function _playerHTML(p, c) {
     </div>`;
 }
 
+// ── Doubles ──────────────────────────────────────────────────────────────────
+// Two sides of two. Each player carries their own doubles rank, rating and
+// rating change; the head to head is between these exact pairs. On a phone
+// the face-off becomes a scoreboard, one row per pair.
+const _pairFirst = (side) => side.players.map((p) => _first(p.name)).join(' & ');
+
+function _dblDelta(p) {
+  const d = p.rating_change;
+  if (d === undefined || d === null || d === 0) return '';
+  return `<span class="mc-delta ${d > 0 ? 'mc-delta--up' : 'mc-delta--down'}">${d > 0 ? '+' : '−'}${Math.abs(d)}</span>`;
+}
+
+function _dblPlayerRow(p) {
+  const meta = p.position ? `#${p.position} doubles · ${Math.round(p.rating)}` : 'Not on doubles ladder';
+  return `
+    <div class="mc-dplayer">
+      ${avatarHTML(p, `mc-avatar mc-avatar--sm${p.is_viewer ? ' mc-avatar--you' : ''}`)}
+      <span class="mc-dplayer-text">
+        <button class="mc-name mc-name--left nav-player-link" data-player-id="${p.id}">${esc(p.name || 'TBD')}</button>
+        <span class="mc-meta mc-meta--left">${esc(meta)}</span>
+      </span>
+      ${_dblDelta(p)}
+    </div>`;
+}
+
+function _dblSideHTML(side) {
+  return `
+    <div class="mc-dside">
+      ${side.players.map(_dblPlayerRow).join('')}
+      ${side.won ? `<span class="mc-winner mc-winners"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Winners</span>` : ''}
+    </div>`;
+}
+
+function _dblPairRow(side, played) {
+  const games = played ? `<span class="mc-pairrow-games${side.won ? ' mc-pairrow-games--won' : ''}">${side.games ?? ''}</span>` : '';
+  return `
+    <div class="mc-pairrow${side.won ? ' mc-pairrow--won' : ''}">
+      <span class="mc-pairrow-avs">${side.players.map((p) => avatarHTML(p, `mc-avatar mc-avatar--xs${p.is_viewer ? ' mc-avatar--you' : ''}`)).join('')}</span>
+      <span class="mc-pairrow-lines">
+        ${side.players.map((p) => `
+          <span class="mc-pairrow-line">
+            <button class="mc-name mc-name--left nav-player-link" data-player-id="${p.id}">${esc(p.name || 'TBD')}</button>
+            <span class="mc-meta">${p.position ? `#${p.position} · ${Math.round(p.rating)}` : 'unranked'}</span>
+            ${_dblDelta(p)}
+          </span>`).join('')}
+      </span>
+      ${games}
+    </div>`;
+}
+
+function _doublesCardHTML(c) {
+  const played = c.status === 'played';
+  const strip = _strip(c);
+  const h = c.head_to_head || { aWins: 0, bWins: 0, total: 0, meetings: [] };
+  const [A, B] = c.sides;
+  const nameA = _pairFirst(A), nameB = _pairFirst(B);
+
+  let lead = '';
+  if (h.total) {
+    lead = h.aWins === h.bWins
+      ? `${nameA} level ${h.aWins}–${h.bWins}`
+      : `${h.aWins > h.bWins ? nameA : nameB} lead ${Math.max(h.aWins, h.bWins)}–${Math.min(h.aWins, h.bWins)}`;
+  }
+  const barPct = h.total ? (h.aWins / h.total) * 100 : 0;
+  const meetings = (h.meetings || []).map((m) => `
+      <div class="mc-meeting">
+        <span class="mc-meeting-date">${esc(_short(m.played_at))}</span>
+        <span class="mc-meeting-who">${esc(m.winner_side === 1 ? nameA : nameB)}</span>
+        <span class="mc-meeting-score">${esc(m.score || '')}</span>
+      </div>`).join('');
+
+  return `
+    <div class="mc-card mc-card--doubles">
+      <div class="mc-handle"><span></span></div>
+      <div class="mc-band">
+        <span class="mc-kicker">${esc(_kicker(c))}</span>
+        <span class="mc-dbl-chip">Doubles</span>
+        <button class="mc-close" id="mcClose" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="mc-players mc-players--doubles">
+        ${_dblSideHTML(A)}
+        <div class="mc-centre mc-centre--doubles">
+          <span class="${played ? 'mc-score' : 'mc-vs'}">${played ? esc(c.score || '') : 'VS'}</span>
+          ${played ? '<span class="mc-final">Final</span>' : ''}
+        </div>
+        ${_dblSideHTML(B)}
+      </div>
+      <div class="mc-scoreboard">
+        ${_dblPairRow(A, played)}
+        ${_dblPairRow(B, played)}
+        ${played ? '<span class="mc-final mc-final--board">Final · Best of five</span>' : ''}
+      </div>
+
+      <div class="mc-strip mc-strip--${strip.kind}">
+        <span class="mc-strip-title">${esc(strip.title)}</span>
+        ${strip.sub ? `<span class="mc-strip-sub">${esc(strip.sub)}</span>` : ''}
+      </div>
+
+      <div class="mc-h2h">
+        <button class="mc-h2h-toggle" id="mcH2hToggle" aria-expanded="false" aria-controls="mcH2hBody">
+          <span>View head-to-head</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="mc-h2h-body" id="mcH2hBody">
+          <div class="mc-h2h-head">
+            <span class="mc-h2h-label"><span class="mc-long">Head to head · these pairs</span><span class="mc-short">These pairs</span></span>
+            ${lead ? `<span class="mc-h2h-lead">${esc(lead)}</span>` : ''}
+          </div>
+          ${h.total ? `
+            <div class="mc-bar"><span class="mc-bar-fill" style="width:${barPct}%"></span></div>
+            <div class="mc-meetings">${meetings}</div>
+          ` : '<div class="mc-h2h-empty"><span class="mc-long">First meeting — these pairs have never played each other.</span><span class="mc-short">First meeting between these pairs.</span></div>'}
+        </div>
+      </div>
+
+      ${c.can_submit_score ? `
+        <div class="mc-foot">
+          <button class="btn btn-primary btn-lg btn-block" id="mcSubmit">Submit score</button>
+        </div>` : ''}
+      <div class="mc-sheet-pad"></div>
+    </div>`;
+}
+
 function _cardHTML(c) {
+  if (c.format === 'doubles' && Array.isArray(c.sides) && c.sides.length === 2) return _doublesCardHTML(c);
   const played = c.status === 'played';
   const strip = _strip(c);
   const h = c.head_to_head || { aWins: 0, bWins: 0, total: 0, meetings: [] };

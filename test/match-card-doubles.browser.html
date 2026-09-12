@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// The doubles match card (desktop face-off, phone scoreboard) and the doubles
+// rows and form on Report Score. Run at 1100 and at 390.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const vtxt = (el) => (el ? el.innerText.replace(/\s+/g, ' ').trim() : '');
+const vis = (el) => !!el && getComputedStyle(el).display !== 'none';
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+const mobile = window.innerWidth <= 768;
+
+const pl = (id, name, position, rating, rating_change, is_viewer = false) => ({ id, name, photo_path: null, position, rating, rating_change, is_viewer });
+const CARD_PLAYED = {
+  id: 1, type: 'league', status: 'played', format: 'doubles', score: '3–1', played_at: '2026-09-08 19:00:00',
+  league_name: 'Doubles League', division_name: 'Division 1', week_number: 4, can_submit_score: false, skipped: false,
+  players: [pl(7, 'James Whitfield', 3, 1498, 9, true), pl(1, 'Sofia Duarte', 1, 1541, -6)],
+  sides: [
+    { players: [pl(7, 'James Whitfield', 3, 1498, 9, true), pl(3, 'Priya Raman', null, null, 12)], games: 3, won: true },
+    { players: [pl(1, 'Sofia Duarte', 1, 1541, -6), pl(2, 'Tom Beckett', 5, 1420, -8)], games: 1, won: false },
+  ],
+  head_to_head: { aWins: 1, bWins: 2, total: 3, meetings: [{ played_at: '2026-09-08 19:00:00', winner_side: 1, score: '3–1' }, { played_at: '2026-07-16 19:00:00', winner_side: 2, score: '3–2' }, { played_at: '2026-06-01 19:00:00', winner_side: 2, score: '3–0' }] },
+};
+const CARD_NEXT = {
+  ...CARD_PLAYED, id: 2, type: 'ladder', status: 'scheduled', score: null, played_at: null, scheduled_date: '2026-09-15', scheduled_time: '19:00', court_name: 'Court 2',
+  can_submit_score: true, sides: CARD_PLAYED.sides.map((sd) => ({ ...sd, games: null, won: false })), head_to_head: { aWins: 0, bWins: 0, total: 0, meetings: [] },
+};
+const ROWS = [
+  { id: 30, type: 'league', status: 'scheduled', format: 'singles', scheduled_date: '2026-09-12', scheduled_time: '19:15', opponent_id: 8, opponent_name: 'Daniel Okafor', opponent_photo: null, league_name: 'Summer League', division_name: 'Division 2', week_number: 6 },
+  { id: 2, type: 'league', status: 'scheduled', format: 'doubles', scheduled_date: '2026-09-15', scheduled_time: '19:00', court_name: 'Court 2',
+    league_name: 'Doubles League', division_name: 'Division 1', week_number: 4,
+    partner: { id: 3, name: 'Priya Raman', photo_path: null }, opponents: [{ id: 1, name: 'Sofia Duarte', photo_path: null }, { id: 2, name: 'Tom Beckett', photo_path: null }],
+    opponent_id: 1, opponent_name: 'Sofia Duarte & Tom Beckett', opponent_photo: null },
+];
+const calls = [];
+window.api = {
+  getMatchCard: async (id) => (String(id) === '1' ? CARD_PLAYED : CARD_NEXT),
+  getReportable: async () => ROWS,
+  reportMatchScore: async (id, body) => { calls.push(['report', id, body]); return { ok: true }; },
+  getPlayers: async () => [],
+};
+window.navigate = (page, params) => calls.push(['navigate', page, params]);
+window.openPlayerProfile = (id) => calls.push(['profile', id]);
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'player', playerId: 7, name: 'James Whitfield' };
+state.players = [{ id: 7, name: 'James Whitfield', photo_path: null }];
+const { openMatchCard } = await import('../renderer/matchCard.js');
+window.openMatchCard = openMatchCard;
+const { renderReportScore } = await import('../renderer/pages/reportScore.js');
+
+try {
+  log.textContent += (mobile ? 'PHONE' : 'DESKTOP') + ' — CARD\n';
+  await openMatchCard(1); await settle();
+  ok('a doubles card, with the chip beside the kicker', !!$('.mc-card--doubles') && txt($('.mc-dbl-chip')) === 'Doubles' && txt($('.mc-kicker')) === 'Doubles League · Division 1 · Week 4', txt($('.mc-kicker')));
+  if (!mobile) {
+    ok('the face-off has two sides of two players', vis($('.mc-players--doubles')) && $$('.mc-dside').length === 2 && $$('.mc-dside')[0].querySelectorAll('.mc-dplayer').length === 2);
+    ok('the phone scoreboard stays hidden', !vis($('.mc-scoreboard')));
+    ok('each player shows their doubles rank and rating', txt($$('.mc-dplayer')[0].querySelector('.mc-meta')) === '#3 doubles · 1498' && txt($$('.mc-dplayer')[1].querySelector('.mc-meta')) === 'Not on doubles ladder', txt($$('.mc-dplayer')[1]?.querySelector('.mc-meta')));
+    ok('with their own delta', $$('.mc-dplayer').map((p) => txt(p.querySelector('.mc-delta'))).join('|') === '+9|+12|−6|−8', $$('.mc-dplayer').map((p) => txt(p.querySelector('.mc-delta'))).join('|'));
+    ok('the viewer wears the ring', !!$$('.mc-dplayer')[0].querySelector('.mc-avatar--you'));
+    ok('only the winning side carries the Winners mark', $$('.mc-dside')[0].querySelector('.mc-winners') && !$$('.mc-dside')[1].querySelector('.mc-winners') && /Winners/.test(txt($$('.mc-dside')[0])));
+    ok('score and Final in the centre', txt($('.mc-centre--doubles .mc-score')) === '3–1' && !!$('.mc-centre--doubles .mc-final'));
+    ok('the head to head is between these pairs', vis($('.mc-h2h-label .mc-long')) && txt($('.mc-h2h-label .mc-long')) === 'Head to head · these pairs');
+  } else {
+    ok('the face-off gives way to the scoreboard', !vis($('.mc-players--doubles')) && vis($('.mc-scoreboard')) && $$('.mc-pairrow').length === 2);
+    ok('the winning pair row is green with 3 games, the loser 1', $$('.mc-pairrow')[0].classList.contains('mc-pairrow--won') && txt($$('.mc-pairrow')[0].querySelector('.mc-pairrow-games')) === '3' && txt($$('.mc-pairrow')[1].querySelector('.mc-pairrow-games')) === '1');
+    ok('each line has name, short meta and delta', $$('.mc-pairrow-line').length === 4 && txt($$('.mc-pairrow-line')[0].querySelector('.mc-meta')) === '#3 · 1498' && txt($$('.mc-pairrow-line')[1].querySelector('.mc-meta')) === 'unranked');
+    ok('Final · Best of five under the rows', /Final · Best of five/.test(txt($('.mc-final--board'))));
+    ok('the head to head label is the short one', vis($('.mc-h2h-label .mc-short')) && !vis($('.mc-h2h-label .mc-long')));
+  }
+  ok('the lead line names the leading pair by first names', txt($('.mc-h2h-lead')) === 'Sofia & Tom lead 2–1', txt($('.mc-h2h-lead')));
+  ok('meeting rows name the winning pair', $$('.mc-meeting-who').map(txt).join('|') === 'James & Priya|Sofia & Tom|Sofia & Tom', $$('.mc-meeting-who').map(txt).join('|'));
+  ok('no submit on a played match', !$('#mcSubmit'));
+  click($('#mcClose')); await settle();
+
+  await openMatchCard(2); await settle();
+  ok('a scheduled doubles ladder card reads VS with its kicker', txt($('.mc-kicker')) === 'Doubles ladder match' && (mobile ? !$$('.mc-pairrow-games').length : txt($('.mc-centre--doubles .mc-vs')) === 'VS'));
+  ok('first meeting copy for pairs', mobile ? vis($('.mc-h2h-empty .mc-short')) && txt($('.mc-h2h-empty .mc-short')) === 'First meeting between these pairs.' : txt($('.mc-h2h-empty .mc-long')) === 'First meeting — these pairs have never played each other.');
+  ok('a participant may submit', !!$('#mcSubmit'));
+  click($('#mcSubmit')); await settle();
+  ok('Submit hands over to Report Score for that match', calls.some((c) => c[0] === 'navigate' && c[1] === 'reportScore' && c[2]?.matchId === 2));
+
+  log.textContent += '\nREPORT SCORE\n';
+  await renderReportScore(); await settle();
+  const rows = $$('.rs-row');
+  ok('singles and doubles rows both list', rows.length === 2 && rows[1].classList.contains('rs-row--dbl') && !rows[0].classList.contains('rs-row--dbl'));
+  const dr = rows[1];
+  ok('the doubles row stacks both opponents\' avatars', dr.querySelectorAll('.rs-avs .rs-avatar').length === 2);
+  if (!mobile) {
+    ok('titled vs both opponents, tagged', vis(dr.querySelector('.rs-row-opp .rs-long')) && /^vs Sofia Duarte & Tom Beckett\s*Doubles$/i.test(vtxt(dr.querySelector('.rs-row-opp'))) && !!dr.querySelector('.rs-dbl-chip'), vtxt(dr.querySelector('.rs-row-opp')));
+    ok('the context leads with the partner', vtxt(dr.querySelector('.rs-row-context')) === 'with Priya Raman · Doubles League · Division 1 · Week 4', vtxt(dr.querySelector('.rs-row-context')));
+  } else {
+    ok('titled with first names on a phone', vis(dr.querySelector('.rs-row-opp .rs-short')) && !vis(dr.querySelector('.rs-row-opp .rs-long')) && /vs Sofia & Tom/.test(vtxt(dr.querySelector('.rs-row-opp'))));
+    ok('the context uses the partner\'s first name', /^with Priya · /.test(vtxt(dr.querySelector('.rs-row-context'))));
+    ok('the date sits under the context, not beside the title', dr.querySelector('.rs-row-when').getBoundingClientRect().top > dr.querySelector('.rs-row-context').getBoundingClientRect().top);
+  }
+  click(dr.querySelector('[data-report]')); await settle();
+  ok('the form is titled with the chip and the pairs', $('#modalTitle .rs-dbl-chip') && /You & Priya/.test(txt($('#modalTitle'))) && /Sofia/.test(txt($('#modalTitle'))));
+  ok('it asks which pair won', txt($('.rs-label')) === 'Which pair won?');
+  const cards = $$('.rs-winner--pair');
+  ok('two pair cards, two avatars and two lines each', cards.length === 2 && cards.every((c) => c.querySelectorAll('.rs-winner-av').length === 2 && c.querySelectorAll('.rs-winner-lines > span').length === 2));
+  ok('You over your partner; opponent over opponent', [...cards[0].querySelectorAll('.rs-winner-lines > span')].map(txt).join('|') === 'You|Priya Raman' && [...cards[1].querySelectorAll('.rs-winner-lines > span')].map(txt).join('|') === 'Sofia Duarte|Tom Beckett');
+  ok('games wait for the winner', $$('.rs-game').every((g) => g.disabled) && txt($('.rs-hint')) === 'Pick the winning pair first');
+  click(cards[0]); await settle();
+  ok('the hint names the losing pair', txt($('.rs-hint')) === 'How many did Sofia & Tom take?', txt($('.rs-hint')));
+  click($$('.rs-game')[1]); await settle();
+  ok('the summary names both pairs and the rating note', /You & Priya beat Sofia & Tom 3–1/.test(txt($('.rs-summary'))) && /All four doubles ratings update individually/.test(txt($('.rs-summary'))), txt($('.rs-summary')));
+  click($$('.rs-winner--pair')[1]); await settle();
+  ok('picking the other pair flips the hint to You & Priya', txt($('.rs-hint')) === 'How many did You & Priya take?', txt($('.rs-hint')));
+  click($$('.rs-winner--pair')[0]); await settle();   // the games pick is kept across a winner change
+  click($('#rsSubmit')); await settle(120);
+  const rep = calls.find((c) => c[0] === 'report');
+  ok('submit sends the side scores', rep && rep[1] === 2 && rep[2].mySideScore === 3 && rep[2].theirSideScore === 1, JSON.stringify(rep));
+  ok('with a toast', /Score reported/.test($('#toastContainer').textContent));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

@@ -30,13 +30,32 @@ function _when(m) {
 }
 
 function _context(m) {
-  if (m.type === 'ladder') return 'Ladder match';
+  if (m.type === 'ladder') return m.format === 'doubles' ? 'Doubles ladder match' : 'Ladder match';
   return [m.league_name, m.division_name, m.week_number ? `Week ${m.week_number}` : null]
     .filter(Boolean).join(' · ');
 }
 
+const _isDbl = (m) => m.format === 'doubles' && Array.isArray(m.opponents);
+// Full names on a desktop, first names on a phone: both are rendered and the
+// stylesheet shows one.
+const _both = (long, short) => `<span class="rs-long">${esc(long)}</span><span class="rs-short">${esc(short)}</span>`;
+const _oppsLong = (m) => m.opponents.map((o) => o.name).join(' & ');
+const _oppsShort = (m) => m.opponents.map((o) => _first(o.name)).join(' & ');
+
 function _rowHTML(m) {
   const when = _when(m);
+  if (_isDbl(m)) {
+    return `
+    <div class="rs-row rs-row--dbl" data-match="${m.id}">
+      <span class="rs-avs">${m.opponents.map((o) => avatarHTML(o, 'rs-avatar')).join('')}</span>
+      <div class="rs-row-text">
+        <span class="rs-row-opp">vs ${_both(_oppsLong(m), _oppsShort(m))}<span class="rs-dbl-chip">Doubles</span></span>
+        <span class="rs-row-context">with ${_both(m.partner?.name || '', _first(m.partner?.name))} · ${esc(_context(m))}</span>
+      </div>
+      <span class="rs-row-when${when ? '' : ' rs-row-when--none'}">${when ? esc(when) : 'No time set'}</span>
+      <button class="btn btn-secondary btn-sm" data-report="${m.id}">Report score</button>
+    </div>`;
+  }
   return `
     <div class="rs-row" data-match="${m.id}">
       ${avatarHTML({ name: m.opponent_name, photo_path: m.opponent_photo }, 'rs-avatar')}
@@ -81,6 +100,7 @@ function _pageHTML() {
 // Enter a Match modal asks, so the two flows read as one thing. There is no
 // date field here: unlike Enter a Match, these matches already exist.
 function _openForm(m) {
+  if (_isDbl(m)) return _openDoublesForm(m);
   let winner = null;   // 1 = me, 2 = opponent
   let games = null;    // games the loser took: 0 | 1 | 2
 
@@ -172,6 +192,111 @@ function _openForm(m) {
   modal.open('Report score', '', { medium: true });
   document.getElementById('modalTitle').innerHTML =
     `Report score<span class="rs-modal-sub">vs ${esc(oppName)} · ${esc(_context(m))}</span>`;
+  render();
+}
+
+// ── The doubles form ─────────────────────────────────────────────────────────
+// Which pair won, then the games, then a summary. One score for the fixture;
+// every one of the four doubles ratings moves on its own.
+function _openDoublesForm(m) {
+  let winner = null;   // 1 = my pair, 2 = theirs
+  let games = null;
+
+  const me = state.players?.find((p) => p.id === state.currentUser?.playerId);
+  const partner = m.partner || { name: 'Partner' };
+  const opps = m.opponents;
+  const mineLong = `You & ${partner.name}`, mineShort = `You & ${_first(partner.name)}`;
+  const theirsLong = _oppsLong(m), theirsShort = _oppsShort(m);
+
+  const GAMES = [
+    { g: 0, label: '3–0', sub: 'swept' },
+    { g: 1, label: '3–1', sub: 'took one' },
+    { g: 2, label: '3–2', sub: 'took two' },
+  ];
+
+  const render = () => {
+    const complete = winner !== null && games !== null;
+    const loserShort = winner === 1 ? theirsShort : mineShort;
+    const winnerShort = winner === 1 ? mineShort : theirsShort;
+    const pairCard = (side, avatars, lines) => `
+      <button class="rs-winner rs-winner--pair${winner === side ? ' rs-winner--on' : ''}" data-side="${side}">
+        <span class="rs-winner-avs">${avatars.map((p) => avatarHTML(p, 'rs-winner-av rs-winner-av--sm')).join('')}</span>
+        <span class="rs-winner-lines">${lines.map((l) => `<span>${esc(l)}</span>`).join('')}</span>
+        ${winner === side ? '<svg class="rs-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
+      </button>`;
+
+    document.getElementById('modalBody').innerHTML = `
+      <div class="rs-form">
+        <div class="rs-form-section">
+          <span class="rs-label">Which pair won?</span>
+          <div class="rs-winners">
+            ${pairCard(1, [me || { name: 'You' }, partner], ['You', partner.name])}
+            ${pairCard(2, opps, opps.map((o) => o.name))}
+          </div>
+        </div>
+
+        <div class="rs-form-section">
+          <div class="rs-label-row">
+            <span class="rs-label">Games</span>
+            <span class="rs-hint">${winner === null ? 'Pick the winning pair first' : `How many did ${esc(loserShort)} take?`}</span>
+          </div>
+          <div class="rs-games${winner === null ? ' rs-games--off' : ''}">
+            ${GAMES.map((x) => `
+              <button class="rs-game${games === x.g ? ' rs-game--on' : ''}" data-games="${x.g}"${winner === null ? ' disabled' : ''}>
+                <span class="rs-game-score">${x.label}</span>
+                <span class="rs-game-sub">${x.sub}</span>
+              </button>`).join('')}
+          </div>
+        </div>
+
+        ${complete ? `
+          <div class="rs-summary rs-summary--dbl">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            <span class="rs-summary-lines">
+              <span>${esc(winnerShort)} beat ${esc(loserShort)} 3–${games}</span>
+              <span class="rs-summary-note">All four doubles ratings update individually.</span>
+            </span>
+          </div>` : ''}
+      </div>
+      <div class="rs-form-foot">
+        <button class="btn btn-secondary btn-lg" id="rsCancel">Cancel</button>
+        <button class="btn btn-primary btn-lg" id="rsSubmit"${complete && !_busy ? '' : ' disabled'}>${_busy ? 'Submitting…' : 'Submit score'}</button>
+      </div>`;
+
+    document.querySelectorAll('.rs-winner').forEach((b) => b.addEventListener('click', () => {
+      winner = winner === Number(b.dataset.side) ? null : Number(b.dataset.side);
+      render();
+    }));
+    document.querySelectorAll('.rs-game:not([disabled])').forEach((b) => b.addEventListener('click', () => {
+      games = games === Number(b.dataset.games) ? null : Number(b.dataset.games);
+      render();
+    }));
+    document.getElementById('rsCancel')?.addEventListener('click', () => modal.close());
+    document.getElementById('rsSubmit')?.addEventListener('click', submit);
+  };
+
+  const submit = async () => {
+    if (_busy || winner === null || games === null) return;
+    _busy = true;
+    render();
+    try {
+      const mySideScore = winner === 1 ? 3 : games;
+      const theirSideScore = winner === 1 ? games : 3;
+      await window.api.reportMatchScore(m.id, { mySideScore, theirSideScore });
+      modal.close();
+      toast('Score reported', 'success');
+      await _load();
+      _paint();
+    } catch (e) {
+      toast(e.message || 'Could not report that score.', 'error');
+    } finally {
+      _busy = false;
+    }
+  };
+
+  modal.open('Report score', '', { medium: true });
+  document.getElementById('modalTitle').innerHTML =
+    `Report score<span class="rs-dbl-chip">Doubles</span><span class="rs-modal-sub">${_both(mineLong, mineShort)} vs ${_both(theirsLong, theirsShort)} · ${esc(_context(m))}</span>`;
   render();
 }
 
