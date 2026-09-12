@@ -1482,7 +1482,13 @@ let _profileResultFilter = 'all';
 let _profileMobileView = null;
 
 export async function openPlayerProfile(id, { pushHistory = true } = {}) {
-  const player = await window.api.getPlayerHistory(id);
+  // The doubles record travels beside the singles payload, never inside it,
+  // so renderPlayerProfile stays synchronous and the two are never merged.
+  const [player, doubles] = await Promise.all([
+    window.api.getPlayerHistory(id),
+    Promise.resolve().then(() => (window.api.getPlayerDoubles ? window.api.getPlayerDoubles(id) : null)).catch(() => null),
+  ]);
+  if (player && typeof player === 'object') player.doubles = doubles;
   window.navigate('playerProfile', { player }, { pushHistory });
 }
 
@@ -1653,6 +1659,33 @@ export function renderPlayerProfile() {
   const ladder = p.ladder || {};
   const isSelf = state.currentUser?.playerId === p.id;
 
+  // ===== DOUBLES DATA =====
+  // A separate payload, scoped to the same season, and never folded into the
+  // singles numbers: the header, the singles record and the detail strip stay
+  // singles-only by design.
+  const dbl = p.doubles || {};
+  const dblAll = (dbl.history || []).map((m) => ({ ...m, week_date: m.played_at }));
+  const doublesHistory = dblAll.filter(inSeason);
+  const dblStats = _profileStats(doublesHistory);
+  const dblLadder = dbl.ladder || {};
+  const dblUpcoming = dbl.upcoming || [];
+  const inSeasonPartner = (pt) => activeSeason === null
+    || (activeSeason === 'none' ? pt.season_key == null : pt.season_key === activeSeason);
+  // Partners arrive per season; "All time" sums them per partner.
+  const dblPartners = (() => {
+    const by = new Map();
+    for (const pt of (dbl.partners || []).filter(inSeasonPartner)) {
+      const e = by.get(pt.id) || { ...pt, wins: 0, losses: 0, matches: 0 };
+      e.wins += pt.wins; e.losses += pt.losses; e.matches += pt.matches;
+      by.set(pt.id, e);
+    }
+    return [...by.values()].sort((a, b) => b.matches - a.matches || a.name.localeCompare(b.name));
+  })();
+  const firstName = (n) => String(n || '').split(' ')[0];
+  const playerLink = (pl) => (pl?.id
+    ? `<span class="nav-player-link" data-player-id="${pl.id}">${esc(pl.name)}</span>`
+    : esc(pl?.name || ''));
+
   // ===== HEADER =====
   const canEditPhoto = adminMode || isSelf;
   const metaBits = [
@@ -1743,6 +1776,7 @@ export function renderPlayerProfile() {
     { key: 'results', label: 'Results' },
     { key: 'upcoming', label: 'Upcoming' },
     { key: 'tournaments', label: 'Tournaments' },
+    { key: 'doubles', label: 'Doubles' },
   ];
   // Normalised back onto the module state so the arrow-key handler and the
   // filter rebuild can't read a tab key the DOM never rendered.
@@ -1787,6 +1821,38 @@ export function renderPlayerProfile() {
       </div>`;
   };
 
+  // A doubles result: the two opponents as the title, tagged, and "with
+  // {partner}" leading the context line. `short` uses first names, for the
+  // phone's Last 3 card.
+  const doublesContext = (m, short) => (m.source === 'league'
+    ? [esc(m.league_name), m.week_number ? `Wk ${m.week_number}` : null,
+       !short && m.division_name ? esc(m.division_name.replace(/^Division\s*/i, 'Div ')) : null].filter(Boolean).join(' · ')
+    : 'Doubles ladder');
+  const doublesRow = (m, { compact = false, short = false } = {}) => {
+    const won = m.result === 'W';
+    const opps = m.opponents || [];
+    const title = short ? esc(opps.map((o) => firstName(o.name)).join(' & ')) : opps.map(playerLink).join(' & ');
+    const partner = short ? esc(firstName(m.partner?.name)) : playerLink(m.partner);
+    const delta = m.rating_change;
+    const deltaHTML = delta === undefined || delta === null ? '' : `
+      <span class="pp-row-delta ${delta >= 0 ? 'pp-delta-up' : 'pp-delta-down'}">${delta >= 0 ? '+' : ''}${delta}</span>`;
+    return `
+      <div class="pp-row pp-row-dbl" data-match="${m.id}">
+        <span class="pp-chip ${won ? 'pp-chip-w' : 'pp-chip-l'}">${won ? 'W' : 'L'}</span>
+        <div class="pp-row-main">
+          <span class="pp-row-title"><span class="pp-row-title-text">${title}</span><span class="pp-dbl-chip">Doubles</span></span>
+          <span class="pp-row-sub"><span class="pp-with">with ${partner} · </span>${doublesContext(m, short)}</span>
+        </div>
+        ${deltaHTML}
+        <span class="pp-row-score">${m.my_score}–${m.their_score}</span>
+        ${compact ? '' : `<span class="pp-row-date">${formatShortDate(m.week_date)}</span>`}
+      </div>`;
+  };
+  // Singles and doubles rows in one list, newest first.
+  const mergedResults = [...history.map((m) => ({ m, dbl: false })), ...doublesHistory.map((m) => ({ m, dbl: true }))]
+    .sort((a, b) => (b.m.week_date || '').localeCompare(a.m.week_date || ''));
+  const anyRow = (x, opts) => (x.dbl ? doublesRow(x.m, opts) : resultRow(x.m, opts));
+
   // `action` is optional: only the states where there is a genuinely available
   // next step get a button, rather than every empty panel growing one.
   const emptyBlock = (msg, action) => `
@@ -1811,19 +1877,32 @@ export function renderPlayerProfile() {
     { key: 'league', label: 'League' },
     { key: 'pickup', label: 'Ladder' },
     { key: 'tournament', label: 'Tournament' },
+    { key: 'doubles', label: 'Doubles' },
   ];
+  const dblDetailStripHTML = dblStats.played === 0 ? '' : `
+    <div class="pp-detail-strip">
+      <div><span class="pp-fig">${dblStats.gamesWon}–${dblStats.gamesLost}</span><span class="pp-fig-label">Doubles games</span></div>
+      <div><span class="pp-fig">${dblStats.gameWinPct === null ? '—' : `${dblStats.gameWinPct}%`}</span><span class="pp-fig-label">Game win rate</span></div>
+    </div>`;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   // Takes the filter as an argument so changing it can rebuild this panel alone
   // instead of re-rendering the whole profile.
   const buildResultsPanel = (filterKey) => {
-    const filtered = filterKey === 'all'
-      ? history
-      : history.filter((m) => (m.source || 'league') === filterKey);
+    const filtered = filterKey === 'all' ? mergedResults
+      : filterKey === 'doubles' ? mergedResults.filter((x) => x.dbl)
+      : mergedResults.filter((x) => !x.dbl && (x.m.source || 'league') === filterKey);
+    // The sub-line always states singles; it only mentions doubles when both are shown.
+    const subLine = filterKey === 'doubles'
+      ? `${plural(dblStats.wins, 'win', 'wins')} · ${plural(dblStats.losses, 'loss', 'losses')} · doubles`
+      : filterKey === 'all' && doublesHistory.length
+        ? `${plural(stats.wins, 'win', 'wins')} · ${plural(stats.losses, 'loss', 'losses')} · singles, plus ${doublesHistory.length} doubles`
+        : `${plural(stats.wins, 'win', 'wins')} · ${plural(stats.losses, 'loss', 'losses')}`;
     return `
     <div class="pp-card">
       <div class="pp-card-head pp-card-head-wrap">
         <div class="pp-card-head-text">
           <span class="pp-card-label">Results · ${esc(seasonLabel)}</span>
-          <span class="pp-card-sub">${stats.wins} win${stats.wins === 1 ? '' : 's'} · ${stats.losses} loss${stats.losses === 1 ? '' : 'es'}</span>
+          <span class="pp-card-sub">${subLine}</span>
         </div>
         <div class="pp-filters" role="group" aria-label="Filter results by competition">
           ${sourceFilters.map((f) => `
@@ -1831,9 +1910,9 @@ export function renderPlayerProfile() {
               aria-pressed="${filterKey === f.key}">${f.label}</button>`).join('')}
         </div>
       </div>
-      ${detailStripHTML}
+      ${filterKey === 'doubles' ? dblDetailStripHTML : detailStripHTML}
       ${filtered.length
-        ? filtered.map((m) => resultRow(m)).join('')
+        ? filtered.map((x) => anyRow(x)).join('')
         : filterKey === 'all'
           ? emptyBlock(`No matches ${periodPhrase} yet`, reportMatchAction)
           : emptyBlock(`No ${sourceFilters.find((f) => f.key === filterKey)?.label.toLowerCase()} matches ${periodPhrase}`)}
@@ -1841,32 +1920,116 @@ export function renderPlayerProfile() {
   };
 
   // -- Upcoming panel --
+  // Singles and doubles fixtures in date order; Next up goes on the first overall.
+  const upcomingAll = [...upcoming.map((m) => ({ m, dbl: false })), ...dblUpcoming.map((m) => ({ m, dbl: true }))]
+    .sort((a, b) => (a.m.week_date || '').localeCompare(b.m.week_date || ''));
   const upcomingPanelHTML = `
     <div class="pp-card">
       <div class="pp-card-head">
         <span class="pp-card-label">Upcoming matches</span>
-        <span class="pp-card-sub">all seasons · ${upcoming.length} scheduled</span>
+        <span class="pp-card-sub">all seasons · ${upcomingAll.length} scheduled</span>
       </div>
-      ${upcoming.length ? upcoming.map((m, i) => {
+      ${upcomingAll.length ? upcomingAll.map(({ m, dbl: isDbl }, i) => {
         const courtLabel = isAdmin() && (m.court_name || (m.schedule_courts && m.court_number ? `Court ${m.court_number}` : null));
         const timing = [m.match_time, courtLabel].filter(Boolean).join(' · ');
         const context = [esc(m.league_name), m.week_number ? `Wk ${m.week_number}` : null].filter(Boolean).join(' · ');
-        const opponent = m.opponent_id
-          ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
-          : esc(m.opponent_name || 'TBD');
+        const opponent = isDbl
+          ? `<span class="pp-row-title-text">${(m.opponents || []).map(playerLink).join(' & ') || 'TBD'}</span><span class="pp-dbl-chip">Doubles</span>`
+          : m.opponent_id
+            ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>`
+            : esc(m.opponent_name || 'TBD');
         return `
-          <div class="pp-row pp-row-lg${i === 0 ? ' pp-row-next' : ''}" data-match="${m.id}">
+          <div class="pp-row pp-row-lg${i === 0 ? ' pp-row-next' : ''}${isDbl ? ' pp-row-dbl' : ''}" data-match="${m.id}">
             <div class="pp-date-block">
               <span class="pp-date-main">${formatShortDate(m.week_date)}</span>
               ${timing ? `<span class="pp-date-sub">${esc(timing)}</span>` : ''}
             </div>
             <div class="pp-row-main">
               <span class="pp-row-title">${opponent}${i === 0 ? '<span class="pp-next-chip">Next up</span>' : ''}</span>
-              <span class="pp-row-sub">${context}</span>
+              <span class="pp-row-sub">${isDbl ? `<span class="pp-with">with ${playerLink(m.partner)} · </span>` : ''}${context}</span>
             </div>
           </div>`;
       }).join('') : emptyBlock('No upcoming matches')}
     </div>`;
+
+  // -- Doubles panel --
+  // Doubles stats only: ladder rank and rating, the season record, the streak,
+  // and partners. Nothing here reads the singles history.
+  const dblRankMoveHTML = !dblLadder.rank_change || dblLadder.frozen ? ''
+    : `<span class="pp-hstat-move ${dblLadder.rank_change > 0 ? 'pp-pos' : 'pp-neg'}" title="Places moved in the last 7 days"><svg class="mv-tri" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 3 L10.2 8.6 L1.8 8.6 Z" fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>${Math.abs(dblLadder.rank_change)}</span>`;
+  const dblRankTileHTML = dblLadder.position != null ? `
+      <div class="pp-dbl-tile pp-dbl-tile--navy">
+        <div class="pp-dbl-tile-val">#${dblLadder.position}<span class="pp-hstat-sub">of ${dblLadder.size}</span>${dblRankMoveHTML}</div>
+        <div class="pp-dbl-tile-label">Doubles ladder${dblLadder.rating == null ? '' : ` · ${Number(dblLadder.rating)}`}</div>
+      </div>` : `
+      <div class="pp-dbl-tile pp-dbl-tile--navy">
+        <div class="pp-dbl-tile-val pp-dbl-tile-val--unranked">Unranked</div>
+        <div class="pp-dbl-tile-label">${isSelf ? 'Play a doubles match to join' : 'No doubles matches yet'}</div>
+      </div>`;
+  const dblStreakTileHTML = `
+      <div class="pp-dbl-tile pp-card">
+        <div class="pp-dbl-tile-val ${dblStats.streakType === 'W' ? 'pp-delta-up' : dblStats.streakType === 'L' ? 'pp-delta-down' : ''}">${dblStats.currentStreak ? `${dblStats.currentStreak}${dblStats.streakType}` : '—'}</div>
+        <div class="pp-dbl-tile-label pp-dbl-tile-label--dark">Doubles streak</div>
+      </div>`;
+  const dblRecordTileHTML = `
+      <div class="pp-dbl-tile pp-card">
+        <div class="pp-dbl-tile-val">${dblStats.wins}–${dblStats.losses}<span class="pp-dbl-tile-pct">${dblStats.winPct === null ? '' : `${dblStats.winPct}%`}</span></div>
+        <div class="pp-bar"><span style="width:${dblStats.winPct || 0}%"></span></div>
+        <div class="pp-dbl-tile-label pp-dbl-tile-label--dark">${esc(seasonLabel)} doubles record</div>
+      </div>`;
+  const partnersCardHTML = (mobile) => `
+    <div class="pp-card">
+      <div class="pp-card-head">
+        <span class="pp-card-label">Partners · ${esc(seasonLabel)}</span>
+        <span class="pp-card-sub">${plural(dblPartners.length, 'partner', 'partners')}${mobile ? '' : ` · ${plural(doublesHistory.length, 'match', 'matches')}`}</span>
+      </div>
+      ${dblPartners.length ? dblPartners.map((pt) => {
+        const played = pt.wins + pt.losses;
+        const pct = played ? Math.round(pt.wins / played * 100) : 0;
+        return `
+        <div class="pp-row pp-partner-row">
+          ${avatarHTML(pt, `pp-partner-av${mobile ? ' pp-partner-av--sm' : ''}`)}
+          <div class="pp-row-main">
+            <span class="pp-row-title">${playerLink(pt)}</span>
+            <span class="pp-row-sub">${esc(pt.context || '')}</span>
+          </div>
+          ${mobile
+            ? `<span class="pp-partner-rec-m">${pt.wins}–${pt.losses}</span>`
+            : `<div class="pp-partner-rec">
+                <span class="pp-partner-rec-val">${pt.wins}–${pt.losses} <span class="pp-partner-pct">${pct}%</span></span>
+                <div class="pp-bar pp-partner-bar"><span style="width:${pct}%"></span></div>
+              </div>`}
+        </div>`;
+      }).join('') : emptyBlock(`No doubles matches ${periodPhrase}`)}
+    </div>`;
+  const doublesPanelHTML = dblAll.length === 0
+    ? emptyBlock(`No doubles matches ${periodPhrase} yet`)
+    : `<div class="pp-col">
+        <div class="pp-dbl-tiles">${dblRankTileHTML}${dblRecordTileHTML}${dblStreakTileHTML}</div>
+        ${partnersCardHTML(false)}
+      </div>`;
+  const doublesMobileHTML = dblAll.length === 0
+    ? emptyBlock(`No doubles matches ${periodPhrase} yet`)
+    : `
+      <div class="pp-dbl-mtiles">${dblRankTileHTML}${dblStreakTileHTML}</div>
+      <div class="pp-card pp-card-pad">
+        <div class="pp-card-head pp-card-head-bare">
+          <span class="pp-card-label">${esc(seasonLabel)} doubles record</span>
+        </div>
+        ${dblStats.played === 0 ? emptyBlock(`No doubles matches ${periodPhrase}`) : `
+          <div class="pp-big">
+            <span class="pp-big-w">${dblStats.wins}</span>
+            <span class="pp-big-sep">/</span>
+            <span class="pp-big-l">${dblStats.losses}</span>
+            <span class="pp-big-pct">${dblStats.winPct === null ? '—' : `${dblStats.winPct}%`}</span>
+          </div>
+          <div class="pp-bar pp-bar-lg"><span style="width:${dblStats.winPct || 0}%"></span></div>
+          <div class="pp-figures">
+            <div><span class="pp-fig">${dblStats.gamesWon}–${dblStats.gamesLost}</span><span class="pp-fig-label">Games</span></div>
+            <div><span class="pp-fig">${dblStats.gameWinPct === null ? '—' : `${dblStats.gameWinPct}%`}</span><span class="pp-fig-label">Game win rate</span></div>
+          </div>`}
+      </div>
+      ${partnersCardHTML(true)}`;
 
   // -- Tournaments panel --
   const tournPanelHTML = `
@@ -1888,10 +2051,11 @@ export function renderPlayerProfile() {
   // replay while the header reported the season's own standing, so the two
   // numbers on one page disagreed by design. Pulled until ladder history is
   // stored rather than re-simulated; the header rank is the reliable one.
-  const panelFor = (tabKey) => {
+  const panelFor = (tabKey, mobile = false) => {
     switch (tabKey) {
       case 'upcoming':    return upcomingPanelHTML;
       case 'tournaments': return tournPanelHTML;
+      case 'doubles':     return mobile ? doublesMobileHTML : doublesPanelHTML;
       default:            return buildResultsPanel(_profileResultFilter);
     }
   };
@@ -1901,7 +2065,7 @@ export function renderPlayerProfile() {
   // Tapping a quick link opens that panel over the column, with a way back.
   // Without this the link set a desktop tab that mobile never renders, so
   // nothing happened.
-  const MOBILE_TITLES = { results: 'Results', upcoming: 'Upcoming matches', tournaments: 'Tournaments' };
+  const MOBILE_TITLES = { results: 'Results', upcoming: 'Upcoming matches', tournaments: 'Tournaments', doubles: 'Doubles' };
   const mobileHTML = _profileMobileView ? `
     <div class="pp-mobile">
       <button class="pp-back" id="ppMobileBack">
@@ -1909,7 +2073,7 @@ export function renderPlayerProfile() {
         Back
       </button>
       <h3 class="pp-subview-title">${esc(MOBILE_TITLES[_profileMobileView] || '')}</h3>
-      ${panelFor(_profileMobileView)}
+      ${panelFor(_profileMobileView, true)}
     </div>` : `
     <div class="pp-mobile">
       <div class="pp-season-row">
@@ -1937,16 +2101,17 @@ export function renderPlayerProfile() {
           </div>`}
       </div>
 
-      ${history.length ? `
+      ${mergedResults.length ? `
         <div class="pp-card">
           <div class="pp-card-head">
-            <span class="pp-card-label">Last ${Math.min(3, history.length)} result${history.length === 1 ? '' : 's'}</span>
-            ${history.length > 3 ? `<button class="pp-link" data-pp-tab="results">All ${history.length}</button>` : ''}
+            <span class="pp-card-label">Last ${Math.min(3, mergedResults.length)} result${mergedResults.length === 1 ? '' : 's'}</span>
+            ${mergedResults.length > 3 ? `<button class="pp-link" data-pp-tab="results">All ${mergedResults.length}</button>` : ''}
           </div>
-          ${history.slice(0, 3).map((m) => resultRow(m)).join('')}
+          ${mergedResults.slice(0, 3).map((x) => anyRow(x, { compact: true, short: true })).join('')}
         </div>` : ''}
 
-      ${_quickLinksHTML(upcoming.length, tournamentResults.length)}
+      ${_quickLinksHTML(upcomingAll.length, tournamentResults.length,
+        dblLadder.position != null ? `#${dblLadder.position} · ${dblStats.wins}–${dblStats.losses}` : 'Unranked')}
     </div>`;
 
   document.getElementById('mainContent').innerHTML = `
@@ -2078,7 +2243,7 @@ function _profileStats(rows) {
   };
 }
 
-function _quickLinksHTML(upcomingCount, tournCount) {
+function _quickLinksHTML(upcomingCount, tournCount, doublesMeta) {
   const chev = `<svg class="pp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>`;
   return `
     <div class="pp-card pp-quick">
@@ -2089,6 +2254,10 @@ function _quickLinksHTML(upcomingCount, tournCount) {
       <button class="pp-quick-row" data-pp-tab="tournaments">
         <span class="pp-quick-label">Tournaments</span>
         <span class="pp-quick-meta">${tournCount}</span>${chev}
+      </button>
+      <button class="pp-quick-row" data-pp-tab="doubles">
+        <span class="pp-quick-label">Doubles</span>
+        <span class="pp-quick-meta">${esc(doublesMeta || '')}</span>${chev}
       </button>
     </div>`;
 }

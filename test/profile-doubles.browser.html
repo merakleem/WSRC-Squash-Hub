@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// Doubles on the profile: its own tab, tagged rows in Results and Upcoming,
+// and the header that never counts doubles. Run at 1280 and again at 390.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const text = (s) => $(s)?.textContent.replace(/\s+/g, ' ').trim();
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const settle = () => new Promise((r) => setTimeout(r, 30));
+const mobile = window.innerWidth <= 768;
+
+const SEASONS = [{ id: '2026', key: '2026', name: '2026', is_current: true }, { id: '2025', key: '2025', name: '2025', is_current: false }];
+const PROFILE = {
+  id: 7, name: 'James Whitfield', member_number: '1042', photo_path: null, accountStatus: 'verified',
+  ladder: { position: 7, ladder_size: 42, rating: 1500, system: 'elo', rank_change: 0 },
+  seasons: SEASONS,
+  history: [
+    { id: 1, result: 'W', my_score: 3, their_score: 1, opponent_name: 'Priya Raman', opponent_id: 3, week_date: '2026-08-05', league_name: 'Summer League', week_number: 5, division_name: 'Division 2', source: 'league', season_key: '2026', rating_change: 7 },
+    { id: 2, result: 'L', my_score: 1, their_score: 3, opponent_name: 'Tom Ashcroft', opponent_id: 4, week_date: '2026-07-15', league_name: 'Summer League', week_number: 3, division_name: 'Division 2', source: 'league', season_key: '2026', rating_change: -9 },
+  ],
+  upcoming: [{ id: 30, week_date: '2026-09-16', match_time: '19:15', opponent_name: 'Daniel Okafor', opponent_id: 8, league_name: 'Summer League', week_number: 6 }],
+  tournamentResults: [],
+  doubles: {
+    ladder: { position: 12, size: 28, rating: 1377, rank_change: 1, unranked: false },
+    history: [
+      { id: 101, source: 'league', played_at: '2026-09-08 19:00:00', season_key: '2026', result: 'W', my_score: 3, their_score: 1, partner: { id: 3, name: 'Priya Raman' }, opponents: [{ id: 1, name: 'Sofia Duarte' }, { id: 2, name: 'Tom Beckett' }], league_name: 'Autumn Doubles', week_number: 1, division_name: 'Division 1', rating_change: 9 },
+      { id: 102, source: 'pickup', played_at: '2026-08-13 19:00:00', season_key: '2026', result: 'L', my_score: 1, their_score: 3, partner: { id: 5, name: 'Kate Sorensen' }, opponents: [{ id: 6, name: 'Elena Kovac' }, { id: 9, name: 'Daniel Osei' }], league_name: null, week_number: null, division_name: null, rating_change: -8 },
+      { id: 103, source: 'pickup', played_at: '2025-06-01 19:00:00', season_key: '2025', result: 'W', my_score: 3, their_score: 0, partner: { id: 5, name: 'Kate Sorensen' }, opponents: [{ id: 6, name: 'Elena Kovac' }, { id: 9, name: 'Daniel Osei' }], league_name: null, week_number: null, division_name: null, rating_change: 5 },
+    ],
+    upcoming: [{ id: 201, week_date: '2026-09-15', match_time: '19:00', court_name: 'Court 2', partner: { id: 3, name: 'Priya Raman' }, opponents: [{ id: 1, name: 'Sofia Duarte' }, { id: 2, name: 'Tom Beckett' }], league_name: 'Autumn Doubles', week_number: 2 }],
+    partners: [
+      { id: 3, name: 'Priya Raman', photo_path: null, season_key: '2026', wins: 1, losses: 0, matches: 1, context: 'Autumn Doubles · Division 1 partner' },
+      { id: 5, name: 'Kate Sorensen', photo_path: null, season_key: '2026', wins: 0, losses: 1, matches: 1, context: 'Doubles ladder' },
+      { id: 5, name: 'Kate Sorensen', photo_path: null, season_key: '2025', wins: 1, losses: 0, matches: 1, context: 'Doubles ladder' },
+    ],
+  },
+};
+window.api = {
+  getPlayerHistory: async () => JSON.parse(JSON.stringify({ ...PROFILE, doubles: undefined })),
+  getPlayerDoubles: async () => JSON.parse(JSON.stringify(PROFILE.doubles)),
+  getPlayers: async () => [],
+  getSeasons: async () => SEASONS,
+};
+const { state } = await import('../renderer/state.js');
+const mod = await import('../renderer/pages/players.js');
+window.navigate = (page, params) => { if (params?.player) state.currentPlayer = params.player; state.page = page; if (page === 'playerProfile') mod.renderPlayerProfile(); };
+window.openPlayerProfile = mod.openPlayerProfile;
+state.currentUser = { role: 'player', playerId: 7, name: 'James Whitfield' };
+
+try {
+  await mod.openPlayerProfile(7); await settle();
+  log.textContent += (mobile ? 'PHONE' : 'DESKTOP') + '\n';
+  ok('the header counts singles only', /2 – ?1|1–1/.test(text('.pp-hstat-wide .pp-hstat-val').replace(/\s/g, '')) || text('.pp-hstat-wide .pp-hstat-val').startsWith('1–1'), text('.pp-hstat-wide .pp-hstat-val'));
+
+  if (!mobile) {
+    ok('a fourth tab, Doubles', $$('.pp-tab').map((t) => t.textContent).join('|') === 'Results|Upcoming|Tournaments|Doubles');
+    log.textContent += '\nRESULTS\n';
+    const rows = $$('#ppPanel .pp-row');
+    ok('singles and doubles rows are merged, newest first', rows.map((r) => r.dataset.match).join() === '101,102,1,2' && rows[0].classList.contains('pp-row-dbl') && !rows[2].classList.contains('pp-row-dbl'), rows.map((r) => r.dataset.match).join());
+    ok('last year\'s doubles match stays in its season', !rows.some((r) => r.dataset.match === '103'));
+    const dblRow = rows[0];
+    ok('a doubles row names both opponents, tagged', dblRow.querySelector('.pp-row-title').textContent.replace(/\s+/g, ' ').trim() === 'Sofia Duarte & Tom BeckettDoubles' && dblRow.querySelector('.pp-dbl-chip'), dblRow.querySelector('.pp-row-title').textContent);
+    ok('with the partner leading the context', dblRow.querySelector('.pp-row-sub').textContent === 'with Priya Raman · Autumn Doubles · Wk 1 · Div 1', dblRow.querySelector('.pp-row-sub').textContent);
+    ok('its own doubles delta and score', dblRow.querySelector('.pp-row-delta').textContent === '+9' && dblRow.querySelector('.pp-row-score').textContent === '3–1');
+    ok('the sub-line says singles, plus doubles', text('.pp-card-sub') === '1 win · 1 loss · singles, plus 2 doubles', text('.pp-card-sub'));
+    ok('the detail strip is singles games', text('.pp-detail-strip').includes('4–4') && /Games/.test(text('.pp-detail-strip')) && !/Doubles games/.test(text('.pp-detail-strip')), text('.pp-detail-strip'));
+    ok('a Doubles filter is offered last', $$('.pp-filter').map((f) => f.textContent).join('|') === 'All|League|Ladder|Tournament|Doubles');
+    click($('.pp-filter[data-pp-filter="doubles"]')); await settle();
+    ok('the Doubles filter shows doubles rows only', $$('#ppPanel .pp-row').length === 2 && $$('#ppPanel .pp-row').every((r) => r.classList.contains('pp-row-dbl')));
+    ok('with a doubles sub-line and doubles games', text('.pp-card-sub') === '1 win · 1 loss · doubles' && /4–4\s*Doubles games/.test(text('.pp-detail-strip')), text('.pp-card-sub') + ' | ' + text('.pp-detail-strip'));
+    ok('a ladder doubles row reads Doubles ladder', $$('#ppPanel .pp-row')[1].querySelector('.pp-row-sub').textContent === 'with Kate Sorensen · Doubles ladder');
+    click($('.pp-filter[data-pp-filter="league"]')); await settle();
+    ok('the League filter is singles only', $$('#ppPanel .pp-row').length === 2 && $$('#ppPanel .pp-row').every((r) => !r.classList.contains('pp-row-dbl')) && text('.pp-card-sub') === '1 win · 1 loss');
+
+    log.textContent += '\nUPCOMING\n';
+    click($('.pp-tab[data-pp-tab="upcoming"]')); await settle();
+    const up = $$('#ppPanel .pp-row');
+    ok('singles and doubles fixtures in date order, two scheduled', up.length === 2 && text('.pp-card-sub') === 'all seasons · 2 scheduled' && up[0].dataset.match === '201');
+    ok('the doubles fixture is tagged and says who with', up[0].querySelector('.pp-dbl-chip') && up[0].querySelector('.pp-row-sub').textContent === 'with Priya Raman · Autumn Doubles · Wk 2', up[0].querySelector('.pp-row-sub').textContent);
+    ok('Next up sits on the first row overall', up[0].querySelector('.pp-next-chip') && !up[1].querySelector('.pp-next-chip'));
+
+    log.textContent += '\nDOUBLES TAB\n';
+    click($('.pp-tab[data-pp-tab="doubles"]')); await settle();
+    const tiles = $$('#ppPanel .pp-dbl-tile');
+    ok('three tiles', tiles.length === 3);
+    ok('the navy tile: rank of size, movement, and the rating in its label', tiles[0].classList.contains('pp-dbl-tile--navy') && text('#ppPanel .pp-dbl-tile--navy .pp-dbl-tile-val').replace(/\s+/g, '') === '#12of281' && text('#ppPanel .pp-dbl-tile--navy .pp-dbl-tile-label') === 'Doubles ladder · 1377', text('#ppPanel .pp-dbl-tile--navy .pp-dbl-tile-val'));
+    ok('the record tile: this season\'s doubles record with a bar', text(`#ppPanel .pp-dbl-tile:nth-child(2) .pp-dbl-tile-val`).replace(/\s+/g, '') === '1–150%' && tiles[1].querySelector('.pp-bar') && text('#ppPanel .pp-dbl-tile:nth-child(2) .pp-dbl-tile-label') === '2026 doubles record', text('#ppPanel .pp-dbl-tile:nth-child(2) .pp-dbl-tile-val'));
+    ok('the streak tile', text('#ppPanel .pp-dbl-tile:nth-child(3) .pp-dbl-tile-val') === '1W' && text('#ppPanel .pp-dbl-tile:nth-child(3) .pp-dbl-tile-label') === 'Doubles streak');
+    ok('partners for the season, most played first', text('#ppPanel .pp-card-label') === 'Partners · 2026' && text('#ppPanel .pp-card-sub') === '2 partners · 2 matches' && $$('#ppPanel .pp-partner-row').length === 2, text('#ppPanel .pp-card-sub'));
+    const prow = $$('#ppPanel .pp-partner-row').find((r) => /Priya Raman/.test(r.textContent));
+    ok('a partner row has avatar, context and record', prow?.querySelector('.pp-partner-av') && /Autumn Doubles · Division 1 partner/.test(prow?.textContent) && prow?.querySelector('.pp-partner-rec-val').textContent.replace(/\s+/g, ' ').trim() === '1–0 100%', prow?.querySelector('.pp-partner-rec-val')?.textContent);
+    ok('ties on matches sort by name', /Kate Sorensen/.test($$('#ppPanel .pp-partner-row')[0].textContent));
+    ok('no all-time block and no cross links in the panel', !$('#ppPanel .pp-link') && !/All time/.test($('#ppPanel').textContent));
+    ok('the header still says the singles rank', /#7/.test(text('.pp-hstat .pp-hstat-val')) && !/#12/.test($('.pp-header').textContent));
+    ok('the singles tab bar and header never mention doubles', !/doubles/i.test($('.pp-header').textContent));
+  } else {
+    log.textContent += '\nMOBILE COLUMN\n';
+    const last3 = $$('.pp-mobile .pp-row');
+    ok('Last 3 results merges singles and doubles', $$('.pp-mobile .pp-card-label').some((l) => /Last 3 results/.test(l.textContent)) && last3.length >= 3 && last3[0].classList.contains('pp-row-dbl'));
+    ok('a doubles row uses first names and the chip', last3[0].querySelector('.pp-row-title').textContent.replace(/\s+/g, ' ').trim() === 'Sofia & TomDoubles' && last3[0].querySelector('.pp-row-sub').textContent.startsWith('with Priya · '), last3[0].querySelector('.pp-row-sub').textContent);
+    const quick = $$('.pp-quick-row');
+    ok('a Doubles quick link with rank and record', quick.length === 3 && quick[2].textContent.replace(/\s+/g, ' ').includes('Doubles') && /#12 · 1–1/.test(quick[2].textContent), quick[2]?.textContent);
+    click(quick[2]); await settle();
+    ok('it opens the Doubles sub-view', text('.pp-subview-title') === 'Doubles' && !!$('#ppMobileBack'));
+    ok('two tiles side by side: rank and streak', $$('.pp-dbl-mtiles .pp-dbl-tile').length === 2 && /#12/.test(text('.pp-dbl-mtiles')) && /1W/.test(text('.pp-dbl-mtiles')) && /DOUBLES STREAK/i.test(text('.pp-dbl-mtiles')));
+    ok('the doubles record card', /2026 doubles record/.test(text('.pp-mobile .pp-card-pad')) && text('.pp-mobile .pp-big').replace(/\s+/g, ' ') === '1 / 1 50%' && /4–4\s*Games/.test(text('.pp-mobile .pp-figures')), text('.pp-mobile .pp-big'));
+    ok('partners with small avatars and a plain record', $$('.pp-mobile .pp-partner-row').length === 2 && $('.pp-mobile .pp-partner-av--sm') && $$('.pp-mobile .pp-partner-rec-m').map((r) => r.textContent).join() === '0–1,1–0');
+    click($('#ppMobileBack')); await settle();
+    ok('Back returns to the column', !$('#ppMobileBack') && $$('.pp-quick-row').length === 3);
+  }
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>
