@@ -109,6 +109,23 @@ function _caDaySub(date) {
 
 function _caShape(m) {
   const p1Won = m.won_side != null ? m.won_side === 1 : m.winner_id === m.player1_id;
+  const { date, minutes } = _caWhen(m.confirmed_at);
+  // A doubles result: two sides of two, no ladder places, tagged as the
+  // doubles ladder or its league.
+  if (m.format === 'doubles') {
+    const t1 = (m.team1 || []).map((p) => ({ id: p.id, name: p.name, pos: null }));
+    const t2 = (m.team2 || []).map((p) => ({ id: p.id, name: p.name, pos: null }));
+    const wScore = p1Won ? m.player1_score : m.player2_score;
+    const lScore = p1Won ? m.player2_score : m.player1_score;
+    return {
+      id: m.id, source: m.source, format: 'doubles',
+      winners: p1Won ? t1 : t2, losers: p1Won ? t2 : t1,
+      score: `${wScore}–${lScore}`, date, minutes,
+      tag: m.source === 'league' ? (m.league_name || 'League') : 'Doubles ladder',
+      moved: 0,
+      by: m.submitted_by_name || '',
+    };
+  }
   const side = (one) => ({
     id: one ? (m.eff_p1_id ?? m.player1_id) : (m.eff_p2_id ?? m.player2_id),
     name: one ? m.p1_name : m.p2_name,
@@ -116,12 +133,11 @@ function _caShape(m) {
     score: one ? m.player1_score : m.player2_score,
   });
   const w = side(p1Won), l = side(!p1Won);
-  const { date, minutes } = _caWhen(m.confirmed_at);
   const tag = m.source === 'league' ? (m.league_name || 'League')
     : m.source === 'tournament' ? [m.tournament_name || 'Tournament', _roundLabels[m.round] || m.round || ''].filter(Boolean).join(' · ')
     : 'Ladder';
   return {
-    id: m.id, source: m.source, winners: [w], losers: [l],
+    id: m.id, source: m.source, format: 'singles', winners: [w], losers: [l],
     score: `${w.score}–${l.score}`, date, minutes, tag,
     moved: m.places_moved > 0 ? m.places_moved : 0,
     by: m.submitted_by_name || '',
@@ -148,7 +164,7 @@ function _caRowHTML(m, admin) {
   const by = admin && m.source !== 'tournament'
     ? `<span class="ca-by">Submitted by ${esc(abbrevName(m.by) || 'Admin')}</span>` : '';
   const del = admin && m.source === 'pickup'
-    ? `<button class="ca-del" data-del="${m.id}" aria-label="Delete this ladder match" title="Delete">${CA_ICON.trash}</button>` : '';
+    ? `<button class="ca-del" data-del="${m.id}" data-format="${m.format || 'singles'}" aria-label="Delete this ladder match" title="Delete">${CA_ICON.trash}</button>` : '';
   return `
     <article class="ca-row" data-match="${m.id}">
       <div class="ca-avs">${avatars}</div>
@@ -317,7 +333,8 @@ function _caRenderDialog() {
   wrap.querySelector('#caConfirmDelete').addEventListener('click', async () => {
     const id = ca.confirmId;
     try {
-      await window.api.deletePickupMatch(id);
+      if (m.format === 'doubles') await window.api.deleteDoublesMatch(id);
+      else await window.api.deletePickupMatch(id);
       ca.all = ca.all.filter((x) => x.id !== id);
       ca.confirmId = null;
       wrap.remove();

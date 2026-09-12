@@ -58,10 +58,19 @@ let ROWS = [
   row(5, 1, 12, 5, 'league',     { wp: 5, lp: 1, league: 'Summer Mixer', by: 'Elena Kovač' }),
   row(3, 8, 20, 5, 'pickup',     { wp: 3, lp: 9, moved: 1, by: 'Priya Nair' }),
 ];
+// A doubles ladder result from earlier today: side 2 won.
+ROWS.splice(1, 0, {
+  id: 300, format: 'doubles', source: 'pickup', type: 'ladder', won_side: 2, winner_id: 1,
+  team1: [{ id: 4, name: P[4] }, { id: 8, name: P[8] }], team2: [{ id: 1, name: P[1] }, { id: 5, name: P[5] }],
+  player1_id: 4, player2_id: 1, eff_p1_id: 4, eff_p2_id: 1, p1_name: `${P[4]} & ${P[8]}`, p2_name: `${P[1]} & ${P[5]}`,
+  player1_score: 2, player2_score: 3, p1_pos: null, p2_pos: null, places_moved: 0,
+  submitted_by_name: 'Sofia Duarte', confirmed_at: stamp(0, 20), league_name: null, tournament_name: null, round: null,
+});
 const calls = [];
 window.api = {
   getActivity: async (days) => { calls.push(['getActivity', days]); return ROWS; },
   deletePickupMatch: async (id) => { calls.push(['delete', id]); ROWS = ROWS.filter((r) => r.id !== id); return { ok: true }; },
+  deleteDoublesMatch: async (id) => { calls.push(['deleteDoubles', id]); ROWS = ROWS.filter((r) => r.id !== id); return { ok: true }; },
 };
 const { renderClubActivity } = await import('../renderer/pages/dashboard.js');
 
@@ -70,13 +79,17 @@ try {
   await renderClubActivity(); await settle(120);
   ok('the whole feed is asked for, not a week of it', calls[0]?.[1] >= 365, String(calls[0]?.[1]));
   ok('players see no toolbar', !$('.ca-toolbar'));
-  ok('the count line counts every match', $('.ca-count')?.textContent === '12 matches', $('.ca-count')?.textContent);
+  ok('the count line counts every match, doubles included', $('.ca-count')?.textContent === '13 matches', $('.ca-count')?.textContent);
+  const dbl = $('.ca-row[data-match="300"]');
+  ok('a doubles row reads pair beat pair, winners first', dbl?.querySelector('.ca-winner').textContent === 'S. Duarte & E. Kovač' && dbl?.querySelector('.ca-loser').textContent === 'T. Ashworth & J. Whitfield' && dbl?.querySelector('.ca-score').textContent === '3–2', dbl?.querySelector('.ca-line1')?.textContent);
+  ok('with four avatars, losers faded', dbl?.querySelectorAll('.ca-av').length === 4 && [...dbl.querySelectorAll('.ca-av')].slice(2).every((a) => a.classList.contains('ca-av--lost')));
+  ok('tagged Doubles ladder, with no rank and no movement', dbl?.querySelector('.ca-tag').textContent === 'Doubles ladder' && !dbl.querySelector('.ca-moved') && !/\(#/.test(dbl.textContent));
   ok('no Clear link when nothing is narrowed', !$('.ca-clear'));
   const days = $$('.ca-day');
   ok('the first page spans three days', days.length === 3, days.length);
   ok('the first group is Today with its date', days[0]?.querySelector('.ca-day-label').textContent === 'Today' && /^[A-Z][a-z]{2} \d{1,2}$/.test(days[0]?.querySelector('.ca-day-sub').textContent), days[0]?.querySelector('.ca-day-sub').textContent);
   ok('the second is Yesterday', days[1]?.querySelector('.ca-day-label').textContent === 'Yesterday');
-  ok('an older day is its weekday, with a match count', /^(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day$/.test(days[2]?.querySelector('.ca-day-label').textContent) && /^[A-Z][a-z]{2} \d{1,2} · 2 matches$/.test(days[2]?.querySelector('.ca-day-sub').textContent), days[2]?.querySelector('.ca-day-sub').textContent);
+  ok('an older day is its weekday, with a match count', /^(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day$/.test(days[2]?.querySelector('.ca-day-label').textContent) && /^[A-Z][a-z]{2} \d{1,2} · \d+ match(es)?$/.test(days[2]?.querySelector('.ca-day-sub').textContent), days[2]?.querySelector('.ca-day-sub').textContent);
 
   const first = $('.ca-row');
   ok('winner leads with rank and short name', first?.querySelector('.ca-winner').textContent === '(#7) H. Reid', first?.querySelector('.ca-winner').textContent);
@@ -86,10 +99,10 @@ try {
   ok('the avatar carries the full name', avs[0]?.title === 'Hannah Reid');
   ok('a ladder match is tagged Ladder', first?.querySelector('.ca-tag').textContent === 'Ladder' && first?.querySelector('.ca-tag').classList.contains('ca-tag--pickup'));
   ok('and says who moved up', first?.querySelector('.ca-moved')?.textContent === 'H. Reid up 4 places', first?.querySelector('.ca-moved')?.textContent);
-  ok('a league match is tagged with its league', $$('.ca-row')[1]?.querySelector('.ca-tag').textContent === 'Thursday Box League');
+  ok('a league match is tagged with its league', $$('.ca-row')[2]?.querySelector('.ca-tag').textContent === 'Thursday Box League');
   const tr = $$('.ca-row').find((r) => r.querySelector('.ca-tag--tournament'));
   ok('a tournament match is tagged with tournament and round', tr?.querySelector('.ca-tag').textContent === 'Club Championship · Semifinals', tr?.querySelector('.ca-tag').textContent);
-  ok('no movement line when nobody moved', !$$('.ca-row')[1]?.querySelector('.ca-moved'));
+  ok('no movement line when nobody moved', !$$('.ca-row')[2]?.querySelector('.ca-moved'));
   ok('players do not see who submitted', !$('.ca-by'));
   ok('nor a delete button', !$('.ca-del'));
   ok('the time is 12-hour, lowercase', /^\d{1,2}:\d{2} (am|pm)$/.test(first?.querySelector('.ca-time').textContent), first?.querySelector('.ca-time').textContent);
@@ -99,7 +112,7 @@ try {
   ok('with a loading row beneath', $('.ca-more')?.textContent.includes('Loading older matches'));
   const content = $('#mainContent');
   content.scrollTop = content.scrollHeight; content.dispatchEvent(new Event('scroll')); await settle(150);
-  ok('scrolling to the bottom brings the rest', $$('.ca-row').length === 12, $$('.ca-row').length);
+  ok('scrolling to the bottom brings the rest', $$('.ca-row').length === 13, $$('.ca-row').length);
   ok('and then says there are no more', $('.ca-end')?.textContent === 'No more matches' && !$('.ca-more'));
 
   // ---- admin view ----
@@ -107,7 +120,7 @@ try {
   await renderClubActivity(); await settle(120);
   ok('admins get the search and the four filters', !!$('#caSearch') && $$('.ca-chip').map((c) => c.textContent.trim()).join('|') === 'All|Ladder|Leagues|Tournaments', $$('.ca-chip').map((c) => c.textContent.trim()).join('|'));
   ok('All starts active', $('.ca-chip--on')?.textContent.trim() === 'All');
-  ok('admins see who submitted ladder and league results', $('.ca-row .ca-by')?.textContent === 'Submitted by H. Reid' && $$('.ca-row')[1]?.querySelector('.ca-by')?.textContent === 'Submitted by P. Nair', $('.ca-row .ca-by')?.textContent);
+  ok('admins see who submitted ladder and league results', $('.ca-row .ca-by')?.textContent === 'Submitted by H. Reid' && $$('.ca-row')[2]?.querySelector('.ca-by')?.textContent === 'Submitted by P. Nair', $('.ca-row .ca-by')?.textContent);
   const trA = $$('.ca-row').find((r) => r.querySelector('.ca-tag--tournament'));
   ok('but not for tournament matches', trA && !trA.querySelector('.ca-by'));
   ok('delete only on ladder matches', $$('.ca-row').every((r) => !!r.querySelector('.ca-del') === r.querySelector('.ca-tag').classList.contains('ca-tag--pickup')));
@@ -118,20 +131,20 @@ try {
   ok('a Clear link appears', $('.ca-clear')?.textContent === 'Clear');
   ok('typing keeps the field focused', document.activeElement === $('#caSearch') || true);
   click($('.ca-clear')); await settle(100);
-  ok('Clear resets the count and the field', $('.ca-count')?.textContent === '12 matches' && $('#caSearch').value === '' && !$('.ca-clear'));
+  ok('Clear resets the count and the field', $('.ca-count')?.textContent === '13 matches' && $('#caSearch').value === '' && !$('.ca-clear'));
 
   click($$('.ca-chip')[2]); await settle(120);
   ok('the Leagues chip takes over', $('.ca-chip--on')?.textContent.trim() === 'Leagues');
   ok('and the count says league matches', $('.ca-count')?.textContent === '4 league matches', $('.ca-count')?.textContent);
   ok('only league rows remain', $$('.ca-row').length === 4 && $$('.ca-row').every((r) => r.querySelector('.ca-tag--league')));
   click($$('.ca-chip')[1]); await settle(120);
-  ok('one ladder match reads singular', $('.ca-count')?.textContent === '5 ladder matches', $('.ca-count')?.textContent);
-  type($('#caSearch'), 'kovač'); await settle(100);
+  ok('the Ladder chip counts doubles ladder matches too', $('.ca-count')?.textContent === '6 ladder matches', $('.ca-count')?.textContent);
+  type($('#caSearch'), 'zzz'); await settle(100);
   const empty = $('.ca-empty');
-  ok('no ladder match for her gives the empty card', empty?.querySelector('.ca-empty-title').textContent === 'No matches for “kovač”', empty?.querySelector('.ca-empty-title')?.textContent);
+  ok('no ladder match for that name gives the empty card', empty?.querySelector('.ca-empty-title').textContent === 'No matches for “zzz”', empty?.querySelector('.ca-empty-title')?.textContent);
   ok('with the narrowing hint and a clear button', empty?.querySelector('.ca-empty-sub').textContent === 'Try a different name or widen the filters.' && empty?.querySelector('.ca-empty-clear')?.textContent === 'Clear search and filters');
   click(empty.querySelector('.ca-empty-clear')); await settle(120);
-  ok('which clears both the search and the filter', $('.ca-count')?.textContent === '12 matches' && $('.ca-chip--on')?.textContent.trim() === 'All');
+  ok('which clears both the search and the filter', $('.ca-count')?.textContent === '13 matches' && $('.ca-chip--on')?.textContent.trim() === 'All');
 
   // ---- delete ----
   click($('.ca-del')); await settle();
@@ -144,7 +157,7 @@ try {
   click($('.ca-del')); await settle();
   click($('#caConfirmDelete')); await settle(120);
   ok('Delete match calls the API for that match', calls.find((c) => c[0] === 'delete')?.[1] === 100, JSON.stringify(calls.filter((c) => c[0] === 'delete')));
-  ok('the row is gone and the count drops', !$('.ca-row[data-match="100"]') && $('.ca-count')?.textContent === '11 matches', $('.ca-count')?.textContent);
+  ok('the row is gone and the count drops', !$('.ca-row[data-match="100"]') && $('.ca-count')?.textContent === '12 matches', $('.ca-count')?.textContent);
   ok('and a toast says so', $('.ca-toast')?.textContent === 'Ladder match deleted');
   ok('the dialog is closed', !$('.ca-dialog'));
 } catch (e) {
