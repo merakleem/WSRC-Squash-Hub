@@ -1,0 +1,15 @@
+node_modules
+.git
+.github
+.env
+*.db
+*.db-wal
+*.db-shm
+squash.db*
+storage
+test
+docs
+.claude
+.DS_Store
+avatars
+squash.db.backup*

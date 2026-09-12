@@ -1,9 +1,10 @@
-require('dotenv').config();
-const express = require('express');
+require('dotenv').config({ quiet: true });
 const path = require('path');
-const { initDB, getDB } = require('./database/db');
-const { getSession, requireCsrf } = require('./middleware');
-const { ensureDir: ensureAvatarDir, AVATAR_DIR, AVATAR_URL_BASE } = require('./lib/photos');
+const log = require('./lib/log');
+const errors = require('./lib/errors');
+const { initDB, closeDB, getDB } = require('./database/db');
+const { ensureDir: ensureAvatarDir } = require('./lib/photos');
+const { startBackups, stopBackups } = require('./lib/backup');
 
 const PORT = process.env.PORT || 8080;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'squash.db');
@@ -14,106 +15,66 @@ const missingVars = [
 ].filter(Boolean);
 
 if (missingVars.length > 0) {
-  console.error(`\n  ERROR: Missing required environment variable(s): ${missingVars.join(', ')}`);
-  console.error('  Railway: set these in your project\'s Variables tab.');
-  console.error('  Local: copy .env.example to .env and fill in the values.\n');
+  log.fatal({ missing: missingVars }, `Missing required environment variable(s): ${missingVars.join(', ')}. ` +
+    'Railway: set these in the service\'s Variables tab. Local: copy .env.example to .env and fill in the values.');
   process.exit(1);
 }
 
-const app = express();
-app.set('trust proxy', 1);
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: false }));
-
-// Public assets (served before auth — login page needs the logo)
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Auth pages + mobile token endpoint
-app.use(require('./routes/auth'));
-
-// Health check
-app.get('/health', (req, res) => res.sendStatus(200));
-
-// ===== GLOBAL AUTH GUARD =====
-app.use((req, res, next) => {
-  if (req.path === '/api/auth/token') return next();
-  const session = getSession(req);
-  if (!session) return res.redirect('/login');
-  req.session = session;
-  next();
-});
-
-// CSRF validation on all mutating API calls
-app.use('/api', requireCsrf);
-
-// Profile photos (behind the auth guard — member photos are not public).
-// Filenames are content-hashed, so these are safe to cache aggressively.
-app.use(AVATAR_URL_BASE, express.static(AVATAR_DIR, {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
-}));
-
-// Renderer SPA (no caching — auth check must run before this)
-app.use(express.static(path.join(__dirname, 'renderer'), {
-  etag: false,
-  lastModified: false,
-  setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
-}));
-
-// ===== API: WHO AM I =====
-app.get('/api/me', (req, res) => {
-  let is_tester = 0;
-  let is_member = 0;
-  let viewing_as = null;
-  // Name and photo are the requester's own, for the sidebar's profile card;
-  // this route only ever reads the session's own player row.
-  let name = null;
-  let photo_path = null;
-  if (req.session.playerId) {
-    const player = getDB().prepare('SELECT is_tester, is_member, name, photo_path FROM players WHERE id = ?').get(req.session.playerId);
-    is_tester = player?.is_tester || 0;
-    is_member = player?.is_member || 0;
-    name = player?.name || null;
-    photo_path = player?.photo_path || null;
-    // Set only when an admin is looking through a member's eyes, so the app can
-    // say so and offer the way back.
-    if (req.session.viewingAs) viewing_as = player?.name || 'this player';
-  }
-  res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, is_member, name, photo_path, viewing_as, club_timezone: require('./lib/clock').getClubTimezone() });
-});
-
-// ===== API ROUTES =====
-app.use('/api', require('./routes/players'));
-app.use('/api', require('./routes/leagues'));
-app.use('/api', require('./routes/matches'));
-app.use('/api', require('./routes/ladder'));
-app.use('/api', require('./routes/activity'));
-app.use('/api', require('./routes/schedule'));
-app.use('/api', require('./routes/bookings'));
-app.use('/api', require('./routes/courts'));
-app.use('/api', require('./routes/tournaments'));
-app.use('/api', require('./routes/settings'));
-app.use('/api', require('./routes/session'));
-app.use('/api', require('./routes/seasons'));
-app.use('/api', require('./routes/events'));
-
-// ===== 404 =====
-app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+errors.init();
 
 // ===== START =====
 async function start() {
-  await initDB(DB_PATH);
+  // A migration that fails throws here, and the process exits below: the
+  // deploy fails its health check instead of serving against the wrong schema.
+  await initDB(DB_PATH, { log: (m) => log.info(m, `migration ${m.id} applied: ${m.name}`) });
   ensureAvatarDir();
-  app.listen(PORT, () => {
-    console.log('');
-    console.log('  Play WSRC is running!');
-    console.log(`  Open http://localhost:${PORT} in your browser`);
-    console.log('');
-    console.log('  Press Ctrl+C to stop.');
-    console.log('');
+
+  const { createApp } = require('./app');
+  const app = createApp();
+  const server = app.listen(PORT, () => {
+    log.info({
+      port: Number(PORT),
+      db: DB_PATH,
+      environment: process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV || 'development',
+      version: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null,
+      node: process.version,
+    }, `Play WSRC is running on http://localhost:${PORT}`);
   });
+  startBackups();
+
+  // ===== SHUTDOWN =====
+  // Railway sends SIGTERM on every redeploy. Stop taking connections, fold the
+  // WAL into the database file and close it, then leave. A hard cap so a
+  // stuck connection cannot hold the old deploy open.
+  let stopping = false;
+  const shutdown = async (signal) => {
+    if (stopping) return;
+    stopping = true;
+    log.info({ signal }, 'shutting down');
+    stopBackups();
+    const cap = setTimeout(() => { log.warn('shutdown timed out; exiting'); process.exit(0); }, 10000);
+    cap.unref();
+    await new Promise((resolve) => server.close(resolve));
+    try { getDB()?.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) { /* best effort */ }
+    closeDB();
+    await errors.flush();
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-start().catch((err) => {
-  console.error('Failed to start server:', err);
+process.on('unhandledRejection', (reason) => {
+  errors.capture(reason instanceof Error ? reason : new Error(String(reason)), { source: 'unhandledRejection' });
+});
+process.on('uncaughtException', async (err) => {
+  errors.capture(err, { source: 'uncaughtException' }, 'uncaught exception; exiting');
+  await errors.flush();
+  process.exit(1);
+});
+
+start().catch(async (err) => {
+  errors.capture(err, { source: 'startup' }, 'failed to start');
+  await errors.flush();
   process.exit(1);
 });

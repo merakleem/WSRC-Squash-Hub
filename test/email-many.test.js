@@ -1,12 +1,11 @@
 // Resend's batch endpoint does not accept attachments, so a message carrying
 // a file has to be posted on its own. This stubs fetch and watches which
 // endpoint each message goes to.
-// Run: node test/email-many.test.js
+// Run: node --test test/email-many.test.js
 process.env.RESEND_API_KEY = 'test-key';
 delete process.env.EMAIL_REDIRECT_TO;
 
-let fails = 0;
-const ok = (n, c, x = '') => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== '' ? ` [${x}]` : '')); };
+const { suite } = require('./lib/suite');
 
 const posts = [];
 const okResponse = { ok: true, json: async () => ({}) };
@@ -19,7 +18,7 @@ global.fetch = async (url, opts) => {
 const { sendMany } = require('../lib/email');
 const file = { filename: 'rules.pdf', content: 'JVBERi0=' };
 
-(async () => {
+suite('sending many emails', async ({ ok }) => {
   console.log('PLAIN MESSAGES GO IN ONE BATCH');
   let r = await sendMany([
     { to: ['a@x.invalid'], subject: 's', html: '<p>hi</p>' },
@@ -62,6 +61,4 @@ const file = { filename: 'rules.pdf', content: 'JVBERi0=' };
   r = await sendMany([{ to: ['a@x.invalid'], subject: 's', html: 'x', attachments: [file] }], { gapMs: 10 });
   ok('a rate limit that never lifts is reported, not looped forever', r.failed === 1 && /Too many/.test(r.errors[0]), JSON.stringify(r));
 
-  console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
-  process.exit(fails ? 1 : 0);
-})();
+});
