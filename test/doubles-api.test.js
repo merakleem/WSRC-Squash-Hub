@@ -74,7 +74,11 @@ async function main() {
     const sgl = get('ann', '/api/ladder/season');
     ok('the singles ladder only knows the singles match', sgl.rows.length === 2, String(sgl.rows.length));
     const feed = get('ann', '/api/activity?days=7');
-    ok('the singles feed shows only the singles match for now', feed.length === 1, String(feed.length));
+    ok('the feed carries the singles match and both doubles matches', feed.length === 3 && feed.filter((x) => x.format === 'doubles').length === 2 && feed.filter((x) => x.format === 'singles').length === 1, JSON.stringify(feed.map((x) => [x.format, x.source])));
+    const dRow = feed.find((x) => x.format === 'doubles' && x.id === matchId);
+    ok('a doubles row names both sides', dRow.team1.map((p) => p.id).join() === '1,2' && dRow.team2.map((p) => p.id).join() === '3,4' && dRow.p1_name === 'Ann Dbl & Bo Dbl', JSON.stringify(dRow));
+    ok('with the winning side and no ladder places', dRow.won_side === 1 && dRow.winner_id === 1 && dRow.p1_pos === null && dRow.places_moved === 0 && dRow.submitted_by_name === 'Ann Dbl');
+    ok('newest first across both formats', feed.every((x, i) => i === 0 || (feed[i - 1].confirmed_at || '') >= (x.confirmed_at || '')));
     const hist = get('ann', '/api/players/1/history');
     ok('singles history and record ignore doubles', hist.history.length === 1 && hist.wins === 1 && hist.losses === 0, `${hist.history.length} rows, ${hist.wins}-${hist.losses}`);
 

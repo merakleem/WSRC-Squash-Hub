@@ -127,7 +127,56 @@ router.get('/activity', wrap(async (req, res) => {
     ranking.splice(loserIdx, 0, effWinnerId);
   }
 
-  res.json(activity.reverse());
+  // Doubles results ride in the same feed, newest first with everything else.
+  // They carry no ladder position or movement - the doubles ladder is a
+  // rating, and a pair has no place to move - just the two sides.
+  const doublesRows = db.prepare(`
+    SELECT m.id, m.type, ${matchModel.SOURCE_OF_TYPE} AS source,
+           m.player1_score, m.player2_score, m.winner_id, m.round,
+           ${matchModel.WON_SIDE} AS won_side,
+           ${matchModel.EFF_P1} AS s1a, ${matchModel.EFF_P1B} AS s1b,
+           ${matchModel.EFF_P2} AS s2a, ${matchModel.EFF_P2B} AS s2b,
+           p1.name AS s1a_name, p1b.name AS s1b_name, p2.name AS s2a_name, p2b.name AS s2b_name,
+           sub_by.name AS submitted_by_name, m.submitted_by_player_id,
+           m.played_at AS confirmed_at,
+           l.name AS league_name
+    FROM matches m ${matchModel.DBL_JOIN}
+    LEFT JOIN players p1  ON p1.id  = ${matchModel.EFF_P1}
+    LEFT JOIN players p1b ON p1b.id = ${matchModel.EFF_P1B}
+    LEFT JOIN players p2  ON p2.id  = ${matchModel.EFF_P2}
+    LEFT JOIN players p2b ON p2b.id = ${matchModel.EFF_P2B}
+    LEFT JOIN players sub_by ON sub_by.id = m.submitted_by_player_id
+    LEFT JOIN leagues l ON l.id = m.league_id
+    WHERE ${matchModel.COUNTS_DOUBLES}
+      AND substr(m.played_at, 1, 10) >= @cutoff
+  `).all({ cutoff }).map((m) => {
+    const team1 = [{ id: m.s1a, name: m.s1a_name }, { id: m.s1b, name: m.s1b_name }];
+    const team2 = [{ id: m.s2a, name: m.s2a_name }, { id: m.s2b, name: m.s2b_name }];
+    return {
+      id: m.id,
+      source: m.source,
+      format: 'doubles',
+      type: m.type,
+      team1, team2,
+      player1_id: m.s1a, player2_id: m.s2a,
+      eff_p1_id: m.s1a, eff_p2_id: m.s2a,
+      won_side: m.won_side,
+      winner_id: m.won_side === 1 ? m.s1a : m.s2a,
+      p1_name: team1.map((p) => p.name).join(' & '),
+      p2_name: team2.map((p) => p.name).join(' & '),
+      player1_score: m.player1_score, player2_score: m.player2_score,
+      p1_pos: null, p2_pos: null, places_moved: 0,
+      submitted_by_player_id: m.submitted_by_player_id,
+      submitted_by_name: m.submitted_by_name,
+      confirmed_at: m.confirmed_at,
+      league_name: m.league_name,
+      tournament_name: null, round: null,
+    };
+  });
+
+  const merged = [...activity.map((m) => ({ ...m, format: 'singles' })), ...doublesRows]
+    .sort((a, b) => (b.confirmed_at || '').localeCompare(a.confirmed_at || '') || b.id - a.id);
+  res.json(merged);
 }));
 
 module.exports = router;
