@@ -69,19 +69,24 @@ router.put('/matches/:id/score', requireAdmin, wrap(async (req, res) => {
 router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   const matchId  = Number(req.params.id);
   const playerId = req.session.playerId;
-  const myScore    = Number(req.body.myScore);
-  const theirScore = Number(req.body.theirScore);
+  // A doubles report may say mySideScore / theirSideScore; same numbers.
+  const myScore    = Number(req.body.myScore ?? req.body.mySideScore);
+  const theirScore = Number(req.body.theirScore ?? req.body.theirSideScore);
 
   const db = getDB();
   // Works for a league match or a ladder one. The match carries its own league,
   // so there is no chain to walk, and a ladder match simply has none.
   const match = db.prepare(`
-    SELECT m.id, m.type, m.status, m.skipped, m.player1_id, m.player2_id, m.player1_score,
+    SELECT m.id, m.type, m.status, m.skipped, m.format, m.player1_id, m.player2_id, m.player1_score,
+           m.player1_partner_id, m.player2_partner_id,
            s1.sub_player_id AS p1_sub, s2.sub_player_id AS p2_sub,
+           s3.sub_player_id AS p1b_sub, s4.sub_player_id AS p2b_sub,
            l.status AS league_status
     FROM matches m
     LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+    LEFT JOIN match_subs s3 ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+    LEFT JOIN match_subs s4 ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
     LEFT JOIN leagues l ON l.id = m.league_id
     WHERE m.id = ?
   `).get(matchId);
@@ -95,8 +100,13 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
 
   const effP1 = match.p1_sub ?? match.player1_id;
   const effP2 = match.p2_sub ?? match.player2_id;
-  const isP1  = effP1 === playerId;
-  const isP2  = effP2 === playerId;
+  // Doubles: either partner on a side may report for it. The score is read
+  // from the reporter's side, and the winner recorded is that side's first
+  // player, which is what every reader of winner_id expects.
+  const side1 = match.format === 'doubles' ? [effP1, match.p1b_sub ?? match.player1_partner_id] : [effP1];
+  const side2 = match.format === 'doubles' ? [effP2, match.p2b_sub ?? match.player2_partner_id] : [effP2];
+  const isP1  = side1.includes(playerId);
+  const isP2  = side2.includes(playerId);
 
   if (!isP1 && !isP2) return res.status(403).json({ error: 'You are not a player in this match' });
 
@@ -107,7 +117,7 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
     && p1Score >= 0 && p1Score <= 3 && p2Score >= 0 && p2Score <= 3
     && (p1Score === 3 || p2Score === 3) && p1Score !== p2Score;
 
-  if (!valid) return res.status(400).json({ error: 'Invalid score. One player must win 3 games (e.g. 3–1, 3–2)' });
+  if (!valid) return res.status(400).json({ error: `Invalid score. One ${match.format === 'doubles' ? 'pair' : 'player'} must win 3 games (e.g. 3–1, 3–2)` });
 
   // The winner is recorded as whoever actually played, so nothing downstream
   // has to guess which of the two conventions this row followed.
@@ -280,55 +290,5 @@ router.delete('/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-router.post('/matches/:id/message-opponent', requireAuth, emailLimiter, wrap(async (req, res) => {
-  const playerId = req.session.playerId;
-  if (!playerId) return res.status(403).json({ error: 'Admin accounts cannot use this feature.' });
-
-  const { message } = req.body;
-  if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required.' });
-
-  if (!emailConfigured()) return res.status(500).json({ error: 'Email service is not configured.' });
-
-  const db = getDB();
-  const match = db.prepare(`
-    SELECT m.player1_id, m.player2_id,
-           p1.name AS p1_name, p1.email AS p1_email,
-           p2.name AS p2_name, p2.email AS p2_email
-    FROM matches m
-    JOIN players p1 ON p1.id = m.player1_id
-    JOIN players p2 ON p2.id = m.player2_id
-    WHERE m.id = ?
-  `).get(Number(req.params.id));
-
-  if (!match) return res.status(404).json({ error: 'Match not found.' });
-
-  const isP1 = playerId === match.player1_id;
-  const isP2 = playerId === match.player2_id;
-  if (!isP1 && !isP2) return res.status(403).json({ error: 'You are not a player in this match.' });
-
-  const sender   = isP1 ? { name: match.p1_name, email: match.p1_email } : { name: match.p2_name, email: match.p2_email };
-  const opponent = isP1 ? { name: match.p2_name, email: match.p2_email } : { name: match.p1_name, email: match.p1_email };
-
-  if (!sender.email)   return res.status(400).json({ error: 'Your account does not have an email on file. Contact your administrator.' });
-  if (!opponent.email) return res.status(400).json({ error: 'Your opponent does not have an email address on file.' });
-
-  const htmlMessage = message.trim()
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
-
-  const result = await sendEmail({
-    reply_to: sender.email,
-    to: [opponent.email],
-    subject: `Message from ${sender.name} via Play WSRC`,
-    html: `<p>Hi ${opponent.name},</p>
-<p>${sender.name} sent you a message through Play WSRC:</p>
-<blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
-<p style="color:#6b7e93;font-size:12px">Reply to this email to respond directly to ${sender.name}. This message was sent through Play WSRC.</p>`,
-  });
-
-  if (!result.ok) return res.status(502).json({ error: result.error });
-
-  res.json({ ok: true });
-}));
 
 module.exports = router;

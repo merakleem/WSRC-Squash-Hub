@@ -467,22 +467,6 @@ export function printBoxes(league) {
   });
 }
 
-export function copyPublicLink(league) {
-  const slug = league.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const publicUrl = window.location.origin + '/' + slug + '/' + league.public_token;
-  navigator.clipboard.writeText(publicUrl).then(function() {
-    toast('Public link copied!', 'success');
-  }).catch(function() {
-    const ta = document.createElement('textarea');
-    ta.value = publicUrl;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    toast('Public link copied!', 'success');
-  });
-}
-
 export function openMessagePlayersModal(league) {
   const players = (league.players || []).filter((p) => p.player_email);
   const noEmailPlayers = (league.players || []).filter((p) => !p.player_email);

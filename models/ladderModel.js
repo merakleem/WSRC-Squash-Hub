@@ -737,6 +737,26 @@ function getPlayerDoublesRatingDeltas(playerId) {
   return deltas;
 }
 
+/** All four players' doubles rating changes for one match, keyed by player id. */
+function getDoublesMatchDeltas(matchId) {
+  const target = Number(matchId);
+  const cfg = elo.config(seasonModel.getSettings());
+  const players = getDB().prepare(PLAYER_SELECT).all();
+  const playerIds = new Set(players.map((p) => p.id));
+  const ratings = {};
+  for (const p of players) ratings[p.id] = cfg.elo_base_rating;
+  for (const m of matchModel.getCompletedDoublesMatches()) {
+    const ids = [m.s1a, m.s1b, m.s2a, m.s2b];
+    if (ids.some((x) => !playerIds.has(x)) || new Set(ids).size !== 4) continue;
+    const k = cfg.elo_k_factor * elo.marginMultiplier(m.winner_games, m.loser_games, cfg);
+    const d = elo.doublesDeltas([[ratings[m.s1a], ratings[m.s1b]], [ratings[m.s2a], ratings[m.s2b]]], m.won_side, k);
+    const flat = { [m.s1a]: d[0][0], [m.s1b]: d[0][1], [m.s2a]: d[1][0], [m.s2b]: d[1][1] };
+    for (const [pid, delta] of Object.entries(flat)) ratings[pid] += delta;
+    if (m.match_id === target) return Object.fromEntries(Object.entries(flat).map(([pid, x]) => [pid, Math.round(x)]));
+  }
+  return {};
+}
+
 function getPlayerDoublesLadderStats(playerId) {
   const { season, frozen, rows } = getDoublesLadderForSeason();
   const row = rows.find((p) => p.id === Number(playerId)) || null;
@@ -778,5 +798,5 @@ module.exports = {
   getLadderForSeason, computeEloLadder, getSeasonRecords,
   getCompletedMatches, getLastMatchDates,
   computeDoublesEloLadder, getDoublesLadderForSeason,
-  getPlayerDoublesRatingDeltas, getPlayerDoublesLadderStats,
+  getPlayerDoublesRatingDeltas, getPlayerDoublesLadderStats, getDoublesMatchDeltas,
 };

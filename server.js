@@ -34,9 +34,6 @@ app.use(require('./routes/auth'));
 // Health check
 app.get('/health', (req, res) => res.sendStatus(200));
 
-// Public league page (unauthenticated)
-app.use(require('./routes/public'));
-
 // ===== GLOBAL AUTH GUARD =====
 app.use((req, res, next) => {
   if (req.path === '/api/auth/token') return next();

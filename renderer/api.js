@@ -111,7 +111,6 @@ if (typeof window !== 'undefined' && !window.api) {
     reportTournamentPlayerScore:   (id, d) => _apiFetch('PUT',    `/api/tournament-matches/${id}/player-score`, d),
     clearTournamentScore:          (id)    => _apiFetch('DELETE', `/api/tournament-matches/${id}/score`),
     messageLeaguePlayers: (id, d) => _apiFetch('POST',   `/api/leagues/${id}/message`, d),
-    messageOpponent:      (id, d) => _apiFetch('POST',   `/api/matches/${id}/message-opponent`, d),
     messagePlayer:        (id, d) => _apiFetch('POST',   `/api/players/${id}/message`, d),
     bulkInviteLeague:     (id)    => _apiFetch('POST',   `/api/leagues/${id}/bulk-invite`),
     createReservation:  (d)       => _apiFetch('POST',   '/api/reservations', d),

@@ -122,6 +122,32 @@ async function main() {
     ok('the profile shows it as a league doubles result', hist.length === 1 && hist[0].source === 'league' && hist[0].league_name === 'Autumn Doubles' && hist[0].week_number === 1 && hist[0].division_name === 'Division 1' && hist[0].result === 'W', JSON.stringify(hist[0]));
     ok('singles history and record stay empty', get('a', `/api/players/${fx.player1_id}/history`).history.length === 0 && get('a', `/api/players/${fx.player1_id}/history`).wins === 0);
 
+    console.log('\nREPORTING A SCORE AS A PARTNER');
+    // Ann's next unscored fixture: Bo, her partner, reports it.
+    const annFixture = L2.weeks.flatMap((w) => w.matchups.flatMap((mu) => mu.matches))
+      .find((m) => m.id !== fx.id && [m.player1_id, m.player1_partner_id, m.player2_id, m.player2_partner_id].includes(1));
+    login('bo', 'bo@x.invalid', 'pw123');
+    const rep = get('bo', '/api/my-matches/reportable');
+    const row = rep.find((x) => x.id === annFixture.id);
+    ok('the fixture is in Bo\'s reportable list as doubles', row && row.format === 'doubles', JSON.stringify(row));
+    ok('naming his partner and both opponents', row?.partner?.id === 1 && row?.opponents?.length === 2 && /&/.test(row?.opponent_name || ''), JSON.stringify(row));
+    let mc = get('bo', `/api/matches/${annFixture.id}/card`);
+    ok('the card is a doubles card with two sides of two', mc.format === 'doubles' && mc.sides?.length === 2 && mc.sides.every((sd) => sd.players.length === 2), JSON.stringify(mc.sides?.map((sd) => sd.players.map((p) => p.name))));
+    ok('Bo is marked as the viewer, and may submit', mc.sides.flatMap((sd) => sd.players).find((p) => p.id === 2)?.is_viewer === true && mc.can_submit_score === true);
+    ok('these pairs have never met', mc.head_to_head.total === 0 && mc.head_to_head.meetings.length === 0);
+    r = send('gus', 'PUT', `/api/matches/${annFixture.id}/player-score`, { mySideScore: 3, theirSideScore: 2 });
+    ok('someone outside the four cannot report it', r.status === 403, String(r.status));
+    r = send('bo', 'PUT', `/api/matches/${annFixture.id}/player-score`, { mySideScore: 3, theirSideScore: 2 });
+    ok('a partner reports for the pair', r.status === 200, JSON.stringify(r.body));
+    mc = get('bo', `/api/matches/${annFixture.id}/card`);
+    const bosSide = mc.sides.find((sd) => sd.players.some((p) => p.id === 2));
+    ok('the card shows the pair as winners with the score', bosSide.won === true && bosSide.games === 3 && mc.score === '3\u20132', JSON.stringify([bosSide.won, bosSide.games, mc.score]));
+    ok('all four carry their own doubles rating change', mc.sides.flatMap((sd) => sd.players).every((p) => Number.isInteger(p.rating_change)) && bosSide.players.every((p) => p.rating_change > 0), JSON.stringify(mc.sides.map((sd) => sd.players.map((p) => p.rating_change))));
+    ok('and a doubles rank and rating now', mc.sides.flatMap((sd) => sd.players).every((p) => Number.isInteger(p.position) && Number.isInteger(p.rating)));
+    ok('it can no longer be submitted', mc.can_submit_score === false);
+    ok('and it left Bo\'s reportable list', !get('bo', '/api/my-matches/reportable').some((x) => x.id === annFixture.id));
+    ok('the opponents lost, from their side', get('a', `/api/players/${mc.sides.find((sd) => !sd.won).players[0].id}/doubles`).history.find((h) => h.id === annFixture.id)?.result === 'L');
+
     console.log('\nDELETION');
     r = send('a', 'DELETE', `/api/leagues/${leagueId}`);
     ok('deleting the league takes its pairs with it', r.status === 200 && dbm.getDB().prepare('SELECT COUNT(*) AS n FROM league_pairs').get().n === 0);
