@@ -73,6 +73,9 @@ const { renderReportScore } = await import('../renderer/pages/reportScore.js');
 try {
   log.textContent += (mobile ? 'PHONE' : 'DESKTOP') + ' — CARD\n';
   await openMatchCard(1); await settle();
+  // On a phone the card is a full-width sheet, so the width only means
+  // something on a desktop.
+  if (!mobile) ok('the doubles card is wider than the singles one', $('.modal').getBoundingClientRect().width === 560, String($('.modal').getBoundingClientRect().width));
   ok('a doubles card, with the chip beside the kicker', !!$('.mc-card--doubles') && txt($('.mc-dbl-chip')) === 'Doubles' && txt($('.mc-kicker')) === 'Doubles League · Division 1 · Week 4', txt($('.mc-kicker')));
   if (!mobile) {
     ok('the face-off has two sides of two players', vis($('.mc-players--doubles')) && $$('.mc-dside').length === 2 && $$('.mc-dside')[0].querySelectorAll('.mc-dplayer').length === 2);
@@ -80,12 +83,24 @@ try {
     ok('each player shows their doubles rank and rating', txt($$('.mc-dplayer')[0].querySelector('.mc-meta')) === '#3 doubles · 1498' && txt($$('.mc-dplayer')[1].querySelector('.mc-meta')) === 'Not on doubles ladder', txt($$('.mc-dplayer')[1]?.querySelector('.mc-meta')));
     ok('with their own delta', $$('.mc-dplayer').map((p) => txt(p.querySelector('.mc-delta'))).join('|') === '+9|+12|−6|−8', $$('.mc-dplayer').map((p) => txt(p.querySelector('.mc-delta'))).join('|'));
     ok('the viewer wears the ring', !!$$('.mc-dplayer')[0].querySelector('.mc-avatar--you'));
+    const av = $$('.mc-dplayer')[0].querySelector('.mc-avatar');
+    ok('each avatar is a 42px circle', Math.round(av.getBoundingClientRect().width) === 42 && Math.round(av.getBoundingClientRect().height) === 42, `${av.getBoundingClientRect().width}x${av.getBoundingClientRect().height}`);
+    ok('a long name ellipsizes rather than wrapping, and the meta never runs under the delta',
+      getComputedStyle($('.mc-name--left')).textOverflow === 'ellipsis'
+      && getComputedStyle($('.mc-meta--left')).overflow === 'hidden'
+      && $$('.mc-dplayer')[0].querySelector('.mc-meta').getBoundingClientRect().right <= $$('.mc-dplayer')[0].querySelector('.mc-delta').getBoundingClientRect().left + 1,
+      `${$$('.mc-dplayer')[0].querySelector('.mc-meta').getBoundingClientRect().right} vs ${$$('.mc-dplayer')[0].querySelector('.mc-delta').getBoundingClientRect().left}`);
+    ok('each side column holds both its players and nothing overflows the card',
+      $$('.mc-dside').every((sd) => sd.getBoundingClientRect().right <= $('.mc-card').getBoundingClientRect().right + 1));
     ok('only the winning side carries the Winners mark', $$('.mc-dside')[0].querySelector('.mc-winners') && !$$('.mc-dside')[1].querySelector('.mc-winners') && /Winners/.test(txt($$('.mc-dside')[0])));
     ok('score and Final in the centre', txt($('.mc-centre--doubles .mc-score')) === '3–1' && !!$('.mc-centre--doubles .mc-final'));
     ok('the head to head is between these pairs', vis($('.mc-h2h-label .mc-long')) && txt($('.mc-h2h-label .mc-long')) === 'Head to head · these pairs');
   } else {
     ok('the face-off gives way to the scoreboard', !vis($('.mc-players--doubles')) && vis($('.mc-scoreboard')) && $$('.mc-pairrow').length === 2);
     ok('the winning pair row is green with 3 games, the loser 1', $$('.mc-pairrow')[0].classList.contains('mc-pairrow--won') && txt($$('.mc-pairrow')[0].querySelector('.mc-pairrow-games')) === '3' && txt($$('.mc-pairrow')[1].querySelector('.mc-pairrow-games')) === '1');
+    const xs = $$('.mc-pairrow-avs .mc-avatar');
+    ok('the stacked circles are 34px including their ring, and overlap by 8', Math.round(xs[0].getBoundingClientRect().width) === 34 && Math.round(xs[1].getBoundingClientRect().left - xs[0].getBoundingClientRect().left) === 26, `${xs[0].getBoundingClientRect().width} / ${xs[1].getBoundingClientRect().left - xs[0].getBoundingClientRect().left}`);
+    ok('and the stack starts flush with the row\'s padding', Math.round(xs[0].getBoundingClientRect().left - $('.mc-pairrow').getBoundingClientRect().left) === 9, String(xs[0].getBoundingClientRect().left - $('.mc-pairrow').getBoundingClientRect().left));
     ok('each line has name, short meta and delta', $$('.mc-pairrow-line').length === 4 && txt($$('.mc-pairrow-line')[0].querySelector('.mc-meta')) === '#3 · 1498' && txt($$('.mc-pairrow-line')[1].querySelector('.mc-meta')) === 'unranked');
     ok('Final · Best of five under the rows', /Final · Best of five/.test(txt($('.mc-final--board'))));
     ok('the head to head label is the short one', vis($('.mc-h2h-label .mc-short')) && !vis($('.mc-h2h-label .mc-long')));
