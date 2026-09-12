@@ -81,14 +81,38 @@ function getMatchups(weekId) {
 }
 
 function getWeekByes(weekId) {
+  // A doubles bye belongs to a pair; player_id still carries the pair's first
+  // player so older readers keep working.
   return all(
-    `SELECT wb.*, p.name AS player_name, d.name AS division_name, d.level AS division_level
+    `SELECT wb.*, p.name AS player_name, d.name AS division_name, d.level AS division_level,
+            lp.player1_id AS pair_player1_id, pp1.name AS pair_player1_name,
+            lp.player2_id AS pair_player2_id, pp2.name AS pair_player2_name
      FROM week_byes wb
      JOIN players p ON wb.player_id = p.id
      JOIN divisions d ON wb.division_id = d.id
+     LEFT JOIN league_pairs lp ON lp.id = wb.pair_id
+     LEFT JOIN players pp1 ON pp1.id = lp.player1_id
+     LEFT JOIN players pp2 ON pp2.id = lp.player2_id
      WHERE wb.week_id = ?
      ORDER BY d.level ASC`,
     [weekId]
+  );
+}
+
+/** The pairs of a doubles league, seeded order within each division. */
+function getLeaguePairs(leagueId) {
+  return all(
+    `SELECT lp.*,
+            p1.name AS player1_name, p1.photo_path AS player1_photo,
+            p2.name AS player2_name, p2.photo_path AS player2_photo,
+            d.name AS division_name, d.level AS division_level
+     FROM league_pairs lp
+     JOIN players p1 ON p1.id = lp.player1_id
+     JOIN players p2 ON p2.id = lp.player2_id
+     JOIN divisions d ON d.id = lp.division_id
+     WHERE lp.league_id = ?
+     ORDER BY d.level ASC, lp.skill_rank ASC`,
+    [leagueId]
   );
 }
 
@@ -104,6 +128,13 @@ function getMatches(matchupId) {
             sp1.name         AS sub1_name,
             s2.sub_player_id AS sub2_id,
             sp2.name         AS sub2_name,
+            -- Doubles: the partners and their substitutes. Null on singles rows.
+            p1b.name         AS player1_partner_name,
+            p2b.name         AS player2_partner_name,
+            s3.sub_player_id AS sub3_id,
+            sp3.name         AS sub3_name,
+            s4.sub_player_id AS sub4_id,
+            sp4.name         AS sub4_name,
             -- The column is scheduled_time now; match_time is what every view of a
             -- league match already calls it.
             m.scheduled_time AS match_time
@@ -115,6 +146,12 @@ function getMatches(matchupId) {
      LEFT JOIN players sp1    ON sp1.id = s1.sub_player_id
      LEFT JOIN match_subs s2  ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
      LEFT JOIN players sp2    ON sp2.id = s2.sub_player_id
+     LEFT JOIN players p1b    ON p1b.id = m.player1_partner_id
+     LEFT JOIN players p2b    ON p2b.id = m.player2_partner_id
+     LEFT JOIN match_subs s3  ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+     LEFT JOIN players sp3    ON sp3.id = s3.sub_player_id
+     LEFT JOIN match_subs s4  ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
+     LEFT JOIN players sp4    ON sp4.id = s4.sub_player_id
      WHERE m.matchup_id = ?
      ORDER BY d.level ASC`,
     [matchupId]
@@ -164,8 +201,8 @@ function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
      JOIN weeks w ON tm.week_id = w.id
      WHERE w.league_id = ?
        AND m.player1_score IS NULL
-       AND (m.player1_id = ? OR m.player2_id = ?)`,
-    [leagueId, originalPlayerId, originalPlayerId]
+       AND (m.player1_id = ? OR m.player2_id = ? OR m.player1_partner_id = ? OR m.player2_partner_id = ?)`,
+    [leagueId, originalPlayerId, originalPlayerId, originalPlayerId, originalPlayerId]
   );
   for (const m of remaining) {
     setMatchSub(m.id, originalPlayerId, subPlayerId);
@@ -227,7 +264,48 @@ function replacePlayerInLeague(leagueId, oldPlayerId, newPlayerId) {
   })();
 }
 
+/**
+ * Swap one partner out of a pair for the rest of a doubles league. The pair
+ * keeps its id, its fixtures, its results and its seed; only the person
+ * changes, everywhere the old player appears for this league.
+ */
+function replacePairPlayer(leagueId, pairId, oldPlayerId, newPlayerId) {
+  const db = getDB();
+  const pair = db.prepare('SELECT * FROM league_pairs WHERE id = ? AND league_id = ?').get(pairId, leagueId);
+  if (!pair) throw _validationError('Pair not found.');
+  if (pair.player1_id !== oldPlayerId && pair.player2_id !== oldPlayerId) throw _validationError('That player is not in this pair.');
+  if (!db.prepare('SELECT 1 FROM players WHERE id = ?').get(newPlayerId)) throw _validationError('Replacement player not found.');
+  const taken = db.prepare('SELECT 1 FROM league_pairs WHERE league_id = ? AND (player1_id = ? OR player2_id = ?)').get(leagueId, newPlayerId, newPlayerId);
+  if (taken) throw _validationError('That player is already in a pair in this league.');
+
+  db.transaction(() => {
+    const col = pair.player1_id === oldPlayerId ? 'player1_id' : 'player2_id';
+    db.prepare(`UPDATE league_pairs SET ${col} = ? WHERE id = ?`).run(newPlayerId, pairId);
+    db.prepare('UPDATE league_players SET player_id = ? WHERE player_id = ? AND league_id = ?')
+      .run(newPlayerId, oldPlayerId, leagueId);
+    const inPair = `league_id = ? AND (pair1_id = ? OR pair2_id = ?)`;
+    for (const c of ['player1_id', 'player1_partner_id', 'player2_id', 'player2_partner_id', 'winner_id']) {
+      db.prepare(`UPDATE matches SET ${c} = ? WHERE ${c} = ? AND ${inPair}`).run(newPlayerId, oldPlayerId, leagueId, pairId, pairId);
+    }
+    const subMatches = `match_id IN (SELECT id FROM matches WHERE ${inPair})`;
+    db.prepare(`UPDATE match_subs SET original_player_id = ? WHERE original_player_id = ? AND ${subMatches}`)
+      .run(newPlayerId, oldPlayerId, leagueId, pairId, pairId);
+    db.prepare(`UPDATE match_subs SET sub_player_id = ? WHERE sub_player_id = ? AND ${subMatches}`)
+      .run(newPlayerId, oldPlayerId, leagueId, pairId, pairId);
+    db.prepare('UPDATE week_byes SET player_id = ? WHERE player_id = ? AND pair_id = ?')
+      .run(newPlayerId, oldPlayerId, pairId);
+  })();
+}
+
+function _validationError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
 module.exports = {
+  getLeaguePairs,
+  replacePairPlayer,
   getAllLeagues,
   getLeagueById,
   createLeagueRecord,

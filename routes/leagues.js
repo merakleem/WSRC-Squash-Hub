@@ -63,6 +63,21 @@ router.get('/leagues', wrap(async (req, res) => {
     for (const row of rows) myDivision[row.league_id] = row.level;
   }
 
+  // Doubles: how many pairs, and who the signed-in player's partner is.
+  const pairCount = {};
+  for (const row of db.prepare('SELECT league_id, COUNT(*) AS n FROM league_pairs GROUP BY league_id').all()) pairCount[row.league_id] = row.n;
+  const myPartner = {};
+  if (playerId) {
+    const rows = db.prepare(`
+      SELECT lp.league_id, CASE WHEN lp.player1_id = @id THEN p2.name ELSE p1.name END AS partner
+      FROM league_pairs lp
+      JOIN players p1 ON p1.id = lp.player1_id
+      JOIN players p2 ON p2.id = lp.player2_id
+      WHERE lp.player1_id = @id OR lp.player2_id = @id
+    `).all({ id: playerId });
+    for (const row of rows) myPartner[row.league_id] = row.partner;
+  }
+
   res.json(leagues.map((l) => {
     const counts = countMap[l.id];
     const status = counts && counts.total > 0 && counts.done === counts.total ? 'completed' : 'active';
@@ -75,6 +90,8 @@ router.get('/leagues', wrap(async (req, res) => {
       weeks_started: weeks?.weeks_started || 0,
       last_week_date: weeks?.last_week_date || null,
       my_division_level: myDivision[l.id] ?? null,
+      pair_count: l.setup_type === 'doubles' ? (pairCount[l.id] || 0) : null,
+      my_partner_name: myPartner[l.id] ?? null,
     };
   }));
 }));
@@ -120,6 +137,13 @@ router.post('/leagues/:id/replace-player', requireAdmin, wrap(async (req, res) =
   const { oldPlayerId, newPlayerId } = req.body;
   if (!oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'oldPlayerId and newPlayerId are required' });
   await leagueModel.replacePlayerInLeague(Number(req.params.id), Number(oldPlayerId), Number(newPlayerId));
+  res.json({ ok: true });
+}));
+
+router.post('/leagues/:id/replace-pair-player', requireAdmin, wrap(async (req, res) => {
+  const { pairId, oldPlayerId, newPlayerId } = req.body;
+  if (!pairId || !oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'pairId, oldPlayerId and newPlayerId are required' });
+  leagueModel.replacePairPlayer(Number(req.params.id), Number(pairId), Number(oldPlayerId), Number(newPlayerId));
   res.json({ ok: true });
 }));
 
