@@ -160,6 +160,7 @@ function getPlayerMatchHistory(id) {
     JOIN leagues l  ON l.id = m.league_id
     JOIN divisions d ON d.id = m.division_id
     WHERE m.player1_score IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+      AND ${matchModel.SINGLES}
     ORDER BY m.played_at DESC, w.week_number DESC
   `).all(numId, numId, numId, numId);
 }
@@ -210,7 +211,7 @@ function getPickupMatchHistory(id) {
       'pickup' AS source
     FROM matches m
     JOIN players opp ON opp.id = CASE WHEN m.player1_id = @id THEN m.player2_id ELSE m.player1_id END
-    WHERE m.type = 'ladder' AND (m.player1_id = @id OR m.player2_id = @id)
+    WHERE m.type = 'ladder' AND ${matchModel.SINGLES} AND (m.player1_id = @id OR m.player2_id = @id)
     ORDER BY m.played_at DESC
   `).all({ id: numId });
 }
@@ -243,7 +244,7 @@ function getPlayerUpcomingMatches(id) {
     JOIN leagues l     ON l.id = m.league_id
     JOIN divisions d   ON d.id = m.division_id
     LEFT JOIN courts c ON c.id = m.court_id
-    WHERE m.type = 'league'
+    WHERE m.type = 'league' AND ${matchModel.SINGLES}
       AND ((m.player1_id = ? AND s1.sub_player_id IS NULL)
        OR  (m.player2_id = ? AND s2.sub_player_id IS NULL))
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
@@ -276,7 +277,7 @@ function getPlayerUpcomingMatches(id) {
     JOIN leagues l     ON l.id = m.league_id
     JOIN divisions d   ON d.id = m.division_id
     LEFT JOIN courts c ON c.id = m.court_id
-    WHERE m.type = 'league' AND s.sub_player_id = ?
+    WHERE m.type = 'league' AND ${matchModel.SINGLES} AND s.sub_player_id = ?
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
 
     ORDER BY week_date ASC, match_time ASC

@@ -101,6 +101,21 @@ CREATE TABLE IF NOT EXISTS matches (
     FOREIGN KEY (player2_id) REFERENCES players(id)
 );
 
+-- Doubles leagues: a pair is the unit a division holds and a fixture pairs.
+-- Both partners are also in league_players, so every membership query works.
+CREATE TABLE IF NOT EXISTS league_pairs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL,
+    division_id INTEGER NOT NULL,
+    player1_id INTEGER NOT NULL,
+    player2_id INTEGER NOT NULL,
+    skill_rank INTEGER NOT NULL,
+    FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE,
+    FOREIGN KEY (division_id) REFERENCES divisions(id),
+    FOREIGN KEY (player1_id) REFERENCES players(id),
+    FOREIGN KEY (player2_id) REFERENCES players(id)
+);
+
 CREATE TABLE IF NOT EXISTS week_byes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     week_id INTEGER NOT NULL,

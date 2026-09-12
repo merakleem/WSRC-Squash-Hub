@@ -37,13 +37,40 @@ const EFF_JOIN = `
 const EFF_P1 = `COALESCE(s1.sub_player_id, m.player1_id)`;
 const EFF_P2 = `COALESCE(s2.sub_player_id, m.player2_id)`;
 
-// A match counts towards records and the ladder once it has a winner, has two
-// real players, and was not skipped.
+// Singles or doubles. Every singles reader - the ladder replay, records,
+// history, head to head, the feed - goes through COUNTS below, so this one
+// clause is what keeps a doubles result out of all of them.
+const SINGLES = `m.format = 'singles'`;
+const DOUBLES = `m.format = 'doubles'`;
+
+// A singles match counts towards records and the ladder once it has a winner,
+// has two real players, and was not skipped.
 const COUNTS = `
   m.winner_id IS NOT NULL
   AND m.player1_id IS NOT NULL AND m.player2_id IS NOT NULL
   AND (m.skipped = 0 OR m.skipped IS NULL)
+  AND ${SINGLES}
 `;
+
+// The doubles equivalent: four real players and a winner.
+const COUNTS_DOUBLES = `
+  m.winner_id IS NOT NULL
+  AND m.player1_id IS NOT NULL AND m.player2_id IS NOT NULL
+  AND m.player1_partner_id IS NOT NULL AND m.player2_partner_id IS NOT NULL
+  AND (m.skipped = 0 OR m.skipped IS NULL)
+  AND ${DOUBLES}
+`;
+
+// Substitutes for the partner slots, on top of EFF_JOIN's s1/s2. A sub is
+// keyed by the player they stand in for, so either partner can be replaced
+// for a night the same way a singles player can.
+const DBL_JOIN = `
+  ${EFF_JOIN}
+  LEFT JOIN match_subs s3 ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+  LEFT JOIN match_subs s4 ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
+`;
+const EFF_P1B = `COALESCE(s3.sub_player_id, m.player1_partner_id)`;
+const EFF_P2B = `COALESCE(s4.sub_player_id, m.player2_partner_id)`;
 
 // Which side won: 1 or 2.
 //
@@ -324,6 +351,7 @@ function getReportableMatches(playerId) {
 module.exports = {
   TYPES, STATUSES,
   SOURCE_OF_TYPE, EFF_JOIN, EFF_P1, EFF_P2, COUNTS, WON_SIDE,
+  SINGLES, DOUBLES, COUNTS_DOUBLES, DBL_JOIN, EFF_P1B, EFF_P2B,
   getCompletedMatches, getLastMatchDates, getParticipation,
   getHeadToHead, getMatchCard, getReportableMatches,
 };

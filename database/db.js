@@ -297,6 +297,44 @@ function initDB(dbPath) {
     db.pragma('foreign_keys = ON');
   }
 
+  // ===== DOUBLES =====
+  // A doubles match is a row in the same table: `format` says so, and the two
+  // partner columns complete the sides (side 1 is player1 + player1_partner,
+  // side 2 is player2 + player2_partner). One column is what keeps every
+  // singles reader honest - the shared "counts" predicate excludes doubles -
+  // where a second table would have let a doubles league night move the
+  // singles ratings of the two pair leaders. These run after the
+  // consolidation above, since that rebuilds the table.
+  const doublesMigrations = [
+    `ALTER TABLE matches ADD COLUMN format TEXT NOT NULL DEFAULT 'singles'`,
+    `ALTER TABLE matches ADD COLUMN player1_partner_id INTEGER`,
+    `ALTER TABLE matches ADD COLUMN player2_partner_id INTEGER`,
+    `ALTER TABLE matches ADD COLUMN pair1_id INTEGER`,
+    `ALTER TABLE matches ADD COLUMN pair2_id INTEGER`,
+    `ALTER TABLE week_byes ADD COLUMN pair_id INTEGER`,
+    `CREATE TABLE IF NOT EXISTS league_pairs (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       league_id INTEGER NOT NULL,
+       division_id INTEGER NOT NULL,
+       player1_id INTEGER NOT NULL,
+       player2_id INTEGER NOT NULL,
+       skill_rank INTEGER NOT NULL,
+       FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE,
+       FOREIGN KEY (division_id) REFERENCES divisions(id),
+       FOREIGN KEY (player1_id) REFERENCES players(id),
+       FOREIGN KEY (player2_id) REFERENCES players(id)
+     )`,
+  ];
+  for (const sql of doublesMigrations) {
+    try {
+      db.prepare(sql).run();
+    } catch (err) {
+      if (!/duplicate column name/i.test(err.message)) {
+        console.error(`[migration] FAILED: ${sql}\n           ${err.message}`);
+      }
+    }
+  }
+
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_matches_type_status ON matches (type, status);
     CREATE INDEX IF NOT EXISTS idx_matches_p1          ON matches (player1_id);
@@ -307,6 +345,8 @@ function initDB(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_matches_week        ON matches (week_id);
     CREATE INDEX IF NOT EXISTS idx_matches_league      ON matches (league_id);
     CREATE INDEX IF NOT EXISTS idx_matches_tournament  ON matches (tournament_id);
+    CREATE INDEX IF NOT EXISTS idx_matches_format      ON matches (format);
+    CREATE INDEX IF NOT EXISTS idx_league_pairs_league ON league_pairs (league_id);
   `);
 
   // Purge any tournament_matches whose parent tournament was deleted without cascade
