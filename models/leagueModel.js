@@ -120,21 +120,29 @@ function getMatches(matchupId) {
   return all(
     `SELECT m.*,
             p1.name  AS player1_name,
+            p1.photo_path AS player1_photo,
             p2.name  AS player2_name,
+            p2.photo_path AS player2_photo,
             d.id     AS division_id,
             d.name   AS division_name,
             d.level  AS division_level,
             s1.sub_player_id AS sub1_id,
             sp1.name         AS sub1_name,
+            sp1.photo_path   AS sub1_photo,
             s2.sub_player_id AS sub2_id,
             sp2.name         AS sub2_name,
+            sp2.photo_path   AS sub2_photo,
             -- Doubles: the partners and their substitutes. Null on singles rows.
             p1b.name         AS player1_partner_name,
+            p1b.photo_path   AS player1_partner_photo,
             p2b.name         AS player2_partner_name,
+            p2b.photo_path   AS player2_partner_photo,
             s3.sub_player_id AS sub3_id,
             sp3.name         AS sub3_name,
+            sp3.photo_path   AS sub3_photo,
             s4.sub_player_id AS sub4_id,
             sp4.name         AS sub4_name,
+            sp4.photo_path   AS sub4_photo,
             -- The column is scheduled_time now; match_time is what every view of a
             -- league match already calls it.
             m.scheduled_time AS match_time

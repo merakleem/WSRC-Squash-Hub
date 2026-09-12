@@ -12,6 +12,9 @@ let fails = 0;
 const ok = (n, c, x = '') => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== '' ? ` [${x}]` : '')); };
 
 db.prepare("INSERT INTO players (name, member_number) VALUES ('Ann A','M-1'),('Bob B','M-2'),('Cy C','M-3'),('Dee D','M-4')").run();
+// Ann has uploaded a profile photo; the roster has to carry it, or every
+// avatar on the events page falls back to initials.
+db.prepare("UPDATE players SET photo_path = '/uploads/avatars/1-ann.jpg' WHERE name = 'Ann A'").run();
 // Ann and Bob are members; Cy and Dee are not.
 db.prepare('UPDATE players SET is_member = 1 WHERE id IN (1, 2)').run();
 db.prepare("INSERT INTO leagues (name, start_date, num_teams, num_divisions) VALUES ('Autumn League', '2026-10-01', 8, 2)").run();
@@ -38,6 +41,13 @@ ok('member numbers for admins', shaped.attendees[0].member_number === 'M-1');
 const asPlayer = M.getEvent(e1.id, { viewerId: 2, isAdmin: false });
 ok('member numbers hidden from players', asPlayer.attendees[0].member_number === undefined);
 ok('preview excludes the viewer', !asPlayer.preview.some((p) => p.name === 'Bob B') && asPlayer.preview.length === 2);
+ok('the roster carries each attendee\'s photo, null when they have none',
+  shaped.attendees.find((a) => a.name === 'Ann A')?.photo_path === '/uploads/avatars/1-ann.jpg'
+  && shaped.attendees.find((a) => a.name === 'Cy C')?.photo_path === null,
+  JSON.stringify(shaped.attendees.map((a) => [a.name, a.photo_path])));
+ok('and so does the card preview',
+  asPlayer.preview.find((p) => p.name === 'Ann A')?.photo_path === '/uploads/avatars/1-ann.jpg',
+  JSON.stringify(asPlayer.preview));
 
 const e2 = M.createEvent({ name: 'BBQ', event_date: '2026-08-28', guests_allowed: 2 });
 try { M.signUp(e2.id, 1, 0, TODAY); ok('past refused', false); }

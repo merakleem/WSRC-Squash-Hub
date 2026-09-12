@@ -32,15 +32,19 @@ const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 const mobile = window.innerWidth <= 768;
 
 const NAMES = ['Ann Pair', 'Bo Pair', 'Cy Pair', 'Di Pair', 'Ed Pair', 'Flo Pair', 'Gus Pair', 'Hal Pair', 'Ivy Pair', 'Jo Pair', 'Kim Spare', 'Lou Spare'];
-const P = NAMES.map((name, i) => ({ id: i + 1, name, photo_path: null }));
+// Ann has a profile photo; the rest fall back to initials.
+const PHOTO = { 1: '/uploads/avatars/1-ann.jpg' };
+const P = NAMES.map((name, i) => ({ id: i + 1, name, photo_path: PHOTO[i + 1] || null }));
 const nm = (id) => P[id - 1].name;
 const day = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
-const pair = (id, divId, a, b, rank) => ({ id, league_id: 9, division_id: divId, player1_id: a, player2_id: b, skill_rank: rank, player1_name: nm(a), player2_name: nm(b), division_name: divId === 59 ? 'Division 1' : 'Division 2', division_level: divId === 59 ? 1 : 2 });
+const pair = (id, divId, a, b, rank) => ({ id, league_id: 9, division_id: divId, player1_id: a, player2_id: b, skill_rank: rank, player1_name: nm(a), player2_name: nm(b), player1_photo: PHOTO[a] || null, player2_photo: PHOTO[b] || null, division_name: divId === 59 ? 'Division 1' : 'Division 2', division_level: divId === 59 ? 1 : 2 });
 const PAIRS = [pair(1, 59, 1, 2, 1), pair(2, 59, 3, 4, 2), pair(3, 59, 5, 6, 3), pair(4, 60, 7, 8, 1001), pair(5, 60, 9, 10, 1002)];
 const fx = (id, matchupId, divId, A, B, s1, s2) => ({
   id, matchup_id: matchupId, division_id: divId, division_name: divId === 59 ? 'Division 1' : 'Division 2', division_level: divId === 59 ? 1 : 2,
   format: 'doubles', player1_id: A.player1_id, player1_name: A.player1_name, player1_partner_id: A.player2_id, player1_partner_name: A.player2_name,
+  player1_photo: A.player1_photo, player1_partner_photo: A.player2_photo,
   player2_id: B.player1_id, player2_name: B.player1_name, player2_partner_id: B.player2_id, player2_partner_name: B.player2_name,
+  player2_photo: B.player1_photo, player2_partner_photo: B.player2_photo,
   pair1_id: A.id, pair2_id: B.id, player1_score: s1, player2_score: s2, winner_id: s1 == null ? null : (s1 > s2 ? A.player1_id : B.player1_id),
   skipped: 0, match_time: '19:00', court_id: 1, sub1_id: null, sub2_id: null, sub3_id: null, sub4_id: null,
 });
@@ -89,6 +93,8 @@ try {
   const std = $('.std-panel.active');
   ok('standings are per pair', std.querySelectorAll('.lg-std-row--dbl').length === 3 && txt(std.querySelector('.lg-card-meta')) === '3 pairs · 1 match played', txt(std.querySelector('.lg-card-meta')));
   const top = std.querySelector('.lg-std-row--dbl');
+  const annAv = top.querySelectorAll('.lg-pair-av')[0];
+  ok('a pair member with a photo shows it in standings', annAv?.querySelector('img')?.getAttribute('src') === '/uploads/avatars/1-ann.jpg' && top.querySelectorAll('.lg-pair-av')[1].textContent === 'BP', annAv?.innerHTML);
   ok('the leader is the pair that won, with two names and a stacked avatar', [...top.querySelectorAll('.lg-pair-names > span')].map(txt).join('|') === 'Ann Pair|Bo Pair' && top.querySelectorAll('.lg-pair-av').length === 2 && top.querySelector('.lg-pair-av--b') && txt(top.querySelector('.lg-std-w')) === '1', txt(top));
   const me = std.querySelector('.lg-std-row.lg-me');
   ok('my pair is tinted with the YOU chip', me && /Cy Pair/.test(me.textContent) && me.querySelector('.lg-you') && txt(me.querySelector('.lg-std-l')) === '1');
@@ -104,6 +110,7 @@ try {
   const open = rows.find((r) => r.dataset.matchId === '2');
   ok('an unplayed fixture says Not played, and is not mine', open.querySelector('.lg-notplayed') && !open.classList.contains('lg-match--mine'));
   ok('each side has two names', open.querySelectorAll('.match-pair').length === 2 && open.querySelectorAll('.lg-pair-names > span').length === 4);
+  ok('a fixture shows the photo too', scored.querySelectorAll('.lg-pair-av')[0].querySelector('img')?.getAttribute('src') === '/uploads/avatars/1-ann.jpg', scored.querySelectorAll('.lg-pair-av')[0].innerHTML);
   ok('byes name the pair', /Bye: Ed Pair & Flo Pair/.test($('#scheduleList').textContent));
   if (mobile) {
     ok('on a phone the pair rows stack', getComputedStyle(scored.querySelector('.lg-players--dbl')).flexDirection === 'column');
@@ -125,6 +132,7 @@ try {
     ok('one block per pair, seeded', blocks.length === 5 && txt(blocks[0].querySelector('.lg-pair-seed')) === '1' && txt(blocks[0].querySelector('.lg-pair-n')) === 'Pair 1');
     ok('with the record', txt(blocks[0].querySelector('.lg-pair-rec')) === '1W · 0L' && txt(blocks[1].querySelector('.lg-pair-rec')) === '0W · 1L');
     ok('two player rows each, navy then accent', blocks[0].querySelectorAll('.lg-pair-slot').length === 2 && blocks[0].querySelector('.lg-pair-slot .lg-pair-av--b'));
+    ok('and the Pairs tab shows the photo', blocks[0].querySelectorAll('.lg-pair-av')[0].querySelector('img')?.getAttribute('src') === '/uploads/avatars/1-ann.jpg', blocks[0].querySelectorAll('.lg-pair-av')[0].innerHTML);
     ok('the division head counts pairs and players', txt($('.lg-roster-card .lg-card-meta')) === '3 pairs · 6 players');
     ok('no Replace buttons until edit mode', !$('.replace-btn'));
     click($('#editRosterBtn')); await settle();

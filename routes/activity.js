@@ -33,6 +33,8 @@ router.get('/activity', wrap(async (req, res) => {
       sub_by.name AS submitted_by_name,
       COALESCE(sp1.name, p1.name) AS p1_name,
       COALESCE(sp2.name, p2.name) AS p2_name,
+      COALESCE(sp1.photo_path, p1.photo_path) AS p1_photo,
+      COALESCE(sp2.photo_path, p2.photo_path) AS p2_photo,
       ${matchModel.EFF_P1} AS eff_p1_id,
       ${matchModel.EFF_P2} AS eff_p2_id,
       ${matchModel.WON_SIDE} AS won_side,
@@ -137,6 +139,8 @@ router.get('/activity', wrap(async (req, res) => {
            ${matchModel.EFF_P1} AS s1a, ${matchModel.EFF_P1B} AS s1b,
            ${matchModel.EFF_P2} AS s2a, ${matchModel.EFF_P2B} AS s2b,
            p1.name AS s1a_name, p1b.name AS s1b_name, p2.name AS s2a_name, p2b.name AS s2b_name,
+           p1.photo_path AS s1a_photo, p1b.photo_path AS s1b_photo,
+           p2.photo_path AS s2a_photo, p2b.photo_path AS s2b_photo,
            sub_by.name AS submitted_by_name, m.submitted_by_player_id,
            m.played_at AS confirmed_at,
            l.name AS league_name
@@ -150,8 +154,8 @@ router.get('/activity', wrap(async (req, res) => {
     WHERE ${matchModel.COUNTS_DOUBLES}
       AND substr(m.played_at, 1, 10) >= @cutoff
   `).all({ cutoff }).map((m) => {
-    const team1 = [{ id: m.s1a, name: m.s1a_name }, { id: m.s1b, name: m.s1b_name }];
-    const team2 = [{ id: m.s2a, name: m.s2a_name }, { id: m.s2b, name: m.s2b_name }];
+    const team1 = [{ id: m.s1a, name: m.s1a_name, photo_path: m.s1a_photo }, { id: m.s1b, name: m.s1b_name, photo_path: m.s1b_photo }];
+    const team2 = [{ id: m.s2a, name: m.s2a_name, photo_path: m.s2a_photo }, { id: m.s2b, name: m.s2b_name, photo_path: m.s2b_photo }];
     return {
       id: m.id,
       source: m.source,

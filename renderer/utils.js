@@ -54,6 +54,22 @@ export function avatarColor(name) {
 }
 
 /**
+ * The inside of an avatar circle: the player's photo when they have one,
+ * their initials otherwise.
+ *
+ * For the surfaces that own their own circle - its element, its size, its
+ * colour - and so cannot use avatarHTML below, which brings a palette of its
+ * own. A photo always wins over initials, everywhere a player is drawn, so
+ * this is the one place that decides it.
+ */
+export function avatarInner(player) {
+  if (player?.photo_path) {
+    return `<img class="avatar-img" src="${esc(player.photo_path)}" alt="" loading="lazy">`;
+  }
+  return esc(playerInitials(player?.name));
+}
+
+/**
  * Avatar markup for a player: their photo when set, initials otherwise.
  * `className` carries the size modifier (e.g. 'ldr-avatar ldr-avatar-sm').
  * Initials avatars carry their colour as --avatar-bg so each surface decides

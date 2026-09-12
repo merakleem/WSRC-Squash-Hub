@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { esc, toast } from './utils.js';
+import { esc, toast, avatarInner } from './utils.js';
 
 // ===== BOOKING PANEL =====
 // One right-hand panel for every booking an admin creates or edits, replacing
@@ -43,9 +43,6 @@ function timeToMin(t) {
   if (!t) return null;
   const [h, m] = String(t).split(':').map(Number);
   return h * 60 + (m || 0);
-}
-function initials(n) {
-  return String(n || '').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 }
 function longDate(iso) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -350,7 +347,7 @@ function resultsHTML() {
   if (!rows.length) return `<div class="sch-search-empty">No players found</div>`;
   return rows.map((x) => `
     <button class="sch-search-row" data-add="${x.id}">
-      <span class="sch-search-av">${esc(initials(x.name))}</span>
+      <span class="sch-search-av">${avatarInner(x)}</span>
       <span class="sch-search-name">${esc(x.name)}</span>
     </button>`).join('');
 }

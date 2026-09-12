@@ -36,10 +36,13 @@ state.currentUser = { role: 'user', playerId: 99 };
 // Stored timestamps are UTC; the page converts them to the club's day.
 const stamp = (daysAgo, minutesAgo = 0) => new Date(Date.now() - daysAgo * 864e5 - minutesAgo * 6e4).toISOString().replace('T', ' ').slice(0, 19);
 const P = { 1: 'Sofia Duarte', 2: 'Marcus Bell', 3: 'Priya Nair', 4: 'Tom Ashworth', 5: 'Elena Kovač', 6: 'Daniel Osei', 7: 'Hannah Reid', 8: 'James Whitfield' };
+// Hannah and Marcus have uploaded a photo; everyone else has initials.
+const PHOTO = { 7: '/uploads/avatars/7-abc.jpg' };
 let nextId = 100;
 const row = (w, l, ago, mins, source, o = {}) => ({
   id: nextId++, player1_id: w, player2_id: l, eff_p1_id: w, eff_p2_id: l, won_side: 1, winner_id: w,
-  p1_name: P[w], p2_name: P[l], player1_score: o.ws ?? 3, player2_score: o.ls ?? 1,
+  p1_name: P[w], p2_name: P[l], p1_photo: PHOTO[w] || null, p2_photo: PHOTO[l] || null,
+  player1_score: o.ws ?? 3, player2_score: o.ls ?? 1,
   p1_pos: o.wp ?? null, p2_pos: o.lp ?? null, places_moved: o.moved ?? 0, source,
   league_name: o.league ?? null, tournament_name: o.tournament ?? null, round: o.round ?? null,
   submitted_by_name: o.by ?? null, confirmed_at: stamp(ago, mins),
@@ -61,7 +64,8 @@ let ROWS = [
 // A doubles ladder result from earlier today: side 2 won.
 ROWS.splice(1, 0, {
   id: 300, format: 'doubles', source: 'pickup', type: 'ladder', won_side: 2, winner_id: 1,
-  team1: [{ id: 4, name: P[4] }, { id: 8, name: P[8] }], team2: [{ id: 1, name: P[1] }, { id: 5, name: P[5] }],
+  team1: [{ id: 4, name: P[4], photo_path: PHOTO[4] || null }, { id: 8, name: P[8], photo_path: PHOTO[8] || null }],
+  team2: [{ id: 1, name: P[1], photo_path: PHOTO[1] || null }, { id: 5, name: P[5], photo_path: PHOTO[5] || null }],
   player1_id: 4, player2_id: 1, eff_p1_id: 4, eff_p2_id: 1, p1_name: `${P[4]} & ${P[8]}`, p2_name: `${P[1]} & ${P[5]}`,
   player1_score: 2, player2_score: 3, p1_pos: null, p2_pos: null, places_moved: 0,
   submitted_by_name: 'Sofia Duarte', confirmed_at: stamp(0, 20), league_name: null, tournament_name: null, round: null,
@@ -95,8 +99,12 @@ try {
   ok('winner leads with rank and short name', first?.querySelector('.ca-winner').textContent === '(#7) H. Reid', first?.querySelector('.ca-winner').textContent);
   ok('then beat, the loser, and the score', first?.querySelector('.ca-beat').textContent === 'beat' && first?.querySelector('.ca-loser').textContent === '(#2) M. Bell' && first?.querySelector('.ca-score').textContent === '3–1');
   const avs = first?.querySelectorAll('.ca-av') || [];
-  ok('two avatars, winner first, loser faded', avs.length === 2 && avs[0].textContent === 'HR' && !avs[0].classList.contains('ca-av--lost') && avs[1].classList.contains('ca-av--lost'));
+  ok('two avatars, winner first, loser faded', avs.length === 2 && avs[0].title === 'Hannah Reid' && !avs[0].classList.contains('ca-av--lost') && avs[1].classList.contains('ca-av--lost'));
   ok('the avatar carries the full name', avs[0]?.title === 'Hannah Reid');
+  ok('a player with a photo shows it, not their initials', avs[0]?.querySelector('img')?.getAttribute('src') === '/uploads/avatars/7-abc.jpg' && avs[0].textContent.trim() === '', avs[0]?.innerHTML);
+  ok('and the circle drops its fallback colour behind it', !/background/.test(avs[0]?.getAttribute('style') || ''), avs[0]?.getAttribute('style'));
+  ok('a player without one still gets initials on a coloured circle', avs[1]?.textContent === 'MB' && /background/.test(avs[1]?.getAttribute('style') || ''), avs[1]?.outerHTML);
+  ok('the photo fills the circle', getComputedStyle(avs[0].querySelector('img')).objectFit === 'cover');
   ok('a ladder match is tagged Ladder', first?.querySelector('.ca-tag').textContent === 'Ladder' && first?.querySelector('.ca-tag').classList.contains('ca-tag--pickup'));
   ok('and says who moved up', first?.querySelector('.ca-moved')?.textContent === 'H. Reid up 4 places', first?.querySelector('.ca-moved')?.textContent);
   ok('a league match is tagged with its league', $$('.ca-row')[2]?.querySelector('.ca-tag').textContent === 'Thursday Box League');

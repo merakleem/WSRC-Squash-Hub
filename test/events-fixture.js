@@ -1,7 +1,9 @@
 // Mirrors the prototype's sample data, shaped as the API returns it.
-const A = (names) => names.map((n) => ({ name: n, initials: n.split(' ').map(w=>w[0]).join('').toUpperCase() }));
+// Sofia has a profile photo; everyone else falls back to initials.
+const PHOTO = { 'Sofia Duarte': '/uploads/avatars/1-sofia.jpg' };
+const A = (names) => names.map((n) => ({ name: n, initials: n.split(' ').map(w=>w[0]).join('').toUpperCase(), photo_path: PHOTO[n] || null }));
 const NAMES = ['Sofia Duarte','Iain Chalmers','Nadia Farouk','Ben Halvorsen','Grace Odell','Peter Lindqvist','Yusuf Demir','Clara Nowak','Daniel Okafor','Tom Ashcroft','Priya Raman','Kate Sorensen','Hugo Bellamy','Ana Ruiz','Owen Blythe','Lena Vogt'];
-const att = (n, guests=[]) => NAMES.slice(0, n).map((nm, i) => ({ player_id: 100+i, name: nm, initials: nm.split(' ').map(w=>w[0]).join('').toUpperCase(), member_number: 'M-'+(1100+i), guests: guests[i]||0 }));
+const att = (n, guests=[]) => NAMES.slice(0, n).map((nm, i) => ({ player_id: 100+i, name: nm, initials: nm.split(' ').map(w=>w[0]).join('').toUpperCase(), photo_path: PHOTO[nm] || null, member_number: 'M-'+(1100+i), guests: guests[i]||0 }));
 export const EVENTS = {
   upcoming: [
     { id:1, name:'Back to the Bunker', description:'Social night in the old bunker bar. Round-robin on courts 1–3 from 7, food and drinks after.', event_date:'2026-09-18', start_time:'19:00', end_time:'21:00', members_only:0, guests_allowed:2, max_people:40, members_count:22, guests_count:5, total:27, spots_left:13, full:false, my_signup:null, link:null, preview:A(['Sofia Duarte','Iain Chalmers','Nadia Farouk']) },

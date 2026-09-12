@@ -1,5 +1,5 @@
 import { state } from '../state.js';
-import { esc, toast, clubTodayStr, clubNowMin, abbrevName } from '../utils.js';
+import { esc, toast, clubTodayStr, clubNowMin, abbrevName, avatarInner } from '../utils.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // The grid stops at 11pm to match the admin schedule page, which uses the same
@@ -157,10 +157,6 @@ function getMaxEnd(slots, startMin, editId = null) {
     if (s.startMin >= startMin && s.startMin < end) end = s.startMin;
   }
   return end;
-}
-
-function _initials(n) {
-  return String(n || '').split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 }
 
 function myName() {
@@ -1076,7 +1072,7 @@ function _buildPanelInner() {
   const searchDropdown = (results.length || cb.panelSearch.trim()) ? `
     <div class="cb-search-results" id="cbSearchDropdown">
       ${results.length
-        ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${esc(_initials(p.name))}</span><span>${esc(p.name)}</span></div>`).join('')
+        ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${avatarInner(p)}</span><span>${esc(p.name)}</span></div>`).join('')
         : '<div class="cb-search-empty">No players found</div>'}
     </div>` : '';
 
@@ -1278,7 +1274,7 @@ function _updateSearchDropdown() {
   div.className = 'cb-search-results';
   div.id = 'cbSearchDropdown';
   div.innerHTML = results.length
-    ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${esc(_initials(p.name))}</span><span>${esc(p.name)}</span></div>`).join('')
+    ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${avatarInner(p)}</span><span>${esc(p.name)}</span></div>`).join('')
     : '<div class="cb-search-empty">No players found</div>';
 
   wrap.appendChild(div);

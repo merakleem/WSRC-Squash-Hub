@@ -27,7 +27,11 @@ try {
 }
 const { state } = await import('../renderer/state.js');
 state.currentUser = { role:'user', playerId:42 };
-state.players = [{ id:42, name:'Merak Lee' }];
+state.players = [
+  { id:42, name:'Merak Lee', photo_path:null },
+  { id:7, name:'Sofia Duarte', photo_path:'/uploads/avatars/7-sofia.jpg' },
+  { id:8, name:'Priya Raman', photo_path:null },
+];
 const t=(m)=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 const today = new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const courts=[1,2,3,4,5].map(i=>({id:i,name:i===5?'Doubles Court':'Court '+i,active:1,sort_order:i}));
@@ -137,6 +141,16 @@ $('.cb-mslot[data-mstart]').click(); await tick(250);
 const rsv=calls.find(c=>c[0]==='reserve');
 ok('tapping an open row reserves on the shown court', rsv && rsv[1].courtId===2, rsv&&JSON.stringify(rsv[1]));
 ok('the sheet opens', !!$('.cb-panel'));
+// Adding someone to the booking searches the club list; a player with a photo
+// is shown by it, not by their initials.
+const search=$('#cbPlayerSearch');
+search.value='a'; search.dispatchEvent(new Event('input',{bubbles:true})); await tick(120);
+const results=$$('.cb-search-result');
+ok('the player search lists club players', results.length>0, results.length);
+const sofiaOpt=results.find(r=>r.textContent.includes('Sofia Duarte'));
+ok('one with a photo shows it', sofiaOpt?.querySelector('.cb-res-av img')?.getAttribute('src')==='/uploads/avatars/7-sofia.jpg', sofiaOpt?.querySelector('.cb-res-av')?.innerHTML);
+ok('one without keeps their initials', results.find(r=>r.textContent.includes('Priya Raman'))?.querySelector('.cb-res-av')?.textContent==='PR', results.find(r=>r.textContent.includes('Priya Raman'))?.querySelector('.cb-res-av')?.textContent);
+search.value=''; search.dispatchEvent(new Event('input',{bubbles:true})); await tick(120);
 ok('the tapped row shows Selected', $('.cb-mslot--sel')?.querySelector('.cb-mslot-m').textContent==='Selected');
 
 // ---- your own hold never caps the duration ----

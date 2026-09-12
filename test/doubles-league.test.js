@@ -41,6 +41,8 @@ async function main() {
   });
   run(`INSERT INTO settings (key,value) VALUES ('season_start_md','01-01')`);
   run('INSERT INTO courts (name, sort_order) VALUES (?, ?)', ['Doubles Court', 1]);
+  // Ann has a profile photo; pairs and fixtures both have to carry it.
+  run(`UPDATE players SET photo_path = '/uploads/avatars/1-ann.jpg' WHERE id = 1`);
 
   const server = spawn('node', [path.join(__dirname, '..', 'server.js')], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: DB, SESSION_SECRET: 's', SITE_PASSWORD: 'pw', RESEND_API_KEY: '' },
@@ -80,6 +82,12 @@ async function main() {
     ok('week 1 has one fixture per division', fixtures.length === 2, String(fixtures.length));
     ok('a fixture is a doubles row with four players and two pair ids', fixtures.every((m) => m.format === 'doubles' && m.player1_id && m.player1_partner_id && m.player2_id && m.player2_partner_id && m.pair1_id && m.pair2_id), JSON.stringify(fixtures[0]));
     ok('and names both partners', fixtures.every((m) => m.player1_name && m.player1_partner_name && m.player2_name && m.player2_partner_name));
+    const annPair = L.pairs.find((p) => p.player1_id === 1);
+    ok('a pair carries its players\' photos', annPair.player1_photo === '/uploads/avatars/1-ann.jpg' && annPair.player2_photo === null, JSON.stringify([annPair.player1_photo, annPair.player2_photo]));
+    // Ann's pair may have the bye in week 1, so look across the season.
+    const annFx = L.weeks.flatMap((w) => w.matchups.flatMap((mu) => mu.matches))
+      .find((m) => m.player1_id === 1);
+    ok('and so does the fixture she plays in', annFx.player1_photo === '/uploads/avatars/1-ann.jpg' && annFx.player1_partner_photo === null, JSON.stringify([annFx.player1_photo, annFx.player1_partner_photo]));
     ok('the odd division sits one pair out, as a pair', w1.byes.length === 1 && w1.byes[0].pair_id && w1.byes[0].pair_player2_name, JSON.stringify(w1.byes));
     ok('every fixture is on the doubles court at a time', fixtures.every((m) => m.court_id === 1 && /^\d\d:\d\d$/.test(m.match_time)));
     const allFixtures = L.weeks.flatMap((w) => w.matchups.flatMap((mu) => mu.matches));

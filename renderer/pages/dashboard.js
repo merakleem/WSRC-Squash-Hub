@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal, formatShortDate, abbrevName, playerInitials, clubNow, clubTodayStr } from '../utils.js';
+import { esc, toast, modal, formatShortDate, abbrevName, avatarInner, clubNow, clubTodayStr } from '../utils.js';
 
 // ===== DASHBOARD HELPERS =====
 function timeAgo(utcStr) {
@@ -113,8 +113,8 @@ function _caShape(m) {
   // A doubles result: two sides of two, no ladder places, tagged as the
   // doubles ladder or its league.
   if (m.format === 'doubles') {
-    const t1 = (m.team1 || []).map((p) => ({ id: p.id, name: p.name, pos: null }));
-    const t2 = (m.team2 || []).map((p) => ({ id: p.id, name: p.name, pos: null }));
+    const t1 = (m.team1 || []).map((p) => ({ id: p.id, name: p.name, photo_path: p.photo_path || null, pos: null }));
+    const t2 = (m.team2 || []).map((p) => ({ id: p.id, name: p.name, photo_path: p.photo_path || null, pos: null }));
     const wScore = p1Won ? m.player1_score : m.player2_score;
     const lScore = p1Won ? m.player2_score : m.player1_score;
     return {
@@ -129,6 +129,7 @@ function _caShape(m) {
   const side = (one) => ({
     id: one ? (m.eff_p1_id ?? m.player1_id) : (m.eff_p2_id ?? m.player2_id),
     name: one ? m.p1_name : m.p2_name,
+    photo_path: (one ? m.p1_photo : m.p2_photo) || null,
     pos: one ? m.p1_pos : m.p2_pos,
     score: one ? m.player1_score : m.player2_score,
   });
@@ -157,7 +158,7 @@ function _caMatching() {
 
 function _caRowHTML(m, admin) {
   const avatars = [...m.winners.map((p) => ({ ...p, win: true })), ...m.losers.map((p) => ({ ...p, win: false }))]
-    .map((p) => `<span class="ca-av${p.win ? '' : ' ca-av--lost'}" title="${esc(p.name)}" style="background:${CA_AVATAR_COLORS[Math.abs(Number(p.id) || 0) % CA_AVATAR_COLORS.length]}">${esc(playerInitials(p.name))}</span>`)
+    .map((p) => `<span class="ca-av${p.win ? '' : ' ca-av--lost'}" title="${esc(p.name)}"${p.photo_path ? '' : ` style="background:${CA_AVATAR_COLORS[Math.abs(Number(p.id) || 0) % CA_AVATAR_COLORS.length]}"`}>${avatarInner(p)}</span>`)
     .join('');
   const moved = m.moved
     ? `<span class="ca-moved">${CA_ICON.up}${esc(abbrevName(m.winners[0].name))} up ${m.moved} place${m.moved !== 1 ? 's' : ''}</span>` : '';

@@ -62,10 +62,10 @@ function _shape(db, e, viewerId) {
     : null;
   // The viewer is excluded here: the card prepends its own ME circle.
   const preview = db.prepare(`
-    SELECT p.name FROM event_signups s JOIN players p ON p.id = s.player_id
+    SELECT p.name, p.photo_path FROM event_signups s JOIN players p ON p.id = s.player_id
     WHERE s.event_id = ? AND s.player_id != COALESCE(?, -1)
     ORDER BY s.created_at ASC, s.id ASC LIMIT 3
-  `).all(e.id, viewerId).map((r) => ({ name: r.name, initials: _initials(r.name) }));
+  `).all(e.id, viewerId).map((r) => ({ name: r.name, initials: _initials(r.name), photo_path: r.photo_path || null }));
   return {
     id: e.id,
     name: e.name,
@@ -107,7 +107,7 @@ function getEvent(id, { viewerId, isAdmin }) {
   if (e.members_only && !_canSeeMembersOnly(db, viewerId, isAdmin)) return null;
   const shaped = _shape(db, e, viewerId);
   shaped.attendees = db.prepare(`
-    SELECT s.player_id, p.name, p.member_number, s.guests, s.created_at
+    SELECT s.player_id, p.name, p.photo_path, p.member_number, s.guests, s.created_at
     FROM event_signups s JOIN players p ON p.id = s.player_id
     WHERE s.event_id = ?
     ORDER BY s.created_at ASC, s.id ASC
@@ -115,6 +115,7 @@ function getEvent(id, { viewerId, isAdmin }) {
     player_id: a.player_id,
     name: a.name,
     initials: _initials(a.name),
+    photo_path: a.photo_path || null,
     member_number: isAdmin ? (a.member_number || null) : undefined,
     guests: a.guests,
   }));

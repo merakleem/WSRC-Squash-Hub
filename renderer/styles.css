@@ -487,6 +487,10 @@ h1, h2, h3, h4, h5, h6,
   overflow: hidden;
 }
 
+/* A player's photo inside a circle that draws its own size and colour. One
+   rule for every such avatar, so a photo always wins over initials. */
+.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+
 /* ===== COMPONENTS =====
    The app's shared vocabulary, defined once. A page composes these - it never
    grows its own near-duplicate button, pill, chip or tab. Page CSS adds layout

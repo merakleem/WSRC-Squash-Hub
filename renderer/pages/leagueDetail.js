@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, formatDate, formatShortDate, toast, modal, playerInitials } from '../utils.js';
+import { esc, formatDate, formatShortDate, toast, modal, avatarInner } from '../utils.js';
 import { printBoxes, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague } from './leagues.js';
 
 let leagueEditMode = false;
@@ -457,11 +457,11 @@ function renderRostersModern(league, editMode = false) {
 // two names on their own lines. Used wherever a player name would be.
 function pairHTML(pr, { size = 'std', me = false, links = true, subs = null } = {}) {
   const names = [
-    { id: pr.player1_id, name: pr.player1_name, sub: subs?.[0] || null },
-    { id: pr.player2_id, name: pr.player2_name, sub: subs?.[1] || null },
+    { id: pr.player1_id, name: pr.player1_name, photo_path: pr.player1_photo || null, sub: subs?.[0] || null },
+    { id: pr.player2_id, name: pr.player2_name, photo_path: pr.player2_photo || null, sub: subs?.[1] || null },
   ];
-  const shown = names.map((n) => (n.sub ? { id: n.sub.id, name: n.sub.name, subFor: n.name } : n));
-  const av = (n, i) => `<span class="lg-pair-av${i ? ' lg-pair-av--b' : ''}">${esc(playerInitials(n.name))}</span>`;
+  const shown = names.map((n) => (n.sub ? { id: n.sub.id, name: n.sub.name, photo_path: n.sub.photo_path || null, subFor: n.name } : n));
+  const av = (n, i) => `<span class="lg-pair-av${i ? ' lg-pair-av--b' : ''}">${avatarInner(n)}</span>`;
   const nm = (n) => `${n.subFor ? `<span class="sub-badge" title="Subbing for ${esc(n.subFor)}">SUB</span>` : ''}${links
     ? `<span class="nav-player-link" data-player-id="${n.id}">${esc(n.name)}</span>`
     : esc(n.name)}`;
@@ -569,9 +569,9 @@ function renderRostersDoubles(league, editMode = false) {
           <div class="lg-pair-blocks">
           ${members.map((pr, i) => {
             const isMe = _pairHas(pr, myId);
-            const slot = (id, name, b) => `
+            const slot = (id, name, photo, b) => `
               <div class="lg-pair-slot">
-                <span class="lg-pair-av${b ? ' lg-pair-av--b' : ''}">${esc(playerInitials(name))}</span>
+                <span class="lg-pair-av${b ? ' lg-pair-av--b' : ''}">${avatarInner({ name, photo_path: photo })}</span>
                 <a class="player-link" data-player-id="${id}" href="#">${esc(name)}</a>
                 ${editMode ? `<button class="replace-btn lg-replace" data-pair-id="${pr.id}" data-player-id="${id}" data-player-name="${esc(name)}">Replace</button>` : ''}
               </div>`;
@@ -583,8 +583,8 @@ function renderRostersDoubles(league, editMode = false) {
                 ${isMe ? '<span class="lg-you">YOU</span>' : ''}
                 <span class="lg-pair-rec">${recordOf(pr)}</span>
               </div>
-              ${slot(pr.player1_id, pr.player1_name, false)}
-              ${slot(pr.player2_id, pr.player2_name, true)}
+              ${slot(pr.player1_id, pr.player1_name, pr.player1_photo, false)}
+              ${slot(pr.player2_id, pr.player2_name, pr.player2_photo, true)}
             </div>`;
           }).join('')}
           </div>
@@ -698,10 +698,12 @@ function renderMatchRowDoubles(match, league, adminMode = true) {
   const p1Won = hasScore && match.player1_score > match.player2_score;
   const p2Won = hasScore && match.player2_score > match.player1_score;
   const myId = state.currentUser?.playerId;
-  const pairA = { player1_id: match.player1_id, player1_name: match.player1_name, player2_id: match.player1_partner_id, player2_name: match.player1_partner_name };
-  const pairB = { player1_id: match.player2_id, player1_name: match.player2_name, player2_id: match.player2_partner_id, player2_name: match.player2_partner_name };
-  const subsA = [match.sub1_id ? { id: match.sub1_id, name: match.sub1_name } : null, match.sub3_id ? { id: match.sub3_id, name: match.sub3_name } : null];
-  const subsB = [match.sub2_id ? { id: match.sub2_id, name: match.sub2_name } : null, match.sub4_id ? { id: match.sub4_id, name: match.sub4_name } : null];
+  const pairA = { player1_id: match.player1_id, player1_name: match.player1_name, player1_photo: match.player1_photo,
+    player2_id: match.player1_partner_id, player2_name: match.player1_partner_name, player2_photo: match.player1_partner_photo };
+  const pairB = { player1_id: match.player2_id, player1_name: match.player2_name, player1_photo: match.player2_photo,
+    player2_id: match.player2_partner_id, player2_name: match.player2_partner_name, player2_photo: match.player2_partner_photo };
+  const subsA = [match.sub1_id ? { id: match.sub1_id, name: match.sub1_name, photo_path: match.sub1_photo } : null, match.sub3_id ? { id: match.sub3_id, name: match.sub3_name, photo_path: match.sub3_photo } : null];
+  const subsB = [match.sub2_id ? { id: match.sub2_id, name: match.sub2_name, photo_path: match.sub2_photo } : null, match.sub4_id ? { id: match.sub4_id, name: match.sub4_name, photo_path: match.sub4_photo } : null];
   const mine = _pairHas(pairA, myId) || _pairHas(pairB, myId)
     || [match.sub1_id, match.sub2_id, match.sub3_id, match.sub4_id].includes(myId);
 

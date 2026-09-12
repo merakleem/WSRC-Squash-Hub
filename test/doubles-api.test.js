@@ -36,6 +36,8 @@ async function main() {
     run('INSERT INTO user_accounts (player_id, password_hash) VALUES (?, ?)', [i + 1, hash]);
   }
   run(`INSERT INTO settings (key,value) VALUES ('season_start_md','01-01')`);
+  // Ann has a profile photo; every feed row she appears in must carry it.
+  run(`UPDATE players SET photo_path = '/uploads/avatars/1-ann.jpg' WHERE id = 1`);
   // One singles match so a current season exists.
   run(`INSERT INTO matches (type, status, format, player1_id, player2_id, player1_score, player2_score, winner_id, played_at, confirmed_at)
        VALUES ('ladder','played','singles',1,2,3,1,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`);
@@ -79,6 +81,9 @@ async function main() {
     ok('a doubles row names both sides', dRow.team1.map((p) => p.id).join() === '1,2' && dRow.team2.map((p) => p.id).join() === '3,4' && dRow.p1_name === 'Ann Dbl & Bo Dbl', JSON.stringify(dRow));
     ok('with the winning side and no ladder places', dRow.won_side === 1 && dRow.winner_id === 1 && dRow.p1_pos === null && dRow.places_moved === 0 && dRow.submitted_by_name === 'Ann Dbl');
     ok('newest first across both formats', feed.every((x, i) => i === 0 || (feed[i - 1].confirmed_at || '') >= (x.confirmed_at || '')));
+    const sglRow = feed.find((x) => x.format === 'singles');
+    ok('a singles row carries both players\' photos', sglRow.p1_photo === '/uploads/avatars/1-ann.jpg' && sglRow.p2_photo === null, JSON.stringify([sglRow.p1_photo, sglRow.p2_photo]));
+    ok('and a doubles row carries all four', dRow.team1[0].photo_path === '/uploads/avatars/1-ann.jpg' && dRow.team1[1].photo_path === null && dRow.team2.every((p) => p.photo_path === null), JSON.stringify(dRow.team1.map((p) => p.photo_path)));
     const hist = get('ann', '/api/players/1/history');
     ok('singles history and record ignore doubles', hist.history.length === 1 && hist.wins === 1 && hist.losses === 0, `${hist.history.length} rows, ${hist.wins}-${hist.losses}`);
 

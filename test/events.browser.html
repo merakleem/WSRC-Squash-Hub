@@ -47,6 +47,11 @@ ok('type chips on linked events', cards[1].querySelector('.chip')?.textContent==
 ok('league-linked counts say registered', cards[3].textContent.includes('9 registered'));
 ok('past-free spots lines', cards[0].textContent.includes('13 spots left') && cards[1].textContent.includes('32 of 32') && cards[2].textContent.includes('No limit'));
 ok('ME leads the stack when signed up', cards[2].querySelector('.ev-av').textContent==='ME');
+// Sofia has a profile photo; the first card's stack must show it rather than her initials.
+const sofiaFace = cards[0].querySelector('.ev-av');
+ok('a signed-up player with a photo shows it in the stack', sofiaFace.querySelector('img')?.getAttribute('src')==='/uploads/avatars/1-sofia.jpg' && sofiaFace.textContent.trim()==='', sofiaFace.innerHTML);
+ok('and the tint behind it is dropped', !/background/.test(sofiaFace.getAttribute('style')||''), sofiaFace.getAttribute('style'));
+ok('a player without a photo still shows initials on a tint', cards[0].querySelectorAll('.ev-av')[1].textContent==='IC' && /background/.test(cards[0].querySelectorAll('.ev-av')[1].getAttribute('style')||''));
 ok('date line omits missing time', cards[3].textContent.includes('Tue 1 Dec') && !cards[3].textContent.includes('· null'));
 ok('a start and end read as a span', cards[0].textContent.includes('7:00 pm – 9:00 pm'), cards[0].querySelector('.ev-card-when')?.textContent);
 ok('a player sees no Members only tag, even on a members-only event', !$('.ev-members-pill'));
@@ -78,6 +83,9 @@ ok('players see no remove buttons', !$('.ev-row-x'));
 ok('long rosters truncate to six', $$('.ev-row').length===6 && text('#evRosterToggle')==='Show all 15', text('#evRosterToggle'));
 $('#evRosterToggle').click(); await tick(60);
 ok('show all expands', $$('.ev-row').length===15 && text('#evRosterToggle')==='Show fewer');
+const sofiaRow = $$('.ev-row').find(r => r.textContent.includes('Sofia Duarte'));
+ok('a roster row shows the photo when there is one', sofiaRow?.querySelector('.ev-av img')?.getAttribute('src')==='/uploads/avatars/1-sofia.jpg', sofiaRow?.querySelector('.ev-av')?.innerHTML);
+ok('and initials when there is not', $$('.ev-row').find(r => r.textContent.includes('Iain Chalmers'))?.querySelector('.ev-av')?.textContent==='IC');
 $('#evWithdraw').click(); await tick(250);
 ok('withdraw calls the API', calls.some(c=>c[0]==='withdraw' && c[1]===3));
 
