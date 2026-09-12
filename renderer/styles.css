@@ -1517,8 +1517,11 @@ tbody td {
 .picker-item:hover { background: var(--surface-2); }
 
 /* ===== NEW LEAGUE WIZARD (wz-) =====
-   Redesigned per design_handoff_league_wizard. The wizard-*/picker-* rules
-   above are kept only for the tournaments wizard, which still uses them. */
+   Redesigned per design_handoff_league_wizard. The older wizard- and picker-
+   rules above are kept only for the tournaments wizard, which still uses them.
+   Nothing in this comment may contain a star followed by a slash: that ends
+   the comment early and the sentence after it swallows the rule below, which
+   is how .wz-page lost its 16px gap between the stepper and the step card. */
 .wz-page { display: flex; flex-direction: column; gap: 16px; max-width: 1080px; }
 
 /* --- Stepper card --- */

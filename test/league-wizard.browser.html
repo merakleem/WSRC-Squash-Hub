@@ -59,6 +59,13 @@ mod.startCreateLeague();
 await settle();
 ok('page titles itself', document.getElementById('pageTitle').textContent === 'New League');
 ok('five clickable steps', $$('.wz-step').length === 5);
+// The handoff's spacing: 16px between the stepper card and the step card.
+// A comment that ended early once swallowed the rule that sets it.
+ok('the stepper card and the step card are 16px apart', (() => {
+  const gap = $('#wizardCard').getBoundingClientRect().top - $('.wz-stepcard').getBoundingClientRect().bottom;
+  return Math.round(gap) === 16;
+})(), String($('#wizardCard').getBoundingClientRect().top - $('.wz-stepcard').getBoundingClientRect().bottom));
+ok('and the column they sit in is the one the wizard styles', getComputedStyle($('.wz-page')).flexDirection === 'column', getComputedStyle($('.wz-page')).display + '/' + getComputedStyle($('.wz-page')).flexDirection);
 ok('step 1 is active', $('.wz-step--on')?.dataset.step === '1');
 ok('summary strip has six cells', $$('.wz-sum-cell').length === 6);
 ok('an unnamed league reads Untitled', $$('.wz-sum-val')[0]?.textContent === 'Untitled');
