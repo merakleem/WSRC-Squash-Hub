@@ -85,6 +85,11 @@ async function main() {
     const allFixtures = L.weeks.flatMap((w) => w.matchups.flatMap((mu) => mu.matches));
     ok('over the season each division 1 pair meets each other once', allFixtures.filter((m) => m.division_level === 1).length === 3 && allFixtures.filter((m) => m.division_level === 2).length === 1, String(allFixtures.length));
 
+    console.log('\nTHE COURT SCHEDULE');
+    const sched = get('a', `/api/schedule?date=${w1.date}`);
+    const slot = sched.slots.find((x) => x.id === `m_${fixtures[0].id}`);
+    ok('a doubles fixture on the grid names both pairs', slot && slot.format === 'doubles' && / & .* vs .* & /.test(slot.info), JSON.stringify(slot?.info));
+
     console.log('\nTHE LIST');
     const list = get('ann', '/api/leagues');
     const card = list.find((l) => l.id === leagueId);

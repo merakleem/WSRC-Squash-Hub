@@ -475,6 +475,9 @@ function getScheduleForDate(date) {
       l.match_duration,
       COALESCE(sp1.name, p1.name) AS eff_p1_name,
       COALESCE(sp2.name, p2.name) AS eff_p2_name,
+      m.format,
+      COALESCE(sp3.name, p1b.name) AS eff_p1b_name,
+      COALESCE(sp4.name, p2b.name) AS eff_p2b_name,
       l.name AS league_name
     FROM matches m
     JOIN leagues l        ON l.id = m.league_id
@@ -484,6 +487,12 @@ function getScheduleForDate(date) {
     LEFT JOIN match_subs s2  ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     LEFT JOIN players sp1    ON sp1.id = s1.sub_player_id
     LEFT JOIN players sp2    ON sp2.id = s2.sub_player_id
+    LEFT JOIN players p1b    ON p1b.id = m.player1_partner_id
+    LEFT JOIN players p2b    ON p2b.id = m.player2_partner_id
+    LEFT JOIN match_subs s3  ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+    LEFT JOIN match_subs s4  ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
+    LEFT JOIN players sp3    ON sp3.id = s3.sub_player_id
+    LEFT JOIN players sp4    ON sp4.id = s4.sub_player_id
     WHERE m.type = 'league' AND m.scheduled_date = ?
       AND m.court_id IS NOT NULL
       AND m.scheduled_time IS NOT NULL
@@ -592,7 +601,12 @@ function getScheduleForDate(date) {
       startTime: m.start_time,
       durationMinutes: m.match_duration || 45,
       title: 'League Match',
-      info: `${m.eff_p1_name} vs ${m.eff_p2_name}`,
+      // A doubles fixture names both pairs, so the grid never shows two
+      // pair leaders as if they were playing singles.
+      format: m.format || 'singles',
+      info: m.format === 'doubles'
+        ? `${m.eff_p1_name} & ${m.eff_p1b_name} vs ${m.eff_p2_name} & ${m.eff_p2b_name}`
+        : `${m.eff_p1_name} vs ${m.eff_p2_name}`,
       color: '#6b7589',
       players: [],
       repeatGroupId: null,
