@@ -1,6 +1,9 @@
 import { state, isAdmin } from '../state.js';
 import { esc, toast, modal, avatarHTML } from '../utils.js';
 
+// Which ladder: the singles rating ladder, or the doubles one beside it. Kept
+// across navigation, so coming back lands on the ladder you left.
+let _ladderMode = 'singles';
 // Which season the ladder is showing. null = the current season.
 let _ladderSeason = null;
 // Search box contents. Filtering is client-side; the whole ladder is already here.
@@ -47,7 +50,29 @@ function _fabHTML(frozen) {
 }
 
 function _wireFab() {
-  document.getElementById('ldrEnterMatch')?.addEventListener('click', () => window.openPickupGameModal());
+  document.getElementById('ldrEnterMatch')?.addEventListener('click', () => window.openPickupGameModal({ mode: _ladderMode }));
+}
+
+// Singles / Doubles, in the top bar beside the title. Switching clears the
+// search, since a filter carried across ladders would hide most of the other.
+function _modeTabsHTML() {
+  return `
+    <span class="ldr-mode-tabs" role="tablist" aria-label="Ladder">
+      ${['singles', 'doubles'].map((m) => `
+        <button type="button" role="tab" class="ldr-mode-tab${_ladderMode === m ? ' ldr-mode-tab--on' : ''}"
+          aria-selected="${_ladderMode === m}" data-ladder-mode="${m}">${m === 'doubles' ? 'Doubles' : 'Singles'}</button>`).join('')}
+    </span>`;
+}
+
+function _attachModeTabs() {
+  document.querySelectorAll('[data-ladder-mode]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      if (tab.dataset.ladderMode === _ladderMode) return;
+      _ladderMode = tab.dataset.ladderMode;
+      _ladderQuery = '';
+      renderLadder();
+    });
+  });
 }
 
 // ===== LADDER PAGE =====
@@ -93,22 +118,26 @@ function _smoothScrollTo(el, reduceMotion) {
 }
 
 export async function renderLadder() {
-  document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>`;
+  const doubles = _ladderMode === 'doubles';
+  document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>${_modeTabsHTML()}`;
   document.getElementById('topbarActions').innerHTML = '';
+  _attachModeTabs();
 
   const [ladderResult, recordsArr, seasons] = await Promise.all([
-    window.api.getLadderForSeason(_ladderSeason),
+    doubles ? window.api.getDoublesLadderForSeason(_ladderSeason) : window.api.getLadderForSeason(_ladderSeason),
     window.api.getPlayerRecords(),
     window.api.getSeasons().catch(() => []),
   ]);
+  // The tabs may have been clicked again while this was loading.
+  if (doubles !== (_ladderMode === 'doubles')) return;
 
   const ladder = ladderResult.rows || [];
   const isElo = ladderResult.system === 'elo';
   const season = ladderResult.season;
-  // Only cache the live current-season ladder; other pages read state.ladder
-  // expecting today's standings, not a historical snapshot.
+  // Only cache the live current-season singles ladder; other pages read
+  // state.ladder expecting today's singles standings.
   const viewingCurrent = !_ladderSeason || (season && season.is_current);
-  if (viewingCurrent) state.ladder = ladder;
+  if (viewingCurrent && !doubles) state.ladder = ladder;
 
   const records = Array.isArray(recordsArr)
     ? Object.fromEntries(recordsArr.map((r) => [r.id, r]))
@@ -132,12 +161,12 @@ export async function renderLadder() {
       <div class="table-card">
         <div class="empty-state">
           <strong>No standings yet</strong>
-          <p>${season ? `No matches have been played in ${esc(season.name)} yet.` : 'Add players on the Players page and they will appear here.'}</p>
+          <p>${season ? `No ${doubles ? 'doubles ' : ''}matches have been played in ${esc(season.name)} yet.` : 'Add players on the Players page and they will appear here.'}</p>
           ${ladderResult.frozen ? '' : `<button class="btn btn-primary" id="ldrEmptyReport">Report a ladder match</button>`}
         </div>
       </div>
       ${_fabHTML(ladderResult.frozen)}`;
-    document.getElementById('ldrEmptyReport')?.addEventListener('click', () => window.openPickupGameModal());
+    document.getElementById('ldrEmptyReport')?.addEventListener('click', () => window.openPickupGameModal({ mode: _ladderMode }));
     _wireFab();
     _attachLadderSeasonTabs();
     return;
@@ -374,6 +403,22 @@ export async function renderLadder() {
   _attachLadderSeasonTabs();
 
   document.getElementById('btnLadderInfo')?.addEventListener('click', () => {
+    if (doubles) {
+      modal.open('How the Doubles Ladder Works', `
+      <div class="info-modal-section">
+        <h4>Play a doubles match to get ranked</h4>
+        <p>Record your first doubles match to join the doubles ladder. Everyone starts on the same rating, and your doubles rating is separate from your singles one.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>Who you beat matters</h4>
+        <p>Each pair counts as the average of its two ratings. Beating a pair rated well above yours is worth a lot; beating one well below is worth little, and losing to them costs you.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>Everyone on court moves</h4>
+        <p>A 2v2 result moves all four players. Partners can move by different amounts: the lower-rated partner gains more from a win and loses less from a defeat.</p>
+      </div>`);
+      return;
+    }
     modal.open('How the Ladder Works', isElo ? `
       <div class="info-modal-section">
         <h4>Play a match to get ranked</h4>
