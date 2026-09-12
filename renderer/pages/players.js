@@ -1986,7 +1986,6 @@ export function renderPlayerProfile() {
     <div class="pp-card">
       <div class="pp-card-head">
         <span class="pp-card-label">Partners · ${esc(seasonLabel)}</span>
-        <span class="pp-card-sub">${plural(dblPartners.length, 'partner', 'partners')}${mobile ? '' : ` · ${plural(doublesHistory.length, 'match', 'matches')}`}</span>
       </div>
       ${dblPartners.length ? dblPartners.map((pt) => {
         const played = pt.wins + pt.losses;
