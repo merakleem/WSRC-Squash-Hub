@@ -1600,7 +1600,12 @@ export function renderPlayerProfile() {
   // appeared in. A season they sat out still shows the same page with an empty
   // record, which reads as "you played none" rather than the season vanishing.
   const seasonKeys = seasons.map((sn) => sn.key);
-  const hasUnassigned = allHistory.some((m) => m.season_key == null);
+  // Which season to open on is decided over everything they played, doubles
+  // included: a player whose only matches this season are doubles used to be
+  // opened on last season, with this season's doubles filtered out of sight.
+  const anyHistory = [...allHistory, ...((p.doubles?.history) || []).map((m) => ({ ...m, week_date: m.played_at }))]
+    .sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''));
+  const hasUnassigned = anyHistory.some((m) => m.season_key == null);
 
   // The current season is the default while there is something of theirs in
   // it. Otherwise the page opens on the last season they played - history is
@@ -1608,8 +1613,8 @@ export function renderPlayerProfile() {
   // on a fixed day whether or not anyone has played yet, and on that day every
   // profile opening blank read as the history being gone.
   const currentKey = seasons.find((sn) => sn.is_current)?.key ?? null;
-  const playedIn = (key) => key != null && allHistory.some((m) => m.season_key === key);
-  const lastPlayedKey = allHistory.map((m) => m.season_key).find((k) => seasonKeys.includes(k)) ?? null;
+  const playedIn = (key) => key != null && anyHistory.some((m) => m.season_key === key);
+  const lastPlayedKey = anyHistory.map((m) => m.season_key).find((k) => seasonKeys.includes(k)) ?? null;
   const defaultSeason = playedIn(currentKey) ? currentKey
     : lastPlayedKey
     ?? currentKey

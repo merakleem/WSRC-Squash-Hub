@@ -114,6 +114,18 @@ try {
     ok('no all-time block and no cross links in the panel', !$('#ppPanel .pp-link') && !/All time/.test($('#ppPanel').textContent));
     ok('the header still says the singles rank', /#7/.test(text('.pp-hstat .pp-hstat-val')) && !/#12/.test($('.pp-header').textContent));
     ok('the singles tab bar and header never mention doubles', !/doubles/i.test($('.pp-header').textContent));
+
+    log.textContent += '\nA PLAYER WHOSE ONLY MATCHES THIS SEASON ARE DOUBLES\n';
+    // Their last singles match was last season; this season they have played
+    // doubles. The page must open on this season and show it.
+    const ONLY_DBL = { ...PROFILE, id: 8, history: PROFILE.history.map((m) => ({ ...m, week_date: '2025-08-05', season_key: '2025' })) };
+    window.api.getPlayerHistory = async () => JSON.parse(JSON.stringify({ ...ONLY_DBL, doubles: undefined }));
+    await mod.openPlayerProfile(8); await settle();
+    ok('the profile opens on the current season', $('.pp-season-select').value === '2026', $('.pp-season-select').value);
+    ok('so this season\'s doubles show in Results', $$('#ppPanel .pp-row-dbl').length === 2 && $$('#ppPanel .pp-row').length === 2, $$('#ppPanel .pp-row').length);
+    click($('.pp-tab[data-pp-tab="doubles"]')); await settle();
+    ok('and the Doubles tab has the season record', text('#ppPanel .pp-dbl-tile:nth-child(2) .pp-dbl-tile-val').replace(/\s+/g, '') === '1–150%', text('#ppPanel .pp-dbl-tile:nth-child(2) .pp-dbl-tile-val'));
+    window.api.getPlayerHistory = async () => JSON.parse(JSON.stringify({ ...PROFILE, doubles: undefined }));
   } else {
     log.textContent += '\nMOBILE COLUMN\n';
     const last3 = $$('.pp-mobile .pp-row');
