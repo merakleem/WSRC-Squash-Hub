@@ -45,6 +45,8 @@ const slots=[
   // starts at 9:15 - on no 30-minute step at all.
   mk(5,3,20*60+30,45,'League Match',{source:'league',info:'Merak Lee vs Sofia Duarte'}),
   mk(6,3,21*60+15,45,'League Match',{source:'league',info:'Priya Raman vs Alex Hupé'}),
+  // A doubles fixture names both pairs; every name is shortened on a phone.
+  mk(10,5,19*60,60,'League Match',{source:'league',info:'Ann Pair & Bo Pair vs Cy Pair & Di Pair',format:'doubles'}),
 ];
 const calls=[];
 let myRows=[];   // filled below, before the page first loads it
@@ -113,6 +115,11 @@ ok('the steps the matches cover are not offered', !openAt.includes(21*60) && !op
 ok('the ones around them still are', openAt.includes(20*60) && openAt.includes(22*60));
 const order=$$('.cb-mslot').map(r=>r.querySelector('.cb-mslot-t').textContent).join(',');
 ok('rows read in time order', order.indexOf('8:30')<order.indexOf('9:15'));
+
+// ---- a doubles league fixture ----
+$$('.cb-mtab')[4].click(); await tick(300);
+const dblRow=$('.cb-mslot--league');
+ok('a doubles fixture shortens all four names, pairs kept', dblRow?.querySelector('.cb-mslot-l1')?.textContent==='A. Pair & B. Pair vs C. Pair & D. Pair', dblRow?.querySelector('.cb-mslot-l1')?.textContent);
 
 // ---- bookings I am on but did not make ----
 $$('.cb-mtab')[3].click(); await tick(300);

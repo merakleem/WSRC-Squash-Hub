@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// The player dashboard with a doubles fixture as the next match and a doubles
+// result among the recent ones, both tagged; the rank and record stay singles.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const settle = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+const day = (n) => { const d = new Date(Date.now() + n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+const HISTORY = {
+  id: 7, name: 'James Whitfield', seasons: [{ key: '2026', name: '2026', is_current: true }],
+  upcoming: [{ id: 30, week_date: day(3), match_time: '19:15', opponent_id: 8, opponent_name: 'Daniel Okafor', league_name: 'Summer League', division_name: 'Division 2', week_number: 6 }],
+  history: [{ id: 1, result: 'W', my_score: 3, their_score: 1, opponent_id: 3, opponent_name: 'Priya Raman', week_date: day(-4), league_name: 'Summer League', season_key: '2026', source: 'league' }],
+  ladder: { position: 7, ladder_size: 42 },
+};
+const DOUBLES = {
+  ladder: { position: 12, size: 28, rating: 1377 },
+  upcoming: [{ id: 201, week_date: day(1), match_time: '19:00', court_name: 'Court 2', partner: { id: 3, name: 'Priya Raman' }, opponents: [{ id: 1, name: 'Sofia Duarte' }, { id: 2, name: 'Tom Beckett' }], league_name: 'Autumn Doubles', division_name: 'Division 1', week_number: 2 }],
+  history: [{ id: 101, played_at: day(-1) + ' 19:00:00', result: 'L', my_score: 1, their_score: 3, partner: { id: 5, name: 'Kate Sorensen' }, opponents: [{ id: 6, name: 'Elena Kovac' }, { id: 9, name: 'Daniel Osei' }], source: 'pickup', season_key: '2026' }],
+  partners: [],
+};
+window.fetch = async (url) => ({ ok: true, json: async () => (String(url).includes('/history') ? HISTORY : {}) });
+window.api = {
+  getLadder: async () => [{ id: 1, name: 'Sofia Duarte' }, { id: 7, name: 'James Whitfield' }, { id: 3, name: 'Priya Raman' }],
+  getActivity: async () => [],
+  getPlayerDoubles: async () => DOUBLES,
+  getPlayers: async () => [],
+};
+window.navigate = () => {};
+window.openPlayerProfile = () => {};
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'player', playerId: 7, name: 'James Whitfield' };
+state.players = [];
+const { renderDashboard } = await import('../renderer/pages/dashboard.js');
+
+try {
+  await renderDashboard(); await settle(150);
+  ok('the next match is the doubles fixture, since it is soonest', /vs Sofia Duarte & Tom Beckett/.test(txt($('.dh-matchup'))) && $('.dh-matchup .db-dbl-chip'), txt($('.dh-matchup')));
+  ok('with a pill saying who with', $$('.dh-pill').some((p) => txt(p) === 'with Priya Raman'), $$('.dh-pill').map(txt).join('|'));
+  ok('and the doubles league named in the label', /Autumn Doubles/.test(txt($('.dh-match-label'))), txt($('.dh-match-label')));
+  const rows = $$('.db-upcoming-row');
+  ok('scheduled matches merge both formats in date order', rows.length === 2 && rows[0].querySelector('.db-dbl-chip') && !rows[1].querySelector('.db-dbl-chip') && /Daniel Okafor/.test(txt(rows[1])));
+  const cards = $$('.db-result-card');
+  ok('recent results include the doubles loss, newest first, tagged', cards.length === 2 && cards[0].classList.contains('db-result-loss') && cards[0].querySelector('.db-dbl-chip') && /Elena Kovac & Daniel Osei/.test(txt(cards[0])), txt(cards[0]));
+  ok('the rank ring reads the singles ladder', /#2/.test(txt($('.db-rank-ladder-card'))) && !/#12/.test(txt($('.db-rank-ladder-card'))), txt($('.db-rank-ladder-card')).slice(0, 80));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

@@ -1032,14 +1032,32 @@ export async function renderDashboard() {
 
   // Player dashboard — fetch data in parallel
   const playerId = user.playerId;
-  const [playerData, ladder, activity] = await Promise.all([
+  const [playerData, ladder, activity, doubles] = await Promise.all([
     fetch(`/api/players/${playerId}/history`).then((r) => r.json()),
     window.api.getLadder(),
     window.api.getActivity(),
+    Promise.resolve().then(() => (window.api.getPlayerDoubles ? window.api.getPlayerDoubles(playerId) : null)).catch(() => null),
   ]);
 
-  const upcoming = playerData.upcoming || [];
-  const history = (playerData.history || []).slice(0, 8);
+  // Doubles fixtures and results sit beside the singles ones here, tagged, so
+  // the next match is the next match whatever the format. The rank ring and
+  // the season record stay singles, as the profile header does.
+  const pairName = (list) => (list || []).map((o) => o.name).join(' & ');
+  const dblUpcoming = (doubles?.upcoming || []).map((m) => ({
+    id: m.id, week_date: m.week_date, match_time: m.match_time, court_name: m.court_name,
+    league_name: m.league_name, division_name: m.division_name, week_number: m.week_number,
+    opponent_id: null, opponent_name: pairName(m.opponents), partner_name: m.partner?.name || '', format: 'doubles',
+  }));
+  const dblHistory = (doubles?.history || []).map((m) => ({
+    id: m.id, week_date: m.played_at, result: m.result, opponent_id: null, opponent_name: pairName(m.opponents),
+    partner_name: m.partner?.name || '', format: 'doubles', my_score: m.my_score, their_score: m.their_score,
+  }));
+  const upcoming = [...(playerData.upcoming || []), ...dblUpcoming]
+    .sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
+  const history = [...(playerData.history || []), ...dblHistory]
+    .sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''))
+    .slice(0, 8);
+  const dblChip = (m) => (m?.format === 'doubles' ? '<span class="db-dbl-chip">Doubles</span>' : '');
   const ladderVisible = ladder.filter((p) => !p.exclude_from_ladder);
   const ladderPos = ladderVisible.findIndex((p) => p.id === playerId);
   const rank = ladderPos >= 0 ? ladderPos + 1 : null;
@@ -1101,6 +1119,7 @@ export async function renderDashboard() {
       nextMatch.match_time ? `<span class="dh-pill">${esc(nextMatch.match_time)}</span>` : '',
       isAdmin() && (nextMatch.court_name || (nextMatch.schedule_courts && nextMatch.court_number)) ? `<span class="dh-pill">${nextMatch.court_name || `Court ${nextMatch.court_number}`}</span>` : '',
       nextMatch.division_name ? `<span class="dh-pill">${esc(nextMatch.division_name)}</span>` : '',
+      nextMatch.partner_name ? `<span class="dh-pill">with ${esc(nextMatch.partner_name)}</span>` : '',
     ].filter(Boolean).join('') : '';
     const countdownInnerHTML = (() => {
       if (!nextMatch?.week_date) return '';
@@ -1120,7 +1139,7 @@ export async function renderDashboard() {
           ${nextMatch ? `
             <div class="dh-hero-left">
               <div class="dh-match-label">${esc(leagueLabel)}</div>
-              <div class="dh-matchup" data-match="${nextMatch.id}">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}</div>
+              <div class="dh-matchup" data-match="${nextMatch.id}">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}${dblChip(nextMatch)}</div>
               <div class="dh-pills">${pills}</div>
             </div>
             ${countdownInnerHTML ? `
@@ -1203,7 +1222,7 @@ export async function renderDashboard() {
             ${upcoming.slice(0, 5).map((m) => `
               <div class="db-upcoming-row">
                 <div class="db-upcoming-date">${fmtShortDate(m.week_date)}</div>
-                <div class="db-upcoming-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</div>
+                <div class="db-upcoming-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}${dblChip(m)}</div>
                 <div class="db-upcoming-time">${m.match_time ? esc(m.match_time) : '—'}</div>
               </div>`).join('')}
           </div>
@@ -1239,7 +1258,7 @@ export async function renderDashboard() {
           return `
             <div class="db-result-card ${win ? 'db-result-win' : 'db-result-loss'}">
               <div class="db-result-badge">${win ? 'WIN' : 'LOSS'}</div>
-              <div class="db-result-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</div>
+              <div class="db-result-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}${dblChip(m)}</div>
               ${scoreStr ? `<div class="db-result-score">${scoreStr}</div>` : ''}
               <div class="db-result-date">${fmtShortDate(m.week_date)}</div>
             </div>`;

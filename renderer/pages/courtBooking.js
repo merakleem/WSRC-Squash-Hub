@@ -574,7 +574,10 @@ function _buildMobileBooking() {
     // A league or tournament row leads with who is playing - initial and
     // surname each, so two names fit on a phone - and says what it is beneath.
     // Its title is the fallback when the names are not known yet.
-    const pair = league && /\svs\s/.test(bk.info || '') ? bk.info.split(/\s+vs\s+/).map(abbrevName).join(' vs ') : null;
+    // "A vs B", or for doubles "A & B vs C & D": every name is shortened.
+    const pair = league && /\svs\s/.test(bk.info || '')
+      ? bk.info.split(/\s+vs\s+/).map((side) => side.split(/\s+&\s+/).map(abbrevName).join(' & ')).join(' vs ')
+      : null;
     const what = league ? (bk.source === 'tournament' ? 'Tournament' : 'League match') : null;
     const sub = bk && !league ? _subLine(bk, { short: true }) : '';
     const labelHTML = bk
