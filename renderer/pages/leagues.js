@@ -8,6 +8,8 @@ import { startCreateLeague } from './createLeague.js';
 // to Leagues always starts on All, so nothing is ever hidden by a choice made
 // in a previous visit.
 let _filter = 'all';
+// Singles / Doubles, alongside the status filter. Same rule: not persisted.
+let _format = 'all';
 
 const CAL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
   <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
@@ -57,12 +59,21 @@ export async function renderLeagues() {
 }
 
 const FILTERS = [['all', 'All'], ['active', 'Active'], ['completed', 'Completed']];
+const FORMATS = [['all', 'All formats'], ['singles', 'Singles'], ['doubles', 'Doubles']];
 
+// Status pills, a divider, then the format pills. On a phone the divider and
+// "All formats" are dropped and Singles / Doubles act as toggles.
 function _filtersHTML() {
-  return FILTERS.map(([key, label]) =>
+  const status = FILTERS.map(([key, label]) =>
     `<button class="lgl-pill${key === _filter ? ' lgl-pill--on' : ''}" data-filter="${key}"
        aria-pressed="${key === _filter}">${label}</button>`).join('');
+  const format = FORMATS.map(([key, label]) =>
+    `<button class="lgl-pill${key === _format ? ' lgl-pill--on' : ''}" data-format="${key}"
+       aria-pressed="${key === _format}">${label}</button>`).join('');
+  return `${status}<span class="lgl-divider" aria-hidden="true"></span>${format}`;
 }
+
+const _isDoubles = (l) => l.setup_type === 'doubles';
 
 /**
  * The grid, grouped and filtered.
@@ -72,7 +83,9 @@ function _filtersHTML() {
  * to the headings that still have cards under them.
  */
 function _groupsHTML() {
-  const shown = state.leagues.filter((l) => _filter === 'all' || l.status === _filter);
+  const shown = state.leagues
+    .filter((l) => _filter === 'all' || l.status === _filter)
+    .filter((l) => _format === 'all' || (_format === 'doubles') === _isDoubles(l));
 
   const playerId = state.currentUser?.playerId;
   const groups = isAdmin()
@@ -124,8 +137,12 @@ function leagueCardHTML(league) {
   const playerId = state.currentUser?.playerId;
   const mine = !isAdmin() && playerId != null && (league.player_ids || []).includes(playerId);
 
-  const structure = league.setup_type === 'modern'
-    ? `${league.num_divisions} division${league.num_divisions !== 1 ? 's' : ''} &middot; ${(league.player_ids || []).length} players`
+  const playerCount = (league.player_ids || []).length;
+  const pairCount = league.pair_count ?? Math.floor(playerCount / 2);
+  const structure = _isDoubles(league)
+    ? `${league.num_divisions} division${league.num_divisions !== 1 ? 's' : ''} &middot; ${pairCount} pair${pairCount !== 1 ? 's' : ''} &middot; ${playerCount} players`
+    : league.setup_type === 'modern'
+    ? `${league.num_divisions} division${league.num_divisions !== 1 ? 's' : ''} &middot; ${playerCount} players`
     : `${league.num_teams} teams &middot; ${league.num_divisions} divisions &middot; ${league.num_teams * league.num_divisions} players`;
 
   const weekday = _weekdayName(league.start_date);
@@ -165,7 +182,10 @@ function leagueCardHTML(league) {
       <div class="lgl-body">
         <div class="lgl-card-head">
           <h3 class="lgl-name">${esc(league.name)}</h3>
-          <span class="lgl-status lgl-status--${done ? 'done' : 'active'}">${done ? 'Completed' : 'Active'}</span>
+          <span class="lgl-badges">
+            ${_isDoubles(league) ? '<span class="lgl-fmt">Doubles</span>' : ''}
+            <span class="lgl-status lgl-status--${done ? 'done' : 'active'}">${done ? 'Completed' : 'Active'}</span>
+          </span>
         </div>
         <div class="lgl-meta">
           <span class="lgl-meta-row">${CAL_ICON}${dateLine}</span>
@@ -189,24 +209,38 @@ function leagueCardHTML(league) {
  */
 function _footNoteHTML(league, mine, totalWeeks) {
   if (mine) {
+    // In a doubles league the chip names your partner as well.
+    const who = league.my_partner_name ? `You &amp; ${esc(String(league.my_partner_name).split(' ')[0])}` : 'You';
     return league.my_division_level != null
-      ? `<span class="lgl-chip">You &middot; Division ${league.my_division_level}</span>`
+      ? `<span class="lgl-chip">${who} &middot; Division ${league.my_division_level}</span>`
       : `<span class="lgl-chip">You're in this league</span>`;
   }
   return totalWeeks > 0 ? `<span class="lgl-weeks">${totalWeeks} weeks</span>` : '<span></span>';
 }
 
 function _wireFilters() {
-  document.getElementById('lglFilters')?.querySelectorAll('[data-filter]').forEach((btn) => {
+  const refresh = () => {
+    // Only the pills and the grid depend on the filters, so the rest of the
+    // page - and the scroll position - is left alone.
+    document.getElementById('lglFilters').innerHTML = _filtersHTML();
+    document.getElementById('lglGroups').innerHTML = _groupsHTML();
+    _wireFilters();
+    _wireCards();
+  };
+  const bar = document.getElementById('lglFilters');
+  bar?.querySelectorAll('[data-filter]').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (btn.dataset.filter === _filter) return;
       _filter = btn.dataset.filter;
-      // Only the pills and the grid depend on the filter, so the rest of the
-      // page - and the scroll position - is left alone.
-      document.getElementById('lglFilters').innerHTML = _filtersHTML();
-      document.getElementById('lglGroups').innerHTML = _groupsHTML();
-      _wireFilters();
-      _wireCards();
+      refresh();
+    });
+  });
+  bar?.querySelectorAll('[data-format]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      // Pressing the active Singles / Doubles pill again clears it: the phone
+      // has no "All formats" pill, and it is harmless on a desktop.
+      _format = btn.dataset.format === _format && btn.dataset.format !== 'all' ? 'all' : btn.dataset.format;
+      refresh();
     });
   });
 }

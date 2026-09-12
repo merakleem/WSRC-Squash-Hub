@@ -20,6 +20,8 @@ export function startCreateLeague() {
     // Modern
     modernNumDivisions: 2,
     modernDivisionPlayers: null,
+    // Doubles: [playerId|null, playerId|null] per pair, in the order made.
+    pairs: [],
     // Shared
     numRounds: 1,
     blackoutDates: [],
@@ -62,11 +64,45 @@ function _fmtLong(iso) {
   return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+const _isDoubles = () => state.wizard.setupType === 'doubles';
+const _surname = (name) => String(name || '').trim().split(/\s+/).pop() || '';
+const _pairLabel = (pr) => `${_surname(pr.a?.name)} & ${_surname(pr.b?.name)}`;
+
+/**
+ * The doubles pairs as the structure steps see them: only complete pairs,
+ * seeded by their best (lowest) ladder rank and numbered in that order.
+ * Player objects come from state.players; the ladder decides the seed.
+ */
+function _seededPairs() {
+  const w = state.wizard;
+  const byId = (id) => state.players.find((p) => p.id === id) || null;
+  const ladderOrder = state.ladder.map((p) => p.id);
+  const rankOf = (id) => { const i = ladderOrder.indexOf(id); return i === -1 ? Infinity : i + 1; };
+  return (w.pairs || [])
+    .filter((pr) => pr[0] && pr[1])
+    .map((pr) => {
+      const a = byId(pr[0]) || { id: pr[0], name: '' };
+      const b = byId(pr[1]) || { id: pr[1], name: '' };
+      return { a, b, bestRank: Math.min(rankOf(a.id), rankOf(b.id)) };
+    })
+    .sort((x, y) => x.bestRank - y.bestRank)
+    .map((pr, i) => ({ ...pr, seed: i + 1, name: _pairLabel(pr) }));
+}
+
 // The derived structure numbers every step shares: validity, divisions,
 // weeks per round and total weeks. Same arithmetic the old steps 3 and 4
-// each computed for themselves.
+// each computed for themselves. For doubles the unit is the complete pair.
 function _calc() {
   const w = state.wizard;
+  if (_isDoubles()) {
+    const pairs = _seededPairs().length;
+    const incomplete = (w.pairs || []).filter((pr) => !(pr[0] && pr[1])).length;
+    const maxDivs = Math.max(1, Math.floor(pairs / 2));
+    const valid = incomplete === 0 && pairs >= 2 && w.modernNumDivisions >= 1 && w.modernNumDivisions <= Math.floor(pairs / 2);
+    const maxSize = valid ? Math.ceil(pairs / w.modernNumDivisions) : null;
+    const base = valid ? (maxSize % 2 === 0 ? maxSize - 1 : maxSize) : null;
+    return { n: pairs, players: pairs * 2, incomplete, valid, divisions: w.modernNumDivisions, maxDivs, base, weeks: valid ? base * w.numRounds : null };
+  }
   const n = w.rankedPlayers.length;
   if (w.setupType === 'traditional') {
     const valid = w.numTeams >= 2 && n > 0 && n % w.numTeams === 0;
@@ -103,6 +139,7 @@ function _summaryHTML() {
   const w = state.wizard;
   const c = _calc();
   const teams = w.setupType === 'traditional';
+  const doubles = _isDoubles();
   const cell = (label, value, { desk = false } = {}) => `
     <div class="wz-sum-cell${desk ? ' wz-sum-cell--desk' : ''}">
       <span class="wz-sum-label">${label}</span>
@@ -111,8 +148,9 @@ function _summaryHTML() {
   return [
     cell('League', esc(w.leagueName.trim()) || 'Untitled', { desk: true }),
     cell('Starts', _fmtShort(w.startDate), { desk: true }),
-    cell('Format', teams ? 'Teams' : 'Divisions only', { desk: true }),
-    cell('Players', String(c.n)),
+    cell('Format', doubles ? 'Doubles' : teams ? 'Teams' : 'Divisions only', { desk: true }),
+    doubles ? cell('Players', `${c.players} · ${c.n} pairs`, { desk: true }) : cell('Players', String(c.n)),
+    ...(doubles ? [cell('Pairs', String(c.n))] : []),
     cell(teams ? 'Teams × divs' : 'Divisions', c.valid ? (teams ? `${c.teams} × ${c.divisions}` : String(c.divisions)) : '—'),
     cell('Weeks', c.weeks ? String(c.weeks) : '—'),
   ].join('');
@@ -135,7 +173,16 @@ function _goToStep(target) {
       w.leagueName = name;
       w.startDate = date;
     }
-    if (target > 2 && w.rankedPlayers.length < 2) {
+    if (target > 2 && _isDoubles()) {
+      const c = _calc();
+      const guard = c.incomplete > 0 ? 'Every pair needs 2 players.' : c.n < 2 ? 'Add at least 2 pairs.' : '';
+      if (guard) {
+        _pendingError = guard;
+        w.step = 2;
+        renderCreateLeague();
+        return;
+      }
+    } else if (target > 2 && w.rankedPlayers.length < 2) {
       _pendingError = 'Select at least 2 players.';
       w.step = 2;
       renderCreateLeague();
@@ -265,13 +312,16 @@ function renderStep1() {
         </div>
         <div class="wz-field">
           <span class="wz-label">Format</span>
-          <div class="wz-formats">
+          <div class="wz-formats wz-formats--3">
             ${formatCard('traditional', 'Teams', 'Current default',
               'Players are grouped into teams. Teams play each other each week, with one match per division.',
               ['Team standings', 'One night, one opponent'])}
             ${formatCard('modern', 'No teams', '',
               'No teams. Players are grouped into divisions and play everyone in their division (round robin).',
               ['Division standings', 'Round robin'])}
+            ${formatCard('doubles', 'Doubles', 'New',
+              'Players are paired up, then pairs are grouped into divisions and play 2v2 round robin on a doubles court.',
+              ['2v2', 'Pair standings', 'Round robin'])}
           </div>
         </div>
       </div>
@@ -292,7 +342,15 @@ function renderStep1() {
 
   document.getElementById('wizardCard').querySelectorAll('.wz-format').forEach((card) => {
     card.addEventListener('click', () => {
-      state.wizard.setupType = card.dataset.type;
+      const next = card.dataset.type;
+      // Doubles holds pairs where the other two hold a ranked list, so moving
+      // between them starts the player step over.
+      if ((next === 'doubles') !== (state.wizard.setupType === 'doubles')) {
+        state.wizard.rankedPlayers = [];
+        state.wizard.pairs = [];
+        state.wizard.modernDivisionPlayers = null;
+      }
+      state.wizard.setupType = next;
       renderCreateLeague();
     });
   });
@@ -310,6 +368,8 @@ async function renderStep2() {
 
   const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
   state.players = allPlayers;
+
+  if (_isDoubles()) return renderStep2Doubles({ allPlayers, ladderOrder });
 
   // Build full available list in ladder order, unranked players appended alphabetically
   function buildAvailable() {
@@ -466,8 +526,202 @@ async function renderStep2() {
   _flushError();
 }
 
+// Step 2, doubles — the pair builder. The left column is the same club list;
+// the right column holds pair cards. A click fills the first open slot, or
+// starts a new pair. Complete pairs seed by their best ladder rank; a pair
+// still needing a partner sits at the bottom.
+function renderStep2Doubles({ allPlayers, ladderOrder }) {
+  const w = state.wizard;
+  w.pairs = w.pairs || [];
+  const byId = (id) => allPlayers.find((p) => p.id === id) || null;
+  const rankOf = (id) => { const i = ladderOrder.indexOf(id); return i === -1 ? Infinity : i + 1; };
+
+  const inPairs = () => new Set(w.pairs.flat().filter(Boolean));
+  const buildAvailable = () => {
+    const taken = inPairs();
+    const list = ladderOrder.map(byId).filter((p) => p && !taken.has(p.id));
+    allPlayers.forEach((p) => { if (!taken.has(p.id) && !ladderOrder.includes(p.id)) list.push(p); });
+    return list;
+  };
+  const query = () => document.getElementById('playerSearch')?.value || '';
+  const filteredAvailable = () => {
+    const q = query().trim().toLowerCase();
+    return buildAvailable().filter((p) => !q || p.name.toLowerCase().includes(q));
+  };
+
+  // Display order: complete pairs by best rank, numbered; incomplete last.
+  const orderedPairs = () => {
+    const complete = w.pairs.filter((pr) => pr[0] && pr[1])
+      .map((pr) => ({ pr, best: Math.min(rankOf(pr[0]), rankOf(pr[1])) }))
+      .sort((x, y) => x.best - y.best)
+      .map((x) => x.pr);
+    const open = w.pairs.filter((pr) => !(pr[0] && pr[1]));
+    return [...complete, ...open];
+  };
+  const counts = () => {
+    const complete = w.pairs.filter((pr) => pr[0] && pr[1]).length;
+    const players = w.pairs.flat().filter(Boolean).length;
+    return { complete, players };
+  };
+
+  const addPlayer = (id) => {
+    const open = w.pairs.find((pr) => !(pr[0] && pr[1]));
+    if (open) { if (!open[0]) open[0] = id; else open[1] = id; }
+    else w.pairs.push([id, null]);
+  };
+  const removePlayer = (id) => {
+    const pr = w.pairs.find((x) => x[0] === id || x[1] === id);
+    if (!pr) return;
+    if (pr[0] === id) pr[0] = null; else pr[1] = null;
+    if (!pr[0] && !pr[1]) w.pairs.splice(w.pairs.indexOf(pr), 1);
+    w.modernDivisionPlayers = null;
+  };
+
+  function renderAvailableList() {
+    const filtered = filteredAvailable();
+    const el = document.getElementById('availableList');
+    if (!el) return;
+    el.innerHTML = filtered.length === 0
+      ? `<div class="wz-lempty">
+          <span class="wz-lempty-t">${buildAvailable().length === 0 ? 'Every club player is in' : 'No players match'}</span>
+        </div>`
+      : filtered.map((p) => {
+          const li = ladderOrder.indexOf(p.id);
+          return `
+            <div class="wz-prow" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
+              ${avatarHTML(p, 'wz-avatar')}
+              <span class="wz-pname">${esc(p.name)}</span>
+              <span class="wz-prank">${li === -1 ? '' : `#${li + 1}`}</span>
+              <button class="wz-pbtn" type="button" tabindex="-1">+</button>
+            </div>`;
+        }).join('');
+  }
+
+  const slotHTML = (id) => (id ? `
+      <div class="wz-pair-slot">
+        ${avatarHTML(byId(id) || { name: '' }, 'wz-avatar wz-avatar--navy wz-avatar--sm')}
+        <span class="wz-pname">${esc(byId(id)?.name || '')}</span>
+        <button class="wz-pbtn wz-pair-x" data-action="remove-pair-player" data-id="${id}" aria-label="Remove">&times;</button>
+      </div>` : `
+      <div class="wz-pair-slot wz-pair-slot--open">
+        <span class="wz-pair-add">+</span>
+        <span class="wz-pair-ph">Add a partner</span>
+      </div>`);
+
+  function renderPairList() {
+    const el = document.getElementById('rankedList');
+    if (!el) return;
+    const ordered = orderedPairs();
+    let seed = 0;
+    el.innerHTML = ordered.length === 0
+      ? `<div class="wz-lempty">
+          <span class="wz-lempty-t">No pairs yet</span>
+          <span class="wz-lempty-s">Click two names on the left to form the first pair.</span>
+        </div>`
+      : ordered.map((pr) => {
+          const complete = pr[0] && pr[1];
+          if (complete) seed++;
+          return `
+            <div class="wz-pair${complete ? '' : ' wz-pair--open'}">
+              <div class="wz-pair-head">
+                <span class="wz-pair-seed">${complete ? seed : ''}</span>
+                <span class="wz-pair-n">Pair ${complete ? seed : ordered.indexOf(pr) + 1}</span>
+                ${complete ? '' : '<span class="wz-pair-need">Needs a partner</span>'}
+              </div>
+              ${slotHTML(pr[0])}${slotHTML(pr[1])}
+            </div>`;
+        }).join('');
+  }
+
+  function refresh() {
+    renderAvailableList();
+    renderPairList();
+    const { complete, players } = counts();
+    document.getElementById('wzSelChip').textContent = `${complete} pair${complete === 1 ? '' : 's'} · ${players} player${players === 1 ? '' : 's'}`;
+    document.getElementById('wzAvailN').textContent = `${buildAvailable().length} available`;
+    document.getElementById('wzAddAll').disabled = filteredAvailable().length === 0;
+    document.getElementById('wzClear').disabled = w.pairs.length === 0;
+    document.getElementById('wzSummary').innerHTML = _summaryHTML();
+    // Next is shown but dimmed while a pair is incomplete; the guard explains.
+    document.getElementById('wNext').classList.toggle('wz-next--dim', _calc().incomplete > 0);
+    _err('');
+  }
+
+  const { complete, players } = counts();
+  document.getElementById('wizardCard').innerHTML = `
+    <div class="wz-card">
+      <div class="wz-head">
+        <div>
+          <div class="wz-title">Add players</div>
+          <div class="wz-sub">Tap two players to make a pair. Pairs seed by their best ladder rank.</div>
+        </div>
+        <span class="wz-selchip" id="wzSelChip">${complete} pair${complete === 1 ? '' : 's'} · ${players} player${players === 1 ? '' : 's'}</span>
+      </div>
+
+      <div class="wz-cols">
+        <div class="wz-pickcol">
+          <div class="wz-colhead">
+            <div class="wz-colhead-row">
+              <span class="wz-label">Club players</span>
+              <span class="wz-hint" id="wzAvailN">${buildAvailable().length} available</span>
+              <button class="wz-ghost" id="wzAddAll"${buildAvailable().length === 0 ? ' disabled' : ''}>Add all</button>
+            </div>
+            <input class="wz-input wz-search" id="playerSearch" placeholder="Search players…" autocomplete="off">
+          </div>
+          <div class="wz-plist" id="availableList"></div>
+        </div>
+
+        <div class="wz-pickcol">
+          <div class="wz-colhead wz-colhead--sel">
+            <span class="wz-label">In this league</span>
+            <span class="wz-hint">pair order</span>
+            <button class="wz-ghost" id="wzClear"${w.pairs.length === 0 ? ' disabled' : ''}>Clear</button>
+          </div>
+          <div class="wz-plist wz-plist--sel wz-plist--pairs" id="rankedList"></div>
+        </div>
+      </div>
+
+      ${_footerHTML()}
+    </div>`;
+
+  renderAvailableList();
+  renderPairList();
+  document.getElementById('wNext').classList.toggle('wz-next--dim', _calc().incomplete > 0);
+
+  document.getElementById('playerSearch').addEventListener('input', () => {
+    renderAvailableList();
+    document.getElementById('wzAddAll').disabled = filteredAvailable().length === 0;
+  });
+  // Add all pairs the remaining players in ladder order, two at a time; an odd
+  // count leaves one pair waiting for a partner.
+  document.getElementById('wzAddAll').addEventListener('click', () => {
+    const remaining = buildAvailable();
+    if (!remaining.length) return;
+    remaining.forEach((p) => addPlayer(p.id));
+    w.modernDivisionPlayers = null;
+    refresh();
+  });
+  document.getElementById('wzClear').addEventListener('click', () => {
+    if (!w.pairs.length) return;
+    w.pairs = [];
+    w.modernDivisionPlayers = null;
+    refresh();
+  });
+  document.getElementById('wBack').addEventListener('click', () => _goToStep(1));
+  document.getElementById('wNext').addEventListener('click', () => _goToStep(3));
+
+  document.getElementById('wizardCard').addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    if (el.dataset.action === 'add-player') { addPlayer(Number(el.dataset.id)); w.modernDivisionPlayers = null; refresh(); }
+    else if (el.dataset.action === 'remove-pair-player') { removePlayer(Number(el.dataset.id)); refresh(); }
+  });
+  _flushError();
+}
+
 // Step 3 — Structure (dispatches based on setupType)
 async function renderStep3() {
+  if (_isDoubles()) return renderStep3Doubles();
   if (state.wizard.setupType === 'modern') return renderStep3Modern();
   return renderStep3Traditional();
 }
@@ -499,6 +753,15 @@ function _calcCardHTML(configs) {
     } else {
       label = 'Doesn&rsquo;t divide evenly';
       text = nearestConfigWarning(c.n, configs, 'teams', w.numTeams);
+    }
+  } else if (_isDoubles()) {
+    if (c.valid) {
+      label = 'Distribution';
+      text = `${c.divisions} divisions from ${c.n} pairs`;
+      chips = _divSizes(c.n, c.divisions).map((sz, i) => `Div ${i + 1}: ${sz}`);
+    } else {
+      label = 'Too many divisions';
+      text = `Max ${c.maxDivs} divisions with ${c.n} pairs &mdash; each needs at least 2.`;
     }
   } else if (c.valid) {
     label = 'Distribution';
@@ -617,7 +880,7 @@ function _patchStep3Derived(configs, anyCourts) {
 
 function _wireStep3({ configs, allCourts }) {
   const w = state.wizard;
-  const modern = w.setupType === 'modern';
+  const modern = w.setupType === 'modern' || _isDoubles();
   const anyCourts = allCourts.length > 0;
 
   const setGroup = (v) => {
@@ -720,6 +983,25 @@ async function renderStep3Modern() {
     groupVal: w.modernNumDivisions,
     presets: [2, 3, 4],
     groupHint: `Minimum 1, maximum ${c.maxDivs} with ${c.n} players.`,
+    configs: [],
+    allCourts,
+  });
+
+  _wireStep3({ configs: [], allCourts });
+}
+
+// Doubles reuses the division layout; every count is in pairs.
+async function renderStep3Doubles() {
+  const w = state.wizard;
+  const allCourts = await window.api.getCourts();
+  const c = _calc();
+
+  document.getElementById('wizardCard').innerHTML = _step3CardHTML({
+    subtitle: `${c.n} pair${c.n === 1 ? '' : 's'} (${c.players} players) selected. Set the division count &mdash; pairs are split by seed.`,
+    groupLabel: 'Number of divisions',
+    groupVal: w.modernNumDivisions,
+    presets: [2, 3, 4],
+    groupHint: `Minimum 1, maximum ${c.maxDivs} with ${c.n} pairs.`,
     configs: [],
     allCourts,
   });
@@ -833,8 +1115,78 @@ function renderStep4() {
 
 // Step 5 — Preview & confirm
 function renderStep5() {
+  if (_isDoubles()) return renderStep5Doubles();
   if (state.wizard.setupType === 'modern') return renderStep5Modern();
   return renderStep5Traditional();
+}
+
+// Step 5, doubles: the modern preview with pairs as the unit. Rosters list
+// pairs as "Surname & Surname"; fixtures pair them off the same way.
+function renderStep5Doubles() {
+  const { startDate, modernNumDivisions, numRounds, selectedCourtIds } = state.wizard;
+  const seeded = _seededPairs();
+
+  if (!state.wizard.modernDivisionPlayers ||
+      state.wizard.modernDivisionPlayers.length !== modernNumDivisions ||
+      state.wizard.modernDivisionPlayers.flat().length !== seeded.length) {
+    state.wizard.modernDivisionPlayers = distributePlayersEvenly(seeded, modernNumDivisions);
+  }
+  const divPairs = state.wizard.modernDivisionPlayers;
+
+  const divRounds = divPairs.map((div) => {
+    const oneRound = previewModernRoundRobin(div);
+    const all = [];
+    for (let rep = 0; rep < numRounds; rep++) all.push(...oneRound);
+    return all;
+  });
+  const totalWeeks = Math.max(...divRounds.map((d) => d.length), 0);
+  const weekDates = _weekDates(totalWeeks);
+  const previewCount = Math.min(3, totalWeeks);
+
+  const weeksHTML = Array.from({ length: previewCount }, (_, w) => {
+    const groups = divRounds.slice(0, 2).map((rounds, dIdx) => {
+      if (w >= rounds.length) return '';
+      const round = rounds[w];
+      const lines = [
+        ...round.matches.map(([p1, p2]) => `<span class="wz-fixline">${esc(p1.name)} &nbsp;vs&nbsp; ${esc(p2.name)}</span>`),
+        ...round.byes.map((p) => `<span class="wz-fixline wz-fixline--bye">${esc(p.name)} &mdash; bye</span>`),
+      ].join('');
+      return `<div class="wz-fixgroup"><span class="wz-fixlabel">Division ${dIdx + 1}</span>${lines}</div>`;
+    }).join('');
+    return `
+      <div class="wz-week">
+        <div class="wz-week-top">
+          <span class="wz-week-title">Week ${w + 1}</span>
+          <span class="wz-week-date">${_fmtShort(weekDates[w])}</span>
+        </div>
+        ${groups}
+      </div>`;
+  }).join('');
+
+  const rostersHTML = divPairs.map((div, i) => `
+    <div class="wz-rosterrow">
+      <div class="wz-rosterrow-top">
+        <span class="wz-rostername">Division ${i + 1}</span>
+        <span class="wz-countchip">${div.length} pair${div.length === 1 ? '' : 's'}</span>
+      </div>
+      <span class="wz-rosternames">${div.map((p) => esc(p.name)).join(' &nbsp;&middot;&nbsp; ')}</span>
+    </div>`).join('');
+
+  document.getElementById('wizardCard').innerHTML = _step5ShellHTML({
+    meta: `Starts ${_fmtLong(startDate)} &middot; ${modernNumDivisions} division${modernNumDivisions !== 1 ? 's' : ''}${_blackoutMetaNote()}`,
+    stats: [[seeded.length * 2, 'Players'], [seeded.length, 'Pairs'], [totalWeeks, 'Weeks'], [selectedCourtIds.length, 'Courts']],
+    rosterLabel: 'Division rosters',
+    editId: 'btnEditDivisions',
+    editLabel: 'Edit divisions',
+    rostersHTML,
+    previewNote: totalWeeks > previewCount ? `First ${previewCount} of ${totalWeeks} weeks` : `All ${totalWeeks} weeks`,
+    weeksHTML,
+  });
+
+  document.getElementById('wBack').addEventListener('click', () => _goToStep(4));
+  document.getElementById('wCreate').addEventListener('click', submitCreateLeague);
+  document.getElementById('btnEditDivisions').addEventListener('click', openEditDivisionsModal);
+  _flushError();
 }
 
 function distributePlayersEvenly(players, numDivisions) {
@@ -995,9 +1347,10 @@ function openEditDivisionsModal() {
   let workingDivs = state.wizard.modernDivisionPlayers.map((d) => [...d]);
   let dragSource = null;
 
+  const unit = _isDoubles() ? 'pairs' : 'players';
   modal.open('Edit Divisions', `
     <p class="text-muted" style="font-size:13px;margin-bottom:16px">
-      Drag players between divisions to reassign them. Each division needs at least 2 players.
+      Drag ${unit} between divisions to reassign them. Each division needs at least 2 ${unit}.
     </p>
     <div id="edColumns" class="ed-columns"></div>
     <div id="edError" class="form-error" style="margin-top:8px"></div>
@@ -1012,7 +1365,7 @@ function openEditDivisionsModal() {
         <div class="ed-column-title">Division ${dIdx + 1} <span class="ed-count">(${div.length})</span></div>
         ${div.map((p, pIdx) => `
           <div class="ed-player" draggable="true" data-div="${dIdx}" data-idx="${pIdx}">
-            ${esc(p.name)}
+            ${esc(p.name)}${p.bestRank && Number.isFinite(p.bestRank) ? `<span class="ed-rank">#${p.bestRank}</span>` : ''}
           </div>`).join('')}
       </div>`).join('');
 
@@ -1046,9 +1399,11 @@ function openEditDivisionsModal() {
 
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', () => {
-    const invalid = workingDivs.find((d) => d.length < 2);
-    if (invalid) {
-      document.getElementById('edError').textContent = 'Each division must have at least 2 players.';
+    const short = workingDivs.filter((d) => d.length < 2).length;
+    if (short) {
+      document.getElementById('edError').textContent = _isDoubles()
+        ? `${short} group${short === 1 ? '' : 's'} ha${short === 1 ? 's' : 've'} fewer than 2 pairs`
+        : 'Each division must have at least 2 players.';
       return;
     }
     state.wizard.modernDivisionPlayers = workingDivs;
@@ -1278,7 +1633,15 @@ async function submitCreateLeague() {
           matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
 
   let payload;
-  if (setupType === 'modern') {
+  if (setupType === 'doubles') {
+    payload = {
+      name: leagueName, startDate, setup_type: 'doubles',
+      numRounds, blackoutDates, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
+      divisions: state.wizard.modernDivisionPlayers.map((divPairs, dIdx) =>
+        divPairs.map((pr, pIdx) => ({ playerIds: [pr.a.id, pr.b.id], rank: dIdx * 1000 + pIdx + 1 }))
+      ),
+    };
+  } else if (setupType === 'modern') {
     payload = {
       name: leagueName, startDate, setup_type: 'modern',
       numRounds, blackoutDates, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,

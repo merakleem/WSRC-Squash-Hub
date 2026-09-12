@@ -867,6 +867,12 @@ tbody td {
 
 .lgl-body { display: flex; flex-direction: column; gap: 14px; padding: 20px 20px 16px; flex: 1; }
 .lgl-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.lgl-badges { display: flex; gap: 6px; flex-shrink: 0; }
+.lgl-fmt {
+  padding: 3px 9px; border-radius: 5px; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; background: #eaf2fb; color: #1e2758; white-space: nowrap;
+}
+.lgl-divider { width: 1px; height: 22px; background: #dce3ed; margin: 0 6px; flex-shrink: 0; }
 .lgl-name {
   margin: 0;
   font-family: 'Barlow', sans-serif;
@@ -972,7 +978,9 @@ tbody td {
   .lgl-group-count { font-size: 11.5px; }
   .lgl-group-rule { display: none; }
 
-  .lgl-filters { gap: 6px; }
+  .lgl-filters { gap: 6px; flex-wrap: wrap; }
+  .lgl-divider, .lgl-pill[data-format="all"] { display: none; }
+  .lgl-badges { gap: 5px; }
   .lgl-pill { height: 32px; padding: 0 13px; font-size: 12.5px; }
 
   /* minmax(0,...) rather than 1fr: a grid item's min-width is auto, so the
@@ -1632,6 +1640,34 @@ tbody td {
 /* --- Step 1: name/date + format cards --- */
 .wz-row1 { display: grid; grid-template-columns: 1fr 260px; gap: 18px; }
 .wz-formats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.wz-formats--3 { grid-template-columns: repeat(3, 1fr); }
+/* Doubles pair builder */
+.wz-plist--pairs { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.wz-pair { padding: 6px 6px 4px; border-radius: 10px; background: var(--surface-2); }
+.wz-pair--open { background: #fff; border: 1px dashed #c8d0dd; }
+.wz-pair-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 6px; }
+.wz-pair-seed { font-family: 'Barlow', sans-serif; font-size: 14px; font-weight: 700; color: var(--primary); min-width: 20px; text-align: center; }
+.wz-pair-n { font-family: 'Barlow', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.wz-pair-need {
+  margin-left: auto; padding: 3px 8px; border-radius: 20px; background: #fdf4e3; color: #a8710f;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+}
+.wz-pair-slot { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 8px; }
+.wz-pair-slot .wz-pname { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.wz-avatar--sm { width: 30px; height: 30px; font-size: 11px; }
+.wz-pair-x { width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); color: #93a2b5; }
+.wz-pair-add {
+  width: 30px; height: 30px; flex: none; border-radius: 50%; border: 1.5px dashed #c8d0dd; color: #93a2b5;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 16px;
+}
+.wz-pair-ph { font-size: 14px; font-weight: 500; color: #93a2b5; }
+.wz-next--dim { opacity: .45; }
+.ed-rank { margin-left: 6px; font-family: 'Barlow', sans-serif; font-size: 12px; font-weight: 700; color: #93a2b5; }
+@media (max-width: 768px) {
+  .wz-formats--3 { grid-template-columns: 1fr; }
+  .wz-pair-slot { min-height: 44px; }
+  .wz-pair-x { width: 40px; height: 40px; }
+}
 .wz-format {
   display: flex;
   flex-direction: column;

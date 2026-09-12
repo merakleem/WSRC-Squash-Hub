@@ -55,6 +55,14 @@ const UNSCHEDULED = {
   last_week_date: null, my_division_level: null,
 };
 
+// A doubles league the viewer is in, paired with Priya, in division 1.
+const DOUBLES = {
+  id: 5, name: 'Autumn Doubles', status: 'active', setup_type: 'doubles',
+  start_date: '2026-09-14', num_divisions: 2, num_teams: 0,
+  player_ids: [7, 12, 13, 14, 15, 16, 17, 18], pair_count: 4, total_weeks: 3, weeks_started: 1,
+  last_week_date: '2026-09-28', my_division_level: 1, my_partner_name: 'Priya Raman',
+};
+
 let LEAGUES = [FALL, BOX, SPRING];
 const calls = [];
 window.api = {
@@ -147,7 +155,8 @@ ok('a player gets no New League button', !$('#btnCreateLeague'), txt($('#topbarA
 
 log.textContent += '\nFILTER PILLS\n';
 await show([FALL, BOX, SPRING], ADMIN);
-ok('three pills are offered', $$('.lgl-pill').map((p) => p.textContent.trim()).join('|') === 'All|Active|Completed');
+ok('three status pills are offered', $$('.lgl-pill[data-filter]').map((p) => p.textContent.trim()).join('|') === 'All|Active|Completed');
+ok('then a divider and the three format pills', !!$('.lgl-divider') && $$('.lgl-pill[data-format]').map((p) => p.textContent.trim()).join('|') === 'All formats|Singles|Doubles');
 ok('All is on by default', pill('All').classList.contains('lgl-pill--on'));
 click(pill('Active')); await settle();
 ok('Active narrows to the active ones', cardNames().length === 2, cardNames().join(', '));
@@ -177,6 +186,27 @@ calls.length = 0;
 click(cardFor('Fall 2026 Wednesday League'));
 for (let i = 0; i < 40 && !calls.some((c) => c[0] === 'navigate'); i++) await settle();
 ok('cards still open after a filter re-render', calls.some((c) => c[0] === 'navigate'), JSON.stringify(calls));
+
+log.textContent += '\nDOUBLES LEAGUES\n';
+await show([FALL, BOX, SPRING, DOUBLES], PLAYER);
+click(pill('All')); await settle();   // the status filter is page state and may still be Active from above
+const dblCard = cardFor('Autumn Doubles');
+ok('a doubles card wears a Doubles chip before its status', txt(dblCard.querySelector('.lgl-badges')) === 'Doubles Active' && !!dblCard.querySelector('.lgl-fmt'), txt(dblCard?.querySelector('.lgl-badges')));
+ok('singles cards do not', !cardFor('Fall 2026 Wednesday League').querySelector('.lgl-fmt'));
+ok('the structure line counts pairs and players', /2 divisions · 4 pairs · 8 players/.test(txt(dblCard)), txt(dblCard.querySelector('.lgl-meta')));
+ok('the You chip names the partner and division', txt(dblCard.querySelector('.lgl-chip')) === 'You & Priya · Division 1', txt(dblCard.querySelector('.lgl-chip')));
+ok('a singles league keeps the plain You chip', txt(cardFor('Fall 2026 Wednesday League').querySelector('.lgl-chip')) === 'You · Division 2');
+const fmt = (label) => $$('.lgl-pill[data-format]').find((p) => p.textContent.trim() === label);
+click(fmt('Doubles')); await settle();
+ok('the Doubles pill narrows to doubles leagues', $$('.lgl-card').length === 1 && !!cardFor('Autumn Doubles') && fmt('Doubles').classList.contains('lgl-pill--on'));
+click(fmt('Singles')); await settle();
+ok('Singles shows box and modern leagues alike', $$('.lgl-card').length === 3 && !cardFor('Autumn Doubles'));
+click(fmt('Singles')); await settle();
+ok('pressing the active pill again clears the format', $$('.lgl-card').length === 4 && fmt('All formats').classList.contains('lgl-pill--on'));
+click(pill('Completed')); await settle(); click(fmt('Doubles')); await settle();
+ok('status and format combine', $$('.lgl-card').length === 0 && /No leagues here/.test($('#mainContent').textContent));
+click(pill('All')); await settle(); click(fmt('All formats')); await settle();
+ok('the count line is not split by format', /3 active · 1 completed/.test(txt($('#pageTitle'))), txt($('#pageTitle')));
 
 log.textContent += '\nNO LEAGUES AT ALL\n';
 await show([], ADMIN);
