@@ -166,6 +166,60 @@ function getParticipation() {
 }
 
 
+// ===== DOUBLES =====
+
+/**
+ * Every completed doubles match, oldest first, for the doubles rating replay.
+ * Substitutes are resolved on all four slots. Same ordering rule as singles.
+ */
+function getCompletedDoublesMatches(range = null) {
+  const rows = getDB().prepare(`
+    SELECT
+      m.id AS match_id,
+      ${SOURCE_OF_TYPE} AS source,
+      m.type, m.league_id, m.pair1_id, m.pair2_id,
+      ${EFF_P1}  AS s1a, ${EFF_P1B} AS s1b,
+      ${EFF_P2}  AS s2a, ${EFF_P2B} AS s2b,
+      ${WON_SIDE} AS won_side,
+      CASE WHEN ${WON_SIDE} = 1 THEN m.player1_score ELSE m.player2_score END AS winner_games,
+      CASE WHEN ${WON_SIDE} = 1 THEN m.player2_score ELSE m.player1_score END AS loser_games,
+      m.played_at AS sort_key
+    FROM matches m
+    ${DBL_JOIN}
+    WHERE ${COUNTS_DOUBLES}
+      ${range ? 'AND substr(m.played_at, 1, 10) BETWEEN @start AND @end' : ''}
+    ORDER BY m.id
+  `).all(range ? { start: range.start, end: range.end } : {});
+  return rows.sort((a, b) => (a.sort_key || '').localeCompare(b.sort_key || '') || 0);
+}
+
+const _DOUBLES_DAYS = `
+  SELECT ${EFF_P1}  AS player_id, m.played_at AS d FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+  UNION ALL SELECT ${EFF_P1B}, m.played_at FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+  UNION ALL SELECT ${EFF_P2},  m.played_at FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+  UNION ALL SELECT ${EFF_P2B}, m.played_at FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+`;
+
+/** Each player's most recent doubles match day - who is on the doubles ladder. */
+function getLastDoublesMatchDates(asOf = null) {
+  const rows = getDB().prepare(`
+    SELECT player_id, MAX(d) AS last_date FROM (${_DOUBLES_DAYS})
+    WHERE player_id IS NOT NULL AND d IS NOT NULL
+      ${asOf ? 'AND substr(d, 1, 10) <= @asOf' : ''}
+    GROUP BY player_id
+  `).all(asOf ? { asOf } : {});
+  return Object.fromEntries(rows.map((r) => [r.player_id, String(r.last_date).slice(0, 10)]));
+}
+
+/** Each player's first doubles match day, for the join-date rule. */
+function getFirstDoublesMatchDates() {
+  const rows = getDB().prepare(`
+    SELECT player_id, MIN(d) AS first_date FROM (${_DOUBLES_DAYS})
+    WHERE player_id IS NOT NULL AND d IS NOT NULL
+    GROUP BY player_id
+  `).all();
+  return Object.fromEntries(rows.map((r) => [r.player_id, String(r.first_date).slice(0, 10)]));
+}
 
 // ladderModel already requires this module, so it is required back lazily -
 // at load time it would hand us a half-built one.
@@ -354,4 +408,5 @@ module.exports = {
   SINGLES, DOUBLES, COUNTS_DOUBLES, DBL_JOIN, EFF_P1B, EFF_P2B,
   getCompletedMatches, getLastMatchDates, getParticipation,
   getHeadToHead, getMatchCard, getReportableMatches,
+  getCompletedDoublesMatches, getLastDoublesMatchDates, getFirstDoublesMatchDates,
 };

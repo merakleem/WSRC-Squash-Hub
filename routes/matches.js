@@ -199,6 +199,70 @@ router.delete('/matches/pickup/:id', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// When a reported match was played: a date, today at the latest, and not
+// before the current season. Shared by the singles and doubles ladder routes.
+// Returns { playedAt } or { error }.
+function _playedAtFrom(playedOn) {
+  if (!playedOn) return { playedAt: null };
+  const day = String(playedOn).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(new Date(`${day}T00:00:00Z`).getTime())) {
+    return { error: 'Invalid date.' };
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  if (day > today) return { error: 'A match cannot be played in the future.' };
+  const season = seasonModel.getCurrentSeason();
+  if (season && day < season.start_date) return { error: `That date is before the ${season.name} season started.` };
+  return { playedAt: `${day} 12:00:00` };
+}
+
+// A doubles ladder match: two pairs, best of five. Anyone signed in may record
+// one they played in; an admin may record any. It lands in the same table as
+// every other match, marked doubles, and moves all four doubles ratings.
+router.post('/matches/doubles', requireAuth, wrap(async (req, res) => {
+  const submitterId = req.session.playerId;
+  const isAdminUser = req.session.role === 'admin';
+  const { team1, team2, playedOn } = req.body;
+  const team1Score = Number(req.body.team1Score);
+  const team2Score = Number(req.body.team2Score);
+
+  const ids = [...(Array.isArray(team1) ? team1 : []), ...(Array.isArray(team2) ? team2 : [])].map(Number);
+  if (ids.length !== 4 || ids.some((id) => !Number.isInteger(id) || id <= 0) || isNaN(team1Score) || isNaN(team2Score)) {
+    return res.status(400).json({ error: 'Missing required fields.' });
+  }
+  if (new Set(ids).size !== 4) return res.status(400).json({ error: 'All four players must be different.' });
+  if (!isAdminUser && !ids.includes(submitterId)) {
+    return res.status(403).json({ error: 'You can only submit scores for matches you played in.' });
+  }
+  const db = getDB();
+  const known = db.prepare(`SELECT COUNT(*) AS n FROM players WHERE id IN (${ids.join(',')})`).get().n;
+  if (known !== 4) return res.status(400).json({ error: 'One of those players does not exist.' });
+
+  const valid = Number.isInteger(team1Score) && Number.isInteger(team2Score)
+    && team1Score >= 0 && team1Score <= 3 && team2Score >= 0 && team2Score <= 3
+    && (team1Score === 3 || team2Score === 3) && team1Score !== team2Score;
+  if (!valid) return res.status(400).json({ error: 'Invalid score. One pair must win 3 games (e.g. 3–1, 2–3).' });
+
+  const when = _playedAtFrom(playedOn);
+  if (when.error) return res.status(400).json({ error: when.error });
+
+  // winner_id names the winning pair's first player, which is what every
+  // existing reader of winner_id expects to find there.
+  const [a, b, c, d] = ids;
+  const winnerId = team1Score > team2Score ? a : c;
+  const result = db.prepare(
+    `INSERT INTO matches (type, status, format, player1_id, player1_partner_id, player2_id, player2_partner_id,
+                          player1_score, player2_score, winner_id, submitted_by_player_id, played_at, confirmed_at)
+     VALUES ('ladder', 'played', 'doubles', ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`
+  ).run(a, b, c, d, team1Score, team2Score, winnerId, submitterId, when.playedAt);
+
+  res.json({ ok: true, id: Number(result.lastInsertRowid) });
+}));
+
+router.delete('/matches/doubles/:id', requireAdmin, wrap(async (req, res) => {
+  getDB().prepare(`DELETE FROM matches WHERE id = ? AND type = 'ladder' AND format = 'doubles'`).run(Number(req.params.id));
+  res.json({ ok: true });
+}));
+
 router.put('/matches/:id/unskip', requireAdmin, wrap(async (req, res) => {
   await leagueModel.unskipMatch(Number(req.params.id));
   res.json({ ok: true });
