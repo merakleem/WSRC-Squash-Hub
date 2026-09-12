@@ -1,0 +1,160 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <div id="pageTitle"></div><div id="topbarActions"></div>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// The league page for a doubles league: pairs in the hero, standings,
+// fixtures and the admin's Pairs tab. Run at 1280 and at 390.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+const mobile = window.innerWidth <= 768;
+
+const NAMES = ['Ann Pair', 'Bo Pair', 'Cy Pair', 'Di Pair', 'Ed Pair', 'Flo Pair', 'Gus Pair', 'Hal Pair', 'Ivy Pair', 'Jo Pair', 'Kim Spare', 'Lou Spare'];
+const P = NAMES.map((name, i) => ({ id: i + 1, name, photo_path: null }));
+const nm = (id) => P[id - 1].name;
+const day = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+const pair = (id, divId, a, b, rank) => ({ id, league_id: 9, division_id: divId, player1_id: a, player2_id: b, skill_rank: rank, player1_name: nm(a), player2_name: nm(b), division_name: divId === 59 ? 'Division 1' : 'Division 2', division_level: divId === 59 ? 1 : 2 });
+const PAIRS = [pair(1, 59, 1, 2, 1), pair(2, 59, 3, 4, 2), pair(3, 59, 5, 6, 3), pair(4, 60, 7, 8, 1001), pair(5, 60, 9, 10, 1002)];
+const fx = (id, matchupId, divId, A, B, s1, s2) => ({
+  id, matchup_id: matchupId, division_id: divId, division_name: divId === 59 ? 'Division 1' : 'Division 2', division_level: divId === 59 ? 1 : 2,
+  format: 'doubles', player1_id: A.player1_id, player1_name: A.player1_name, player1_partner_id: A.player2_id, player1_partner_name: A.player2_name,
+  player2_id: B.player1_id, player2_name: B.player1_name, player2_partner_id: B.player2_id, player2_partner_name: B.player2_name,
+  pair1_id: A.id, pair2_id: B.id, player1_score: s1, player2_score: s2, winner_id: s1 == null ? null : (s1 > s2 ? A.player1_id : B.player1_id),
+  skipped: 0, match_time: '19:00', court_id: 1, sub1_id: null, sub2_id: null, sub3_id: null, sub4_id: null,
+});
+const bye = (weekId, pr) => ({ id: weekId * 10 + pr.id, week_id: weekId, player_id: pr.player1_id, player_name: pr.player1_name, division_id: pr.division_id, division_name: pr.division_name, division_level: pr.division_level, pair_id: pr.id, pair_player1_id: pr.player1_id, pair_player1_name: pr.player1_name, pair_player2_id: pr.player2_id, pair_player2_name: pr.player2_name });
+const LEAGUE = () => ({
+  id: 9, name: 'Autumn Doubles', start_date: day(-1), status: 'active', setup_type: 'doubles', num_divisions: 2, num_rounds: 1, num_courts: 1, schedule_courts: 1,
+  divisions: [{ id: 59, league_id: 9, name: 'Division 1', level: 1 }, { id: 60, league_id: 9, name: 'Division 2', level: 2 }],
+  players: PAIRS.flatMap((pr) => [pr.player1_id, pr.player2_id].map((id) => ({ player_id: id, player_name: nm(id), division_id: pr.division_id, division_name: pr.division_name, division_level: pr.division_level, skill_rank: pr.skill_rank }))),
+  pairs: PAIRS.map((p) => ({ ...p })),
+  courts: [{ id: 1, name: 'Doubles Court' }],
+  weeks: [
+    { id: 100, league_id: 9, week_number: 1, date: day(-1), matchups: [
+      { id: 1000, week_id: 100, division_id: 59, division_name: 'Division 1', division_level: 1, matches: [fx(1, 1000, 59, PAIRS[0], PAIRS[1], 3, 1)] },
+      { id: 1001, week_id: 100, division_id: 60, division_name: 'Division 2', division_level: 2, matches: [fx(2, 1001, 60, PAIRS[3], PAIRS[4], null, null)] },
+    ], byes: [bye(100, PAIRS[2])] },
+    { id: 101, league_id: 9, week_number: 2, date: day(6), matchups: [
+      { id: 1002, week_id: 101, division_id: 59, division_name: 'Division 1', division_level: 1, matches: [fx(3, 1002, 59, PAIRS[0], PAIRS[2], null, null)] },
+    ], byes: [bye(101, PAIRS[1])] },
+  ],
+});
+const calls = [];
+window.api = {
+  getLeague: async () => LEAGUE(),
+  getPlayers: async () => P,
+  replacePairPlayer: async (d) => { calls.push(['replacePair', d]); return { ok: true }; },
+  updateMatchScore: async (d) => { calls.push(['score', d]); return { ok: true }; },
+  setMatchSub: async (d) => { calls.push(['sub', d]); return { ok: true }; },
+  removeMatchSub: async () => ({ ok: true }),
+  setSubRemaining: async () => ({ ok: true }),
+  getCourts: async () => [{ id: 1, name: 'Doubles Court' }],
+};
+window.navigate = () => {};
+window.openPlayerProfile = (id) => calls.push(['profile', id]);
+const { state } = await import('../renderer/state.js');
+const mod = await import('../renderer/pages/leagueDetail.js');
+state.players = P;
+const render = async (user) => { state.currentUser = user; state.currentLeague = LEAGUE(); mod.resetLeagueEditMode(); mod.renderLeagueDetail(); await settle(); };
+
+try {
+  await render({ role: 'player', playerId: 3 });
+  log.textContent += (mobile ? 'PHONE' : 'DESKTOP') + ' — PLAYER\n';
+  ok('the hero wears a Doubles chip beside the status', $('.lg-hero-title .lg-dbl-chip')?.textContent === 'Doubles' && !!$('.lg-status'));
+  ok('the meta line counts divisions, pairs, players and weeks', txt($('.lg-hero-meta')) === '2 divisions · 5 pairs · 10 players · 2 weeks', txt($('.lg-hero-meta')));
+  ok('players get Standings and Schedule only', $$('.lg-tab').map((t) => txt(t)).join('|') === 'Standings|Schedule');
+  ok('the division of my pair is selected', $('.std-tab.active')?.textContent === 'Division 1' && $('.std-panel.active')?.dataset.divId === '59');
+  const std = $('.std-panel.active');
+  ok('standings are per pair', std.querySelectorAll('.lg-std-row--dbl').length === 3 && txt(std.querySelector('.lg-card-meta')) === '3 pairs · 1 match played', txt(std.querySelector('.lg-card-meta')));
+  const top = std.querySelector('.lg-std-row--dbl');
+  ok('the leader is the pair that won, with two names and a stacked avatar', [...top.querySelectorAll('.lg-pair-names > span')].map(txt).join('|') === 'Ann Pair|Bo Pair' && top.querySelectorAll('.lg-pair-av').length === 2 && top.querySelector('.lg-pair-av--b') && txt(top.querySelector('.lg-std-w')) === '1', txt(top));
+  const me = std.querySelector('.lg-std-row.lg-me');
+  ok('my pair is tinted with the YOU chip', me && /Cy Pair/.test(me.textContent) && me.querySelector('.lg-you') && txt(me.querySelector('.lg-std-l')) === '1');
+  ok('the columns read Pair, W, L, GD, GP', $$('.std-panel.active .lg-std-cols--dbl span').map(txt).join(' ') === '# Pair W L GD GP', $$('.std-panel.active .lg-std-cols--dbl span').map(txt).join(' '));
+
+  click($$('.lg-tab')[1]); await settle();
+  const rows = $$('#scheduleList .match-row.lg-match--dbl');
+  ok('fixtures are doubles rows', rows.length === 3);
+  const scored = rows.find((r) => r.dataset.matchId === '1');
+  ok('a scored fixture marks the winning pair and dims the loser', scored.classList.contains('lg-match-scored') && /Ann Pair/.test(scored.querySelector('.match-pair.winner').textContent) && /Cy Pair/.test(scored.querySelector('.match-pair.loser').textContent), txt(scored));
+  ok('with the score', txt(scored.querySelector('.score-display')) === '3–1');
+  ok('and it is marked as mine', scored.classList.contains('lg-match--mine'));
+  const open = rows.find((r) => r.dataset.matchId === '2');
+  ok('an unplayed fixture says Not played, and is not mine', open.querySelector('.lg-notplayed') && !open.classList.contains('lg-match--mine'));
+  ok('each side has two names', open.querySelectorAll('.match-pair').length === 2 && open.querySelectorAll('.lg-pair-names > span').length === 4);
+  ok('byes name the pair', /Bye: Ed Pair & Flo Pair/.test($('#scheduleList').textContent));
+  if (mobile) {
+    ok('on a phone the pair rows stack', getComputedStyle(scored.querySelector('.lg-players--dbl')).flexDirection === 'column');
+    ok('and the winner wears a WIN tag', getComputedStyle(scored.querySelector('.match-pair.winner .lg-win-tag')).display !== 'none');
+    ok('names read on one line as A & B', getComputedStyle(scored.querySelector('.lg-pair-names')).flexDirection === 'row');
+  } else {
+    ok('on a desktop the WIN tag stays hidden', getComputedStyle(scored.querySelector('.match-pair.winner .lg-win-tag')).display === 'none');
+  }
+
+  if (!mobile) {
+    log.textContent += '\nADMIN\n';
+    await render({ role: 'admin', playerId: null });
+    ok('the third tab is Pairs, marked admin', txt($$('.lg-tab')[2]) === 'PairsADMIN');
+    ok('the top bar offers Edit Pairs', txt($('#editRosterBtn')) === 'Edit Pairs');
+    ok('box printing is not offered for doubles', !$('[data-action="print-boxes"]') && !$('[data-action="box-scores"]') && !!$('[data-action="print-schedule"]'));
+    click($$('.lg-tab')[2]); await settle();
+    ok('the hint explains Edit Pairs', /Division pairs in seeded order/.test(txt($('.lg-roster-hint'))));
+    const blocks = $$('.lg-pair-block');
+    ok('one block per pair, seeded', blocks.length === 5 && txt(blocks[0].querySelector('.lg-pair-seed')) === '1' && txt(blocks[0].querySelector('.lg-pair-n')) === 'Pair 1');
+    ok('with the record', txt(blocks[0].querySelector('.lg-pair-rec')) === '1W · 0L' && txt(blocks[1].querySelector('.lg-pair-rec')) === '0W · 1L');
+    ok('two player rows each, navy then accent', blocks[0].querySelectorAll('.lg-pair-slot').length === 2 && blocks[0].querySelector('.lg-pair-slot .lg-pair-av--b'));
+    ok('the division head counts pairs and players', txt($('.lg-roster-card .lg-card-meta')) === '3 pairs · 6 players');
+    ok('no Replace buttons until edit mode', !$('.replace-btn'));
+    click($('#editRosterBtn')); await settle();
+    click($$('.lg-tab')[2]); await settle();
+    ok('edit mode puts a Replace on every partner and the hint changes', $$('.replace-btn').length === 10 && /keeps its fixtures, results and seed/.test(txt($('.lg-roster-hint'))) && txt($('#editRosterBtn')) === 'Done Editing');
+    click($$('.replace-btn').find((b) => b.dataset.playerId === '4')); await settle();
+    ok('Replace opens the pair modal for that partner', $('#modalTitle').textContent === 'Replace Di Pair' && /Their partner, the pair\'s fixtures, results and seed stay the same/.test($('#modalBody').textContent));
+    ok('only players not already in a pair are offered', $$('.replace-option').map((o) => o.dataset.name).join('|') === 'Kim Spare|Lou Spare', $$('.replace-option').map((o) => o.dataset.name).join('|'));
+    click($$('.replace-option')[0]); await settle();
+    click($('#replaceConfirmBtn')); await settle(80);
+    const rep = calls.find((c) => c[0] === 'replacePair');
+    ok('confirming calls replacePairPlayer with the pair and both players', rep && rep[1].leagueId === 9 && rep[1].pairId === 2 && rep[1].oldPlayerId === 4 && rep[1].newPlayerId === 11, JSON.stringify(rep?.[1]));
+
+    click($$('.lg-tab')[1]); await settle();
+    const openRow = $$('#scheduleList .match-row.lg-match--dbl').find((r) => r.dataset.matchId === '2');
+    click(openRow.querySelector('.sub-btn')); await settle();
+    ok('the sub modal offers all four players', $$('.sub-select').length === 4 && $$('.sub-select').map((s) => s.dataset.slot).join() === '1,3,2,4');
+    click($('#fCancel')); await settle();
+    type(openRow.querySelector('[data-score="p1"]'), '3'); type(openRow.querySelector('[data-score="p2"]'), '0');
+    click(openRow.querySelector('.score-save-btn')); await settle(80);
+    const sc = calls.find((c) => c[0] === 'score');
+    ok('saving a score names the winning pair\'s first player', sc && sc[1].matchId === 2 && sc[1].winnerId === 7 && sc[1].player1Score === 3, JSON.stringify(sc?.[1]));
+    ok('and the row moves to its scored state with the winner marked', openRow.classList.contains('lg-match-scored') && openRow.querySelectorAll('.match-pair')[0].classList.contains('winner') && openRow.querySelectorAll('.match-pair')[1].classList.contains('loser'));
+  }
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

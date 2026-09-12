@@ -738,7 +738,7 @@ export function printSchedule(league) {
       });
     });
     (week.byes || []).forEach((b) => {
-      if (divData[b.division_id]) divData[b.division_id].byes.push(b.player_name);
+      if (divData[b.division_id]) divData[b.division_id].byes.push(b.pair_player2_name ? `${b.pair_player1_name} & ${b.pair_player2_name}` : b.player_name);
     });
 
     const divsHTML = divisions.map((div) => {
@@ -746,8 +746,9 @@ export function printSchedule(league) {
       if (matches.length === 0 && byes.length === 0) return '';
 
       const matchRows = matches.map((m) => {
-        const p1 = m.sub1_name || m.player1_name;
-        const p2 = m.sub2_name || m.player2_name;
+        const dbl = m.format === 'doubles';
+        const p1 = dbl ? `${m.sub1_name || m.player1_name} & ${m.sub3_name || m.player1_partner_name}` : (m.sub1_name || m.player1_name);
+        const p2 = dbl ? `${m.sub2_name || m.player2_name} & ${m.sub4_name || m.player2_partner_name}` : (m.sub2_name || m.player2_name);
         const score = (m.player1_score != null && m.player2_score != null)
           ? `<span class="sched-score">${m.player1_score}–${m.player2_score}</span>` : '';
         const courtLabel = m.court_name || (league.schedule_courts && m.court_number ? `Ct ${m.court_number}` : null);

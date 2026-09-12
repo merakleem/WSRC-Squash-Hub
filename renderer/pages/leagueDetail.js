@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, formatDate, formatShortDate, toast, modal } from '../utils.js';
+import { esc, formatDate, formatShortDate, toast, modal, playerInitials } from '../utils.js';
 import { printBoxes, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague } from './leagues.js';
 
 let leagueEditMode = false;
@@ -63,17 +63,18 @@ export function renderLeagueDetail() {
   if (!league) { window.navigate('leagues'); return; }
 
   const adminMode = isAdmin();
+  const isDoubles = league.setup_type === 'doubles';
   document.getElementById('pageTitle').textContent = league.name;
   document.getElementById('topbarActions').innerHTML = adminMode ? `
     <button class="btn ${leagueEditMode ? 'btn-primary' : 'btn-outline'}" id="editRosterBtn">
-      ${leagueEditMode ? 'Done Editing' : 'Edit Players'}
+      ${leagueEditMode ? 'Done Editing' : (isDoubles ? 'Edit Pairs' : 'Edit Players')}
     </button>
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
       <div class="options-dropdown" id="optionsDropdown">
-        <button class="options-item" data-action="print-boxes">Print Boxes</button>
-        <button class="options-item" data-action="box-scores">Submit scores by box view</button>
-        ${league.setup_type === 'modern' ? `<button class="options-item" data-action="print-schedule">Print Schedule</button>` : ''}
+        ${isDoubles ? '' : `<button class="options-item" data-action="print-boxes">Print Boxes</button>
+        <button class="options-item" data-action="box-scores">Submit scores by box view</button>`}
+        ${league.setup_type === 'modern' || isDoubles ? `<button class="options-item" data-action="print-schedule">Print Schedule</button>` : ''}
         <button class="options-item" data-action="message-players">Message Players</button>
         <button class="options-item" data-action="bulk-invite">Send Account Invites</button>
         ${league.status !== 'completed' ? `<button class="options-item options-item-danger" data-action="end-league">End League</button>` : ''}
@@ -140,7 +141,8 @@ export function renderLeagueDetail() {
 
   const content = document.getElementById('mainContent');
   const isModern = league.setup_type === 'modern';
-  const numPlayers = isModern ? (league.players || []).length : league.num_teams * league.num_divisions;
+  const numPlayers = isModern || isDoubles ? (league.players || []).length : league.num_teams * league.num_divisions;
+  const pairs = league.pairs || [];
 
   // Arriving at a different league resets the view to its defaults.
   if (_leagueViewFor !== league.id) {
@@ -180,7 +182,9 @@ export function renderLeagueDetail() {
     ? new Date(String(weeks[0].date).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }) + 's'
     : null;
 
-  const metaBits = (isModern
+  const metaBits = (isDoubles
+    ? [`${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${pairs.length} pair${pairs.length === 1 ? '' : 's'}`, `${numPlayers} players`, weeks.length ? `${weeks.length} week${weeks.length === 1 ? '' : 's'}` : null]
+    : isModern
     ? [`${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${numPlayers} players`, weekday]
     : [`${league.num_teams} teams`, `${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${numPlayers} players`, weekday]
   ).filter(Boolean).join(' · ');
@@ -200,6 +204,7 @@ export function renderLeagueDetail() {
         <div class="lg-hero-title">
           <h2>${esc(league.name)}</h2>
           <span class="lg-status">${esc(String(league.status || 'active').toUpperCase())}</span>
+          ${isDoubles ? '<span class="lg-dbl-chip">Doubles</span>' : ''}
         </div>
         ${metaBits ? `<span class="lg-hero-meta">${metaBits}</span>` : ''}
       </div>
@@ -226,12 +231,16 @@ export function renderLeagueDetail() {
       <div class="lg-tabs" id="lgTabs">
         <button class="lg-tab" data-lg-tab="standings">Standings</button>
         <button class="lg-tab" data-lg-tab="schedule">Schedule</button>
-        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">Players<span class="lg-admin-chip">ADMIN</span></button>` : ''}
+        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">${isDoubles ? 'Pairs' : 'Players'}<span class="lg-admin-chip">ADMIN</span></button>` : ''}
       </div>
       ${pillsHTML}
     </div>`;
 
-  const rosterHint = leagueEditMode
+  const rosterHint = isDoubles
+    ? (leagueEditMode
+      ? 'Edit mode on. Replace swaps one partner out; the pair keeps its fixtures, results and seed.'
+      : 'Division pairs in seeded order. Use <strong>Edit Pairs</strong> in the top bar to swap a partner out.')
+    : leagueEditMode
     ? 'Edit mode on. Replace swaps a player out and hands their fixtures and history to the new player.'
     : 'Division rosters in seeded order. Use <strong>Edit Players</strong> in the top bar to swap a player out.';
 
@@ -240,7 +249,7 @@ export function renderLeagueDetail() {
       ${heroHTML}
       ${tabsHTML}
       <div class="lg-panel" id="lgPanelStandings">
-        ${renderStandings(league)}
+        ${isDoubles ? renderStandingsDoubles(league) : renderStandings(league)}
       </div>
       <div class="lg-panel" id="lgPanelSchedule" hidden>
         <div class="schedule-list${adminMode ? ' is-admin' : ''}" id="scheduleList">
@@ -252,7 +261,7 @@ export function renderLeagueDetail() {
         <div class="lg-roster-hint">
           <span class="lg-roster-hint-text">${rosterHint}</span>
         </div>
-        ${isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
+        ${isDoubles ? renderRostersDoubles(league, leagueEditMode) : isModern ? renderRostersModern(league, leagueEditMode) : renderRosters(league, leagueEditMode)}
       </div>` : ''}
     </div>`;
 
@@ -272,7 +281,7 @@ export function renderLeagueDetail() {
     }
     // Schedule rows: the filtering behaviour #schFilter has always had, now
     // always scoped to one division.
-    if (isModern) {
+    if (isModern || isDoubles) {
       content.querySelectorAll('#scheduleList .matchup-block[data-division-id]').forEach((block) => {
         block.hidden = block.dataset.divisionId !== divId;
       });
@@ -343,7 +352,11 @@ export function renderLeagueDetail() {
   if (adminMode && leagueEditMode) {
     content.querySelectorAll('.replace-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        openReplacePlayerModal(league.id, Number(btn.dataset.playerId), btn.dataset.playerName);
+        if (btn.dataset.pairId) {
+          openReplacePairPlayerModal(league.id, Number(btn.dataset.pairId), Number(btn.dataset.playerId), btn.dataset.playerName);
+        } else {
+          openReplacePlayerModal(league.id, Number(btn.dataset.playerId), btn.dataset.playerName);
+        }
       });
     });
   }
@@ -437,6 +450,343 @@ function renderRostersModern(league, editMode = false) {
         </div>`;
     }).join('')}
   </div>`;
+}
+
+// ===== DOUBLES =====
+// The pair unit: two initials circles (navy, then accent) overlapping, and the
+// two names on their own lines. Used wherever a player name would be.
+function pairHTML(pr, { size = 'std', me = false, links = true, subs = null } = {}) {
+  const names = [
+    { id: pr.player1_id, name: pr.player1_name, sub: subs?.[0] || null },
+    { id: pr.player2_id, name: pr.player2_name, sub: subs?.[1] || null },
+  ];
+  const shown = names.map((n) => (n.sub ? { id: n.sub.id, name: n.sub.name, subFor: n.name } : n));
+  const av = (n, i) => `<span class="lg-pair-av${i ? ' lg-pair-av--b' : ''}">${esc(playerInitials(n.name))}</span>`;
+  const nm = (n) => `${n.subFor ? `<span class="sub-badge" title="Subbing for ${esc(n.subFor)}">SUB</span>` : ''}${links
+    ? `<span class="nav-player-link" data-player-id="${n.id}">${esc(n.name)}</span>`
+    : esc(n.name)}`;
+  return `
+    <span class="lg-pair lg-pair--${size}">
+      <span class="lg-pair-avs">${shown.map(av).join('')}</span>
+      <span class="lg-pair-names"><span>${nm(shown[0])}</span><span>${nm(shown[1])}</span></span>
+      ${me ? '<span class="lg-you">YOU</span>' : ''}
+    </span>`;
+}
+
+const _pairHas = (pr, playerId) => playerId != null && (pr.player1_id === playerId || pr.player2_id === playerId);
+
+/** Standings per pair: wins, then game difference, then seed. */
+export function computeStandingsDoubles(league) {
+  const stats = {};
+  for (const pr of (league.pairs || [])) {
+    stats[pr.id] = { pairId: pr.id, pair: pr, divisionId: pr.division_id, skillRank: pr.skill_rank, wins: 0, losses: 0, gamesWon: 0, gamesLost: 0 };
+  }
+  for (const week of (league.weeks || [])) {
+    for (const mu of (week.matchups || [])) {
+      for (const m of (mu.matches || [])) {
+        if (m.skipped || m.player1_score == null || m.player2_score == null) continue;
+        const a = stats[m.pair1_id], b = stats[m.pair2_id];
+        if (!a || !b) continue;
+        a.gamesWon += m.player1_score; a.gamesLost += m.player2_score;
+        b.gamesWon += m.player2_score; b.gamesLost += m.player1_score;
+        if (m.player1_score > m.player2_score) { a.wins++; b.losses++; } else { b.wins++; a.losses++; }
+      }
+    }
+  }
+  const divMap = {};
+  for (const d of (league.divisions || [])) divMap[d.id] = d;
+  const result = {};
+  for (const st of Object.values(stats)) {
+    const div = divMap[st.divisionId];
+    if (!div) continue;
+    if (!result[st.divisionId]) result[st.divisionId] = { division: div, pairs: [] };
+    result[st.divisionId].pairs.push({ ...st, gameDiff: st.gamesWon - st.gamesLost, played: st.wins + st.losses });
+  }
+  for (const d of Object.values(result)) {
+    d.pairs.sort((a, b) => (b.wins !== a.wins ? b.wins - a.wins : b.gameDiff !== a.gameDiff ? b.gameDiff - a.gameDiff : a.skillRank - b.skillRank));
+  }
+  return result;
+}
+
+function renderStandingsDoubles(league) {
+  const standings = computeStandingsDoubles(league);
+  const divIds = Object.keys(standings).sort((a, b) => standings[a].division.level - standings[b].division.level);
+  if (divIds.length === 0) return '<p style="color:var(--text-muted);padding:8px 0 24px">No standings available.</p>';
+  const myId = state.currentUser?.playerId;
+
+  const panelsHTML = divIds.map((id) => {
+    const { division, pairs } = standings[id];
+    const matchesPlayed = Math.round(pairs.reduce((sum, p) => sum + p.played, 0) / 2);
+    const rows = pairs.map((p, idx) => {
+      const isMe = _pairHas(p.pair, myId);
+      const gdText = p.gameDiff > 0 ? `+${p.gameDiff}` : p.gameDiff < 0 ? `−${Math.abs(p.gameDiff)}` : '0';
+      const gdClass = p.gameDiff > 0 ? ' lg-gd-pos' : p.gameDiff < 0 ? ' lg-gd-neg' : '';
+      const rankClass = isMe ? ' lg-rank-me' : idx === 0 ? ' lg-rank-first' : '';
+      return `
+        <div class="lg-std-row lg-std-row--dbl${isMe ? ' lg-me' : ''}">
+          <span class="lg-std-rank${rankClass}">${idx + 1}</span>
+          <span class="lg-std-name">${pairHTML(p.pair, { size: 'std', me: isMe })}</span>
+          <span class="lg-std-w">${p.wins}</span>
+          <span class="lg-std-l">${p.losses}</span>
+          <span class="lg-std-gd${gdClass}">${gdText}</span>
+          <span class="lg-std-gp">${p.played}</span>
+        </div>`;
+    }).join('');
+    return `
+      <div class="std-panel lg-std-card lg-std-card--dbl" data-div-id="${id}">
+        <div class="lg-card-head">
+          <span class="lg-card-label">${esc(division.name)} standings</span>
+          <span class="lg-card-meta">${pairs.length} pair${pairs.length === 1 ? '' : 's'} · ${matchesPlayed} match${matchesPlayed === 1 ? '' : 'es'} played</span>
+        </div>
+        <div class="lg-std-cols lg-std-cols--dbl">
+          <span>#</span><span>Pair</span><span>W</span><span>L</span><span>GD</span><span>GP</span>
+        </div>
+        ${rows}
+      </div>`;
+  }).join('');
+  return `<div class="std-container lg-std">${panelsHTML}</div>`;
+}
+
+// The admin's Pairs tab: one block per pair, in seeded order, with the record
+// and, in edit mode, a Replace button on each partner.
+function renderRostersDoubles(league, editMode = false) {
+  if (!league.divisions || league.divisions.length === 0) return '';
+  const myId = state.currentUser?.playerId;
+  const standings = computeStandingsDoubles(league);
+  const recordOf = (pr) => {
+    const row = (standings[pr.division_id]?.pairs || []).find((x) => x.pairId === pr.id);
+    return row ? `${row.wins}W · ${row.losses}L` : '0W · 0L';
+  };
+  return `<div class="roster-grid lg-rosters">
+    ${league.divisions.slice().sort((a, b) => a.level - b.level).map((div) => {
+      const members = (league.pairs || []).filter((p) => p.division_id === div.id).sort((a, b) => a.skill_rank - b.skill_rank);
+      return `
+        <div class="roster-team-card lg-roster-card">
+          <div class="lg-card-head">
+            <span class="lg-card-label">${esc(div.name)}</span>
+            <span class="lg-card-meta">${members.length} pair${members.length === 1 ? '' : 's'} · ${members.length * 2} players</span>
+          </div>
+          <div class="lg-pair-blocks">
+          ${members.map((pr, i) => {
+            const isMe = _pairHas(pr, myId);
+            const slot = (id, name, b) => `
+              <div class="lg-pair-slot">
+                <span class="lg-pair-av${b ? ' lg-pair-av--b' : ''}">${esc(playerInitials(name))}</span>
+                <a class="player-link" data-player-id="${id}" href="#">${esc(name)}</a>
+                ${editMode ? `<button class="replace-btn lg-replace" data-pair-id="${pr.id}" data-player-id="${id}" data-player-name="${esc(name)}">Replace</button>` : ''}
+              </div>`;
+            return `
+            <div class="lg-pair-block${isMe ? ' lg-me' : ''}">
+              <div class="lg-pair-block-head">
+                <span class="lg-pair-seed">${i + 1}</span>
+                <span class="lg-pair-n">Pair ${i + 1}</span>
+                ${isMe ? '<span class="lg-you">YOU</span>' : ''}
+                <span class="lg-pair-rec">${recordOf(pr)}</span>
+              </div>
+              ${slot(pr.player1_id, pr.player1_name, false)}
+              ${slot(pr.player2_id, pr.player2_name, true)}
+            </div>`;
+          }).join('')}
+          </div>
+        </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function openReplacePairPlayerModal(leagueId, pairId, oldPlayerId, oldPlayerName) {
+  const inPairs = new Set((state.currentLeague.pairs || []).flatMap((p) => [p.player1_id, p.player2_id]));
+  const available = state.players.filter((p) => !inPairs.has(p.id));
+
+  modal.open(`Replace ${esc(oldPlayerName)}`, `
+    <p style="margin:0 0 12px;color:var(--text-muted);font-size:13px">
+      Choose a replacement for <strong>${esc(oldPlayerName)}</strong>.
+      Their partner, the pair's fixtures, results and seed stay the same.
+    </p>
+    <input class="form-control" id="replaceSearch" placeholder="Search players…" style="margin-bottom:10px" autofocus>
+    <div id="replaceList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline" id="replaceCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="replaceConfirmBtn" disabled>Select a player</button>
+    </div>
+  `, { wide: true });
+
+  let selectedId = null;
+  function renderList(query = '') {
+    const q = query.toLowerCase();
+    const filtered = q ? available.filter((p) => p.name.toLowerCase().includes(q)) : available;
+    const list = document.getElementById('replaceList');
+    if (!list) return;
+    if (filtered.length === 0) {
+      list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No players available</div>`;
+      return;
+    }
+    list.innerHTML = filtered.map((p) => `
+      <div class="replace-option ${p.id === selectedId ? 'replace-option-selected' : ''}" data-pid="${p.id}" data-name="${esc(p.name)}"
+           style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;border-bottom:1px solid var(--border)">
+        ${esc(p.name)}
+      </div>`).join('');
+    list.querySelectorAll('.replace-option').forEach((row) => {
+      row.addEventListener('click', () => {
+        selectedId = Number(row.dataset.pid);
+        list.querySelectorAll('.replace-option').forEach((r) => r.classList.remove('replace-option-selected'));
+        row.classList.add('replace-option-selected');
+        const confirmBtn = document.getElementById('replaceConfirmBtn');
+        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Replace with ${row.dataset.name}`; }
+      });
+    });
+  }
+  renderList();
+  document.getElementById('replaceSearch').addEventListener('input', (e) => renderList(e.target.value));
+  document.getElementById('replaceCancelBtn').addEventListener('click', modal.close);
+  document.getElementById('replaceConfirmBtn').addEventListener('click', async () => {
+    if (!selectedId) return;
+    const btn = document.getElementById('replaceConfirmBtn');
+    btn.disabled = true;
+    btn.textContent = 'Replacing…';
+    try {
+      await window.api.replacePairPlayer({ leagueId, pairId, oldPlayerId, newPlayerId: selectedId });
+      modal.close();
+      leagueEditMode = false;
+      state.currentLeague = await window.api.getLeague(leagueId);
+      renderLeagueDetail();
+      toast('Partner replaced', 'success');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Replace';
+      toast(e.message || 'Failed to replace partner', 'error');
+    }
+  });
+}
+
+function renderWeekCardDoubles(week, league, adminMode = true, isCurrent = false) {
+  const summary = _weekSummary(_weekCounts(week));
+  const byes = week.byes || [];
+  const matchupsHTML = week.matchups.map((mu) => {
+    const divByes = byes.filter((b) => b.division_id === mu.division_id);
+    const byesHTML = divByes.length
+      ? `<div class="matchup-byes">Bye: ${divByes.map((b) => esc(b.pair_player1_name && b.pair_player2_name ? `${b.pair_player1_name} & ${b.pair_player2_name}` : b.player_name)).join(', ')}</div>` : '';
+    return `
+      <div class="matchup-block lg-group" data-division-id="${mu.division_id}">
+        <div class="matchup-title lg-group-title">${esc(mu.division_name)}</div>
+        <div class="lg-matches">
+          ${mu.matches.map((m) => renderMatchRowDoubles(m, league, adminMode)).join('')}
+        </div>
+        ${byesHTML}
+      </div>`;
+  }).join('');
+  return `
+    <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
+      <div class="week-header lg-week-header">
+        <div class="lg-week-lead">
+          <span class="lg-week-num">Week ${week.week_number}</span>
+          ${isCurrent ? '<span class="lg-thisweek">THIS WEEK</span>' : ''}
+        </div>
+        <span class="lg-week-date">${formatDate(week.date)}</span>
+        <span class="lg-week-summary">${summary}</span>
+        <svg class="week-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </div>
+      <div class="week-body lg-week-body">${matchupsHTML}</div>
+    </div>`;
+}
+
+// A doubles fixture: two pair units either side of "vs". Scoring writes the
+// usual player1/player2 score, with winner_id the winning pair's first player.
+function renderMatchRowDoubles(match, league, adminMode = true) {
+  const hasScore = match.player1_score != null && match.player2_score != null;
+  const p1Won = hasScore && match.player1_score > match.player2_score;
+  const p2Won = hasScore && match.player2_score > match.player1_score;
+  const myId = state.currentUser?.playerId;
+  const pairA = { player1_id: match.player1_id, player1_name: match.player1_name, player2_id: match.player1_partner_id, player2_name: match.player1_partner_name };
+  const pairB = { player1_id: match.player2_id, player1_name: match.player2_name, player2_id: match.player2_partner_id, player2_name: match.player2_partner_name };
+  const subsA = [match.sub1_id ? { id: match.sub1_id, name: match.sub1_name } : null, match.sub3_id ? { id: match.sub3_id, name: match.sub3_name } : null];
+  const subsB = [match.sub2_id ? { id: match.sub2_id, name: match.sub2_name } : null, match.sub4_id ? { id: match.sub4_id, name: match.sub4_name } : null];
+  const mine = _pairHas(pairA, myId) || _pairHas(pairB, myId)
+    || [match.sub1_id, match.sub2_id, match.sub3_id, match.sub4_id].includes(myId);
+
+  if (league?.courts?.length) _leagueCourtsCache.set(league.id, league.courts);
+  const leagueCourts = league?.courts || [];
+  const newCourtName = leagueCourts.length > 0 && match.court_id ? leagueCourts.find((c) => c.id === match.court_id)?.name : null;
+  const timingLabel = adminMode && newCourtName
+    ? `${newCourtName}${match.match_time ? ' · ' + match.match_time : ''}`
+    : (adminMode && league?.schedule_courts && match.court_number
+        ? `Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}`
+        : (match.match_time || ''));
+  const canEditTiming = adminMode && !match.skipped;
+  const timingAttrs = canEditTiming ? `
+    class="match-court-label timing-btn${timingLabel ? '' : ' timing-btn-empty'}"
+    data-match-id="${match.id}"
+    data-league-id="${league ? league.id : ''}"
+    data-match-time="${match.match_time || ''}"
+    data-court-number="${match.court_number || ''}"
+    data-court-id="${match.court_id || ''}"
+    data-schedule-courts="${league && league.schedule_courts ? '1' : '0'}"
+    data-num-courts="${league ? league.num_courts : 2}"` : `class="match-court-label"`;
+  const courtInfo = (canEditTiming || timingLabel)
+    ? `<span ${timingAttrs}>${timingLabel || 'Set time'}</span>`
+    : `<span class="match-court-label"></span>`;
+
+  const pairUnit = (pr, subs, won, lost) => `
+    <span class="match-pair match-player${won ? ' winner' : ''}${lost ? ' loser' : ''}">
+      ${pairHTML(pr, { size: 'fix', subs })}
+      ${won ? '<span class="lg-win-tag">WIN</span>' : ''}
+    </span>`;
+  const playersHTML = `
+    <span class="lg-players lg-players--dbl">
+      ${pairUnit(pairA, subsA, p1Won, p2Won)}
+      <span class="match-vs">vs</span>
+      ${pairUnit(pairB, subsB, p2Won, p1Won)}
+    </span>`;
+
+  if (match.skipped) {
+    return `
+      <div class="match-row lg-match lg-match--dbl lg-match-skipped" data-match-id="${match.id}" data-division-id="${match.division_id}">
+        <span class="match-court-label"></span>
+        ${playersHTML}
+        <div class="match-actions">
+          <span class="match-skipped-label">Skipped</span>
+          ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn lg-ghost" data-match-id="${match.id}">Undo</button>` : ''}
+        </div>
+      </div>`;
+  }
+
+  let scoreSection;
+  if (hasScore) {
+    scoreSection = `<div class="match-score">
+         <span class="score-display">${match.player1_score}–${match.player2_score}</span>
+         ${adminMode ? `<button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
+           data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="false">Edit</button>` : ''}
+       </div>`;
+  } else if (adminMode) {
+    scoreSection = `<div class="match-score">
+         ${bo5ScoreInputHTML()}
+         <button class="btn btn-success btn-sm score-save-btn lg-save"
+           data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="true">Save</button>
+       </div>`;
+  } else {
+    scoreSection = `<div class="match-score"><span class="lg-notplayed">Not played</span></div>`;
+  }
+
+  return `
+    <div class="match-row lg-match lg-match--dbl${hasScore ? ' lg-match-scored' : ''}${mine ? ' lg-match--mine' : ''}" data-match-id="${match.id}" data-division-id="${match.division_id}">
+      ${courtInfo}
+      ${playersHTML}
+      <div class="match-actions">
+        ${scoreSection}
+        ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn lg-ghost"
+          data-match-id="${match.id}"
+          data-league-id="${league ? league.id : ''}"
+          data-p1-id="${match.player1_id}" data-p1-name="${esc(match.player1_name)}"
+          data-p2-id="${match.player2_id}" data-p2-name="${esc(match.player2_name)}"
+          data-p1b-id="${match.player1_partner_id}" data-p1b-name="${esc(match.player1_partner_name || '')}"
+          data-p2b-id="${match.player2_partner_id}" data-p2b-name="${esc(match.player2_partner_name || '')}"
+          data-sub1-id="${match.sub1_id || ''}" data-sub1-name="${esc(match.sub1_name || '')}"
+          data-sub2-id="${match.sub2_id || ''}" data-sub2-name="${esc(match.sub2_name || '')}"
+          data-sub3-id="${match.sub3_id || ''}" data-sub3-name="${esc(match.sub3_name || '')}"
+          data-sub4-id="${match.sub4_id || ''}" data-sub4-name="${esc(match.sub4_name || '')}">Sub</button>` : ''}
+      </div>
+    </div>`;
 }
 
 // ===== STANDINGS =====
@@ -716,6 +1066,7 @@ function openReplacePlayerModal(leagueId, oldPlayerId, oldPlayerName) {
 }
 
 function renderWeekCard(week, league, adminMode = true, isCurrent = false) {
+  if (league.setup_type === 'doubles') return renderWeekCardDoubles(week, league, adminMode, isCurrent);
   if (league.setup_type === 'modern') return renderWeekCardModern(week, league, adminMode, isCurrent);
 
   const summary = _weekSummary(_weekCounts(week));
@@ -936,8 +1287,8 @@ async function saveMatchScore(btn) {
     // Toggle rather than reassign className: the spans also carry
     // nav-player-link and their match-p1/p2 hooks, which a reassignment wiped.
     const playerSpans = row.querySelectorAll('.match-player');
-    playerSpans[0].classList.remove('winner');
-    playerSpans[1].classList.remove('winner');
+    playerSpans[0].classList.remove('winner', 'loser');
+    playerSpans[1].classList.remove('winner', 'loser');
     row.classList.remove('lg-match-scored');
     row.querySelector('.match-score').innerHTML = `
       ${bo5ScoreInputHTML()}
@@ -967,6 +1318,9 @@ async function saveMatchScore(btn) {
   const playerSpans = row.querySelectorAll('.match-player');
   playerSpans[0].classList.toggle('winner', winnerId === p1Id);
   playerSpans[1].classList.toggle('winner', winnerId === p2Id);
+  // A doubles pair that lost dims its avatars.
+  playerSpans[0].classList.toggle('loser', winnerId !== p1Id);
+  playerSpans[1].classList.toggle('loser', winnerId !== p2Id);
   // The row itself has to move to its scored state, or it keeps the unscored
   // background and the names never dim.
   row.classList.add('lg-match-scored');
@@ -1205,6 +1559,11 @@ async function openSubModal(btn) {
   const sub1Name  = btn.dataset.sub1Name || '';
   const sub2Id    = btn.dataset.sub2Id ? Number(btn.dataset.sub2Id) : null;
   const sub2Name  = btn.dataset.sub2Name || '';
+  // Doubles: the two partners are slots of their own; either can be subbed.
+  const doublesSlots = btn.dataset.p1bId ? [
+    { slot: 3, id: Number(btn.dataset.p1bId), name: btn.dataset.p1bName, subId: btn.dataset.sub3Id ? Number(btn.dataset.sub3Id) : null, subName: btn.dataset.sub3Name || '' },
+    { slot: 4, id: Number(btn.dataset.p2bId), name: btn.dataset.p2bName, subId: btn.dataset.sub4Id ? Number(btn.dataset.sub4Id) : null, subName: btn.dataset.sub4Name || '' },
+  ] : [];
 
   // Load all players for the picker
   const allPlayers = state.players.length ? state.players : await window.api.getPlayers();
@@ -1233,7 +1592,9 @@ async function openSubModal(btn) {
       Select a substitute for either player. Choose "No sub" to remove an existing sub.
     </p>
     ${subRowHTML(1, p1Id, p1Name, sub1Id, sub1Name)}
+    ${doublesSlots[0] ? subRowHTML(3, doublesSlots[0].id, doublesSlots[0].name, doublesSlots[0].subId, doublesSlots[0].subName) : ''}
     ${subRowHTML(2, p2Id, p2Name, sub2Id, sub2Name)}
+    ${doublesSlots[1] ? subRowHTML(4, doublesSlots[1].id, doublesSlots[1].name, doublesSlots[1].subId, doublesSlots[1].subName) : ''}
     <div class="form-group form-group-check" id="subRemainingGroup">
       <label class="check-label">
         <input type="checkbox" id="subRemaining" checked>
@@ -1251,22 +1612,27 @@ async function openSubModal(btn) {
   const sel2 = document.querySelector('.sub-select[data-slot="2"]');
   if (sub1Id) sel1.value = sub1Id;
   if (sub2Id) sel2.value = sub2Id;
+  const sels = [sel1, sel2];
+  for (const d of doublesSlots) {
+    const sel = document.querySelector(`.sub-select[data-slot="${d.slot}"]`);
+    if (d.subId) sel.value = d.subId;
+    sels.push(sel);
+  }
 
   // Show "apply remaining" only when a sub is actually selected
   const updateRemainingVisibility = () => {
-    const anySubSelected = sel1.value !== '' || sel2.value !== '';
+    const anySubSelected = sels.some((sel) => sel.value !== '');
     document.getElementById('subRemainingGroup').style.display = anySubSelected ? '' : 'none';
   };
   updateRemainingVisibility();
-  sel1.addEventListener('change', updateRemainingVisibility);
-  sel2.addEventListener('change', updateRemainingVisibility);
+  sels.forEach((sel) => sel.addEventListener('change', updateRemainingVisibility));
 
   document.getElementById('fCancel').addEventListener('click', modal.close);
   document.getElementById('fSubmit').addEventListener('click', async () => {
     const applyRemaining = document.getElementById('subRemaining').checked;
     const saves = [];
 
-    for (const sel of [sel1, sel2]) {
+    for (const sel of sels) {
       const origId = Number(sel.dataset.origId);
       const subVal = sel.value ? Number(sel.value) : null;
 
