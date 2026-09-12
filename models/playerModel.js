@@ -216,6 +216,101 @@ function getPickupMatchHistory(id) {
   `).all({ id: numId });
 }
 
+// ===== DOUBLES =====
+// A player's doubles matches, kept apart from the singles history on purpose:
+// the profile shows them in their own tab and never mixes the two records.
+
+const _DBL_SELECT = `
+  SELECT m.id, m.type, ${matchModel.SOURCE_OF_TYPE} AS source, m.status, m.played_at,
+         m.player1_score, m.player2_score, ${matchModel.WON_SIDE} AS won_side,
+         ${matchModel.EFF_P1} AS s1a, ${matchModel.EFF_P1B} AS s1b,
+         ${matchModel.EFF_P2} AS s2a, ${matchModel.EFF_P2B} AS s2b,
+         m.scheduled_date, m.scheduled_time, m.court_id, c.name AS court_name,
+         w.date AS week_date, w.week_number,
+         l.id AS league_id, l.name AS league_name, d.name AS division_name
+  FROM matches m ${matchModel.DBL_JOIN}
+  LEFT JOIN courts c    ON c.id = m.court_id
+  LEFT JOIN weeks w     ON w.id = m.week_id
+  LEFT JOIN leagues l   ON l.id = m.league_id
+  LEFT JOIN divisions d ON d.id = m.division_id
+`;
+
+function _namesFor(rows) {
+  const ids = [...new Set(rows.flatMap((r) => [r.s1a, r.s1b, r.s2a, r.s2b]).filter(Boolean))];
+  if (!ids.length) return {};
+  const people = getDB().prepare(`SELECT id, name, photo_path FROM players WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids);
+  return Object.fromEntries(people.map((p) => [p.id, p]));
+}
+
+// Which side the player is on, their partner, and the two opponents.
+function _sidesFor(row, id, names) {
+  const person = (pid) => ({ id: pid, name: names[pid]?.name || null, photo_path: names[pid]?.photo_path || null });
+  const onSide1 = row.s1a === id || row.s1b === id;
+  const mine = onSide1 ? [row.s1a, row.s1b] : [row.s2a, row.s2b];
+  const theirs = onSide1 ? [row.s2a, row.s2b] : [row.s1a, row.s1b];
+  return {
+    mySide: onSide1 ? 1 : 2,
+    partner: person(mine.find((x) => x !== id)),
+    opponents: theirs.map(person),
+  };
+}
+
+/** Completed doubles matches for one player, newest first. */
+function getPlayerDoublesHistory(id) {
+  const numId = Number(id);
+  const rows = getDB().prepare(`${_DBL_SELECT}
+    WHERE ${matchModel.COUNTS_DOUBLES}
+      AND @id IN (${matchModel.EFF_P1}, ${matchModel.EFF_P1B}, ${matchModel.EFF_P2}, ${matchModel.EFF_P2B})
+    ORDER BY m.played_at DESC, m.id DESC
+  `).all({ id: numId });
+  const names = _namesFor(rows);
+  return rows.map((r) => {
+    const { mySide, partner, opponents } = _sidesFor(r, numId, names);
+    return {
+      id: r.id,
+      source: r.source,
+      played_at: r.played_at,
+      result: r.won_side === mySide ? 'W' : 'L',
+      my_score: mySide === 1 ? r.player1_score : r.player2_score,
+      their_score: mySide === 1 ? r.player2_score : r.player1_score,
+      partner,
+      opponents,
+      league_id: r.league_id,
+      league_name: r.league_name,
+      week_number: r.week_number,
+      division_name: r.division_name,
+    };
+  });
+}
+
+/** Doubles league fixtures still to be played, soonest first. */
+function getPlayerDoublesUpcoming(id) {
+  const numId = Number(id);
+  const rows = getDB().prepare(`${_DBL_SELECT}
+    WHERE ${matchModel.DOUBLES} AND m.type = 'league'
+      AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
+      AND @id IN (${matchModel.EFF_P1}, ${matchModel.EFF_P1B}, ${matchModel.EFF_P2}, ${matchModel.EFF_P2B})
+    ORDER BY w.date ASC, m.scheduled_time ASC
+  `).all({ id: numId });
+  const names = _namesFor(rows);
+  return rows.map((r) => {
+    const { partner, opponents } = _sidesFor(r, numId, names);
+    return {
+      id: r.id,
+      week_date: r.week_date || r.scheduled_date,
+      match_time: r.scheduled_time,
+      court_id: r.court_id,
+      court_name: r.court_name,
+      partner,
+      opponents,
+      league_id: r.league_id,
+      league_name: r.league_name,
+      week_number: r.week_number,
+      division_name: r.division_name,
+    };
+  });
+}
+
 function getPlayerUpcomingMatches(id) {
   const numId = Number(id);
   return getDB().prepare(`
@@ -287,4 +382,5 @@ function getPlayerUpcomingMatches(id) {
 module.exports = {
   getAllPlayers, getPlayerById, addPlayer, updatePlayer, deletePlayer, setPlayerPhoto, setMembership, patchPlayers,
   getPlayerMatchHistory, getPickupMatchHistory, getPlayerUpcomingMatches, getAllPlayerRecords,
+  getPlayerDoublesHistory, getPlayerDoublesUpcoming,
 };

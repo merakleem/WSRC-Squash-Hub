@@ -78,6 +78,22 @@ async function main() {
     const hist = get('ann', '/api/players/1/history');
     ok('singles history and record ignore doubles', hist.history.length === 1 && hist.wins === 1 && hist.losses === 0, `${hist.history.length} rows, ${hist.wins}-${hist.losses}`);
 
+    console.log('\nTHE PROFILE PAYLOAD');
+    const prof = get('ann', '/api/players/1/doubles');
+    ok('two doubles matches in Ann\'s history, newest first', prof.history.length === 2 && prof.history[0].id > prof.history[1].id, JSON.stringify(prof.history.map((h) => h.id)));
+    const first = prof.history.find((h) => h.id === matchId);
+    ok('a row says who she played with and against', first.partner.id === 2 && first.opponents.map((o) => o.id).sort().join() === '3,4', JSON.stringify(first));
+    ok('with her result and score from her side', first.result === 'W' && first.my_score === 3 && first.their_score === 1);
+    const lost = prof.history.find((h) => h.id !== matchId);
+    ok('a loss reads as one', lost.result === 'L' && lost.my_score === 1 && lost.their_score === 3, JSON.stringify(lost));
+    ok('each row carries its season and her own rating change', prof.history.every((h) => h.season_key && Number.isInteger(h.rating_change)) && first.rating_change > 0 && lost.rating_change < 0, JSON.stringify(prof.history.map((h) => [h.season_key, h.rating_change])));
+    ok('it is a ladder row, not a league one', first.source === 'pickup' && first.league_name === null);
+    ok('partners are summed per season', prof.partners.length === 1 && prof.partners[0].id === 2 && prof.partners[0].wins === 1 && prof.partners[0].losses === 1 && prof.partners[0].context === 'Doubles ladder', JSON.stringify(prof.partners));
+    ok('the ladder block matches the ladder', prof.ladder.position === dbl.rows.find((x) => x.id === 1).position && prof.ladder.rating === dbl.rows.find((x) => x.id === 1).rating && prof.ladder.size === 5, JSON.stringify(prof.ladder));
+    ok('no doubles fixtures upcoming', Array.isArray(prof.upcoming) && prof.upcoming.length === 0);
+    const bystander = get('ann', '/api/players/5/doubles');
+    ok('a player with one match has one row and one partner', bystander.history.length === 1 && bystander.partners.length === 1 && bystander.partners[0].id === 3, JSON.stringify(bystander.partners));
+
     console.log('\nDELETING');
     r = send('ann', 'DELETE', `/api/matches/doubles/${matchId}`);
     ok('a player cannot delete', r.status === 403, String(r.status));

@@ -147,6 +147,45 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   });
 }));
 
+// Everything the profile's Doubles tab shows. A separate payload from the
+// singles history, so the two records are never merged by accident.
+router.get('/players/:id/doubles', wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!playerModel.getPlayerById(id)) return res.status(404).json({ error: 'Player not found' });
+  const settings = seasonModel.getSettings();
+  const deltas = ladderModel.getPlayerDoublesRatingDeltas(id);
+
+  const history = playerModel.getPlayerDoublesHistory(id).map((m) => ({
+    ...m,
+    season_key: seasonModel.seasonKeyForDate(m.played_at, settings),
+    ...(deltas[m.id] === undefined ? {} : { rating_change: deltas[m.id] }),
+  }));
+  const upcoming = playerModel.getPlayerDoublesUpcoming(id);
+
+  // Partners, one entry per partner per season, with the record together and
+  // the context they played in most.
+  const byKey = new Map();
+  for (const m of history) {
+    if (!m.partner?.id) continue;
+    const key = `${m.partner.id}|${m.season_key}`;
+    if (!byKey.has(key)) byKey.set(key, { id: m.partner.id, name: m.partner.name, photo_path: m.partner.photo_path, season_key: m.season_key, wins: 0, losses: 0, matches: 0, contexts: new Map() });
+    const e = byKey.get(key);
+    e.matches++;
+    e[m.result === 'W' ? 'wins' : 'losses']++;
+    const ctx = m.source === 'league' ? `${m.league_name}${m.division_name ? ` · ${m.division_name} partner` : ''}` : 'Doubles ladder';
+    e.contexts.set(ctx, (e.contexts.get(ctx) || 0) + 1);
+  }
+  const partners = [...byKey.values()]
+    .map(({ contexts, ...e }) => ({ ...e, context: [...contexts.entries()].sort((a, b) => b[1] - a[1])[0][0] }))
+    .sort((a, b) => b.matches - a.matches || a.name.localeCompare(b.name));
+
+  const stats = ladderModel.getPlayerDoublesLadderStats(id);
+  res.json({
+    ladder: { position: stats.position, size: stats.ladder_size, rating: stats.rating, rank_change: stats.rank_change, unranked: stats.unranked, season_name: stats.season_name, frozen: stats.frozen },
+    history, upcoming, partners,
+  });
+}));
+
 router.post('/players', requireAdmin, wrap(async (req, res) => {
   const player = await playerService.addPlayer(req.body);
   res.json(player);

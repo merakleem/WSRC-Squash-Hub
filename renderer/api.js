@@ -76,6 +76,7 @@ if (typeof window !== 'undefined' && !window.api) {
     deletePickupMatch: (id) => _apiFetch('DELETE', `/api/matches/pickup/${id}`),
     logDoublesMatch:    (d)  => _apiFetch('POST',   '/api/matches/doubles', d),
     deleteDoublesMatch: (id) => _apiFetch('DELETE', `/api/matches/doubles/${id}`),
+    getPlayerDoubles:   (id)     => _apiFetch('GET',    `/api/players/${id}/doubles`),
     getDoublesLadderForSeason: (season) => _apiFetch('GET', `/api/ladder/doubles/season${season ? `?season=${encodeURIComponent(season)}` : ''}`),
     getActivity:        (days) => _apiFetch('GET', `/api/activity${days ? `?days=${days}` : ''}`),
     getCourts:          ()        => _apiFetch('GET',    '/api/courts'),
