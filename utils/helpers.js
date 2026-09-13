@@ -7,7 +7,7 @@
 function generateRoundRobin(teams) {
   if (teams.length < 2) return [];
 
-  let list = [...teams];
+  const list = [...teams];
 
   if (list.length % 2 === 1) {
     list.push('BYE');

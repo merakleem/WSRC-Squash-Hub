@@ -82,8 +82,8 @@ const REPORTABLE = [
 ];
 window.api = {
   getMatchCard: async (id) => { calls.push(['getMatchCard', String(id)]); return CARDS[Number(id)] || null; },
-  getReportable: async () => { calls.push(['getReportable']); return REPORTABLE.filter(r => !r._done); },
-  reportMatchScore: async (id, d) => { calls.push(['reportMatchScore', id, d]); REPORTABLE.find(r => r.id === Number(id))._done = true; return { ok: true }; },
+  getReportable: async () => { calls.push(['getReportable']); return REPORTABLE.filter((r) => !r._done); },
+  reportMatchScore: async (id, d) => { calls.push(['reportMatchScore', id, d]); REPORTABLE.find((r) => r.id === Number(id))._done = true; return { ok: true }; },
   getPlayers: async () => [{ id: ME, name: 'James Whitfield' }],
 };
 window.openPlayerProfile = (id) => calls.push(['openPlayerProfile', id]);
@@ -97,7 +97,7 @@ for (const [src, dst] of [
 ]) {
   let code = readFileSync(`${REPO}/${src}`, 'utf8');
   code = code.replace(/'\.\.?\/state\.js'/, "'./state.mjs'").replace(/'\.\.?\/utils\.js'/, "'./utils.mjs'")
-             .replace("'./players.js'", "'./players-stub.mjs'");
+    .replace("'./players.js'", "'./players-stub.mjs'");
   writeFileSync(`${HERE}${dst}`, code);
 }
 writeFileSync(`${HERE}players-stub.mjs`, 'export function openPickupGameModal(){ globalThis.__pickupOpened = true; }\n');
@@ -115,18 +115,18 @@ const ok = (l, c, e = '') => { console.log(`  ${c ? 'PASS' : 'FAIL'}  ${l}${e ? 
 const $  = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const click = (el) => el.dispatchEvent(new window.Event('click', { bubbles: true }));
-const settle = () => new Promise(r => setTimeout(r, 10));
+const settle = () => new Promise((r) => setTimeout(r, 10));
 
 console.log('\nMATCH CARD — played');
 await card.openMatchCard(100); await settle();
 ok('the band carries the competition', $('.mc-kicker')?.textContent === 'Autumn League · Division 2 · Week 3');
 ok('the card has no photo band', !$('.mc-band [style]') && !($('.mc-band')?.getAttribute('style')));
-ok('both players are shown', $$('.mc-name').map(e => e.textContent).join('|') === 'Sofia Duarte|James Whitfield');
+ok('both players are shown', $$('.mc-name').map((e) => e.textContent).join('|') === 'Sofia Duarte|James Whitfield');
 ok('ladder position and rating in the meta', $('.mc-meta')?.textContent === '#4 on ladder · 1512');
 ok('the score replaces VS', $('.mc-score')?.textContent === '3–1' && !$('.mc-vs'));
 ok('and is marked final', $('.mc-final')?.textContent === 'Final');
 ok('the winner is named', $$('.mc-winner').length === 1);
-ok('rating changes show with sign', $$('.mc-delta').map(e => e.textContent).join(' ') === '+7 −7', $$('.mc-delta').map(e=>e.textContent).join(' '));
+ok('rating changes show with sign', $$('.mc-delta').map((e) => e.textContent).join(' ') === '+7 −7', $$('.mc-delta').map((e)=>e.textContent).join(' '));
 ok('the strip says when it was played', /^Played Wednesday, August 26$/.test($('.mc-strip-title')?.textContent || ''), $('.mc-strip-title')?.textContent);
 ok('the signed-in player gets the you ring', $('.mc-avatar--you') !== null);
 ok('head to head names the leader', $('.mc-h2h-lead')?.textContent === 'Sofia leads 4–2');
@@ -158,8 +158,8 @@ ok('a fresh card opens with the record collapsed again', !$('.mc-h2h--open'));
 ok('submit score is offered', !!$('#mcSubmit'));
 calls.length = 0;
 click($('#mcSubmit'));
-ok('submit hands over to the report page with the match', 
-  JSON.stringify(calls.find(c => c[0] === 'navigate')) === JSON.stringify(['navigate','reportScore',{matchId:101}]),
+ok('submit hands over to the report page with the match',
+  JSON.stringify(calls.find((c) => c[0] === 'navigate')) === JSON.stringify(['navigate','reportScore',{ matchId:101 }]),
   JSON.stringify(calls));
 
 console.log('\nMATCH CARD — unscheduled tournament, first meeting');
@@ -180,12 +180,12 @@ ok('kicker reads Ladder match', $('.mc-kicker')?.textContent === 'Ladder match')
 ok('a ladder match of mine offers submit', !!$('#mcSubmit'));
 calls.length = 0;
 click($('.mc-name'));
-ok('a name opens that profile', calls.some(c => c[0] === 'openPlayerProfile' && c[1] === ME));
+ok('a name opens that profile', calls.some((c) => c[0] === 'openPlayerProfile' && c[1] === ME));
 
 console.log('\nMATCH CARD — prefixed ids');
 calls.length = 0;
 await card.openMatchCard('m_100'); await settle();
-ok('a schedule-style id is stripped before fetching', calls.some(c => c[0] === 'getMatchCard' && c[1] === '100'));
+ok('a schedule-style id is stripped before fetching', calls.some((c) => c[0] === 'getMatchCard' && c[1] === '100'));
 
 console.log('\nREPORT SCORE — the page');
 await rs.renderReportScore(); await settle();
@@ -204,22 +204,22 @@ ok('it opens the enter-a-match modal', globalThis.__pickupOpened === true);
 console.log('\nREPORT SCORE — the form');
 click($$('.rs-row [data-report]')[0]); await settle();
 ok('the form opens on that match', $$('.rs-winner').length === 2);
-ok('games are disabled until a winner is picked', $$('.rs-game').every(b => b.disabled));
+ok('games are disabled until a winner is picked', $$('.rs-game').every((b) => b.disabled));
 ok('and it says so', $('.rs-hint')?.textContent === 'Pick the winner first');
 ok('submit is disabled', $('#rsSubmit')?.disabled === true);
 click($$('.rs-winner')[0]);
 ok('picking a winner marks that card', $$('.rs-winner')[0].classList.contains('rs-winner--on'));
-ok('games become available', $$('.rs-game').every(b => !b.disabled));
+ok('games become available', $$('.rs-game').every((b) => !b.disabled));
 ok('the hint names the loser', $('.rs-hint')?.textContent === 'How many did Priya take?', $('.rs-hint')?.textContent);
-ok('3–0 is offered as a real option', $$('.rs-game-score').map(e => e.textContent).join(' ') === '3–0 3–1 3–2');
+ok('3–0 is offered as a real option', $$('.rs-game-score').map((e) => e.textContent).join(' ') === '3–0 3–1 3–2');
 click($$('.rs-game')[0]);   // 3-0: the games count is 0, which must still count as chosen
 ok('a clean sweep completes the form', $('#rsSubmit')?.disabled === false);
 ok('the summary reads it back', /beat Priya Raman 3–0/.test($('.rs-summary')?.textContent || ''), $('.rs-summary')?.textContent.trim());
 calls.length = 0;
 click($('#rsSubmit')); await settle();
-const sent = calls.find(c => c[0] === 'reportMatchScore');
+const sent = calls.find((c) => c[0] === 'reportMatchScore');
 ok('it sends my score and theirs', sent && sent[1] === 101 && sent[2].myScore === 3 && sent[2].theirScore === 0, JSON.stringify(sent));
-ok('the list reloads afterwards', calls.filter(c => c[0] === 'getReportable').length >= 1);
+ok('the list reloads afterwards', calls.filter((c) => c[0] === 'getReportable').length >= 1);
 ok('and the reported match is gone', $$('.rs-row').length === 1);
 
 console.log('\nREPORT SCORE — arriving from a card');
@@ -229,7 +229,7 @@ ok('the named match opens straight into its form', $$('.rs-winner').length === 2
 ok('showing that opponent', /Sofia Duarte/.test($('#modalTitle')?.textContent || ''), $('#modalTitle')?.textContent);
 
 console.log('\nREPORT SCORE — empty');
-REPORTABLE.forEach(r => { r._done = true; });
+REPORTABLE.forEach((r) => { r._done = true; });
 state.reportMatchId = null;
 await rs.renderReportScore(); await settle();
 ok('the empty state replaces the list', !$('.rs-row') && !!$('.rs-empty'));

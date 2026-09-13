@@ -119,7 +119,7 @@ function updateSettings({ season_start_md }) {
   const db = getDB();
   if (season_start_md) {
     db.prepare(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value'
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
     ).run('season_start_md', season_start_md);
   }
   return getAllSeasons();

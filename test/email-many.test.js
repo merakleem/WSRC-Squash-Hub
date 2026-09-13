@@ -43,7 +43,7 @@ suite('sending many emails', async ({ ok }) => {
   console.log('\nA RATE LIMIT IS WAITED OUT AND RETRIED');
   posts.length = 0;
   let calls = 0;
-  global.fetch = async (url, opts) => {
+  global.fetch = async (url, _opts) => {
     calls++;
     posts.push({ url, at: Date.now() });
     if (calls === 1) return { ok: false, status: 429, headers: { get: () => '0' }, json: async () => ({ message: 'Too many requests' }) };

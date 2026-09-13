@@ -45,7 +45,7 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
     for (const { playerId, rank } of divisions[d]) {
       run(
         'INSERT INTO league_players (league_id, player_id, skill_rank, team_id, division_id) VALUES (?, ?, ?, NULL, ?)',
-        [leagueId, playerId, rank, divisionIds[d]]
+        [leagueId, playerId, rank, divisionIds[d]],
       );
     }
   }
@@ -101,10 +101,10 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
     weekMatches.sort((a, b) => a.level - b.level);
     for (let i = 0; i < weekMatches.length; i++) {
       const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
-        // Creating a league is creating scheduled matches. Each row carries its
-        // own league, week, date, court and time, so every later view finds it
-        // by filtering matches rather than walking back up through the matchup.
-        run(
+      // Creating a league is creating scheduled matches. Each row carries its
+      // own league, week, date, court and time, so every later view finds it
+      // by filtering matches rather than walking back up through the matchup.
+      run(
           `INSERT INTO matches
              (type, status, league_id, week_id, matchup_id, division_id,
               player1_id, player2_id, scheduled_date, scheduled_time, court_id, court_number)
@@ -120,8 +120,8 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
             time,
             courtId:     useNewCourts ? courtIds[i % effectiveCourts] : null,
             courtNumber: useNewCourts ? null : (i % effectiveCourts) + 1,
-          }
-        );
+          },
+      );
     }
   }
 
@@ -175,7 +175,7 @@ function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blacko
     const [a, b] = playerIds.map(Number);
     const result = run(
       'INSERT INTO league_pairs (league_id, division_id, player1_id, player2_id, skill_rank) VALUES (?, ?, ?, ?, ?)',
-      [leagueId, divisionIds[d], a, b, rank]
+      [leagueId, divisionIds[d], a, b, rank],
     );
     for (const pid of [a, b]) {
       run('INSERT INTO league_players (league_id, player_id, skill_rank, team_id, division_id) VALUES (?, ?, ?, NULL, ?)',
@@ -242,7 +242,7 @@ function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blacko
           date: weekDate, time,
           courtId: useNewCourts ? courtIds[i % effectiveCourts] : null,
           courtNumber: useNewCourts ? null : (i % effectiveCourts) + 1,
-        }
+        },
       );
     }
   }
@@ -267,7 +267,7 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
   const total = numTeams * numDivisions;
   if (total !== rankedPlayers.length) {
     throw new Error(
-      `${numTeams} teams × ${numDivisions} divisions = ${total} players needed, but ${rankedPlayers.length} were provided.`
+      `${numTeams} teams × ${numDivisions} divisions = ${total} players needed, but ${rankedPlayers.length} were provided.`,
     );
   }
 
@@ -286,7 +286,7 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
     const teamName = (teamNames[i] && teamNames[i].trim()) || `Team ${TEAM_LABELS[i]}`;
     const result = run(
       'INSERT INTO teams (league_id, name, team_order) VALUES (?, ?, ?)',
-      [leagueId, teamName, i + 1]
+      [leagueId, teamName, i + 1],
     );
     teamIds.push(result.lastID);
   }
@@ -296,7 +296,7 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
   for (let i = 0; i < numDivisions; i++) {
     const result = run(
       'INSERT INTO divisions (league_id, name, level) VALUES (?, ?, ?)',
-      [leagueId, `Division ${i + 1}`, i + 1]
+      [leagueId, `Division ${i + 1}`, i + 1],
     );
     divisionIds.push(result.lastID);
   }
@@ -312,7 +312,7 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
 
     run(
       'INSERT INTO league_players (league_id, player_id, skill_rank, team_id, division_id) VALUES (?, ?, ?, ?, ?)',
-      [leagueId, playerId, rank, teamIds[teamIndex], divisionIds[divisionIndex]]
+      [leagueId, playerId, rank, teamIds[teamIndex], divisionIds[divisionIndex]],
     );
   }
 
@@ -336,7 +336,7 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
 
     const weekResult = run(
       'INSERT INTO weeks (league_id, week_number, date) VALUES (?, ?, ?)',
-      [leagueId, r + 1, weekDate]
+      [leagueId, r + 1, weekDate],
     );
     const weekId = weekResult.lastID;
 
@@ -346,12 +346,12 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
       if (matchup.bye) {
         run(
           'INSERT INTO team_matchups (week_id, bye_team_id) VALUES (?, ?)',
-          [weekId, matchup.bye]
+          [weekId, matchup.bye],
         );
       } else {
         const matchupResult = run(
           'INSERT INTO team_matchups (week_id, team1_id, team2_id) VALUES (?, ?, ?)',
-          [weekId, matchup.team1, matchup.team2]
+          [weekId, matchup.team1, matchup.team2],
         );
         const matchupId = matchupResult.lastID;
 
@@ -359,11 +359,11 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
           const divId = divisionIds[d];
           const p1 = get(
             'SELECT player_id FROM league_players WHERE league_id = ? AND team_id = ? AND division_id = ?',
-            [leagueId, matchup.team1, divId]
+            [leagueId, matchup.team1, divId],
           );
           const p2 = get(
             'SELECT player_id FROM league_players WHERE league_id = ? AND team_id = ? AND division_id = ?',
-            [leagueId, matchup.team2, divId]
+            [leagueId, matchup.team2, divId],
           );
           if (p1 && p2) {
             weekMatches.push({ matchupId, divId, level: d + 1, p1Id: p1.player_id, p2Id: p2.player_id });
@@ -389,10 +389,10 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
       const slotIdx  = Math.floor(i / effectiveCourts);
       const time = addMinutes(matchStartTime, slotIdx * slotMinutes);
 
-        // Creating a league is creating scheduled matches. Each row carries its
-        // own league, week, date, court and time, so every later view finds it
-        // by filtering matches rather than walking back up through the matchup.
-        run(
+      // Creating a league is creating scheduled matches. Each row carries its
+      // own league, week, date, court and time, so every later view finds it
+      // by filtering matches rather than walking back up through the matchup.
+      run(
           `INSERT INTO matches
              (type, status, league_id, week_id, matchup_id, division_id,
               player1_id, player2_id, scheduled_date, scheduled_time, court_id, court_number)
@@ -408,8 +408,8 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
             time,
             courtId:     useNewCourts ? courtIds[courtIdx] : null,
             courtNumber: useNewCourts ? null : courtIdx + 1,
-          }
-        );
+          },
+      );
     }
   }
 

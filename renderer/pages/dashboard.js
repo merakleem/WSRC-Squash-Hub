@@ -388,8 +388,7 @@ export async function renderClubActivity() {
 // browsers without supportedValuesOf get a short list of plausible zones.
 function _timezoneOptionsHTML(current) {
   let zones;
-  try { zones = Intl.supportedValuesOf('timeZone'); }
-  catch (_) {
+  try { zones = Intl.supportedValuesOf('timeZone'); } catch (_) {
     zones = ['America/Winnipeg', 'America/Toronto', 'America/Vancouver', 'America/Edmonton',
       'America/Regina', 'America/Halifax', 'America/St_Johns', 'UTC'];
   }
@@ -911,7 +910,7 @@ function _courtStatus(court, slots, nowMins) {
   }
 
   const courtSlots = slots.filter((s) =>
-    s.courtId === court.id || (s.courtIds && s.courtIds.includes(court.id))
+    s.courtId === court.id || (s.courtIds && s.courtIds.includes(court.id)),
   ).map((s) => ({ ...s, _startMins: _parseTimeMins(s.startTime) }))
     .filter((s) => s._startMins !== null);
 
@@ -1098,18 +1097,6 @@ export async function renderDashboard() {
     const parts = d.slice(0, 10).split('-').map(Number);
     return new Date(parts[0], parts[1] - 1, parts[2])
       .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  }
-
-  function countdownLabel(dStr, tStr) {
-    if (!dStr) return null;
-    const base = new Date(dStr + 'T' + (tStr || '12:00') + ':00');
-    const diff = base - new Date();
-    if (diff <= 0) return 'Today';
-    const days = Math.floor(diff / 86400000);
-    const hrs = Math.floor((diff % 86400000) / 3600000);
-    if (days > 0) return `In ${days}d ${hrs}h`;
-    const mins = Math.floor((diff % 3600000) / 60000);
-    return `In ${hrs}h ${mins}m`;
   }
 
   // Hero card (full-width, card-styled, left/right layout)

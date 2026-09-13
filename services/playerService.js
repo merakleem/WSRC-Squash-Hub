@@ -15,7 +15,7 @@ function _checkEmailUnique(email, excludeId = null) {
   if (!email || !email.trim()) return;
   const db = getDB();
   const existing = db.prepare(
-    'SELECT id, name FROM players WHERE LOWER(email) = LOWER(?) AND id != COALESCE(?, -1)'
+    'SELECT id, name FROM players WHERE LOWER(email) = LOWER(?) AND id != COALESCE(?, -1)',
   ).get(email.trim(), excludeId);
   if (existing) throw _validationError(`Email is already used by ${existing.name}`);
 }

@@ -50,7 +50,7 @@ const { state } = await import('../renderer/state.js');
 state.currentUser = { role: 'user', playerId: 7, name: 'Hannah Reid' };
 state.players = P;
 state.page = 'ladder';
-const players = await import('../renderer/pages/players.js');
+const players = await import('../renderer/pages/ladderMatch.js');
 const { renderLadder } = await import('../renderer/pages/ladder.js');
 window.renderLadder = renderLadder;
 

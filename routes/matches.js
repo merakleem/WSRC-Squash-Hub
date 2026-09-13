@@ -3,8 +3,7 @@ const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
 const matchModel = require('../models/matchModel');
 const seasonModel = require('../models/seasonModel');
-const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
-const { sendEmail, isConfigured: emailConfigured } = require('../lib/email');
+const { wrap, requireAdmin, requireAuth } = require('../middleware');
 
 const router = express.Router();
 
@@ -198,7 +197,7 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
   const winnerId = player1Score > player2Score ? player1Id : player2Id;
   db.prepare(
     `INSERT INTO matches (type, status, player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id, played_at, confirmed_at)
-     VALUES ('ladder', 'played', ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`
+     VALUES ('ladder', 'played', ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`,
   ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId, playedAt);
 
   res.json({ ok: true });
@@ -262,7 +261,7 @@ router.post('/matches/doubles', requireAuth, wrap(async (req, res) => {
   const result = db.prepare(
     `INSERT INTO matches (type, status, format, player1_id, player1_partner_id, player2_id, player2_partner_id,
                           player1_score, player2_score, winner_id, submitted_by_player_id, played_at, confirmed_at)
-     VALUES ('ladder', 'played', 'doubles', ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`
+     VALUES ('ladder', 'played', 'doubles', ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`,
   ).run(a, b, c, d, team1Score, team2Score, winnerId, submitterId, when.playedAt);
 
   res.json({ ok: true, id: Number(result.lastInsertRowid) });

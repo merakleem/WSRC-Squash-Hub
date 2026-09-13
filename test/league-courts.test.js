@@ -64,7 +64,7 @@ suite('league court assignment', async ({ ok, t }) => {
     ok('within every time slot, lower courts hold higher divisions', ordered);
     const slot1 = rows.filter((r) => r.scheduled_time === '19:00' && r.scheduled_date === rows[0].scheduled_date);
     ok('division 1 sits on court 1', slot1.find((r) => r.level === 1)?.court_id === courts[0].id,
-       JSON.stringify(slot1.map((r) => [r.court_id, r.level])));
+      JSON.stringify(slot1.map((r) => [r.court_id, r.level])));
   }
 
   console.log('MODERN - uneven: div 1 has 3 matches a week, div 2 has 1');
@@ -82,7 +82,7 @@ suite('league court assignment', async ({ ok, t }) => {
     ok('within every time slot, lower courts hold higher divisions', ordered);
     const first = slots[Object.keys(slots).sort()[0]];
     ok('div 1 (3 matches) fills the whole first slot, div 2 waits',
-       JSON.stringify(first.slice().sort((a, b) => a.court_id - b.court_id).map((r) => r.level)) === '[1,1,1]',
-       JSON.stringify(first.map((r) => [r.court_id, r.level])));
+      JSON.stringify(first.slice().sort((a, b) => a.court_id - b.court_id).map((r) => r.level)) === '[1,1,1]',
+      JSON.stringify(first.map((r) => [r.court_id, r.level])));
   }
 });

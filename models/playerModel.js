@@ -23,7 +23,7 @@ function addPlayer({ name, email, phone, member_number, club_locker_rating, excl
   const db = getDB();
   const result = db.prepare(
     `INSERT INTO players (name, email, phone, member_number, club_locker_rating, exclude_from_ladder, is_member, is_tester)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(name, email || null, phone || null, member_number || null, club_locker_rating ?? null,
     exclude_from_ladder ? 1 : 0, is_member ? 1 : 0, is_tester ? 1 : 0);
   return getPlayerById(result.lastInsertRowid);

@@ -34,7 +34,7 @@ suite('the sign-in pages', async ({ ok, t }) => {
   // The headline beside the panel already says welcome back; a second one in
   // the card was saying it twice.
   ok('with no subtitle under it', !/class="panel-sub"/.test(login));
-  ok('the form still posts to \/login', /<form method="POST" action="\/login">/.test(login));
+  ok('the form still posts to /login', /<form method="POST" action="\/login">/.test(login));
   ok('the email field keeps its name and autocomplete', /name="email"[^>]*autocomplete="email"/.test(login));
   ok('the password field keeps its name, autofocus and autocomplete', /name="password"[^>]*autofocus autocomplete="current-password"/.test(login));
   ok('both fields carry a mobile placeholder', (login.match(/data-mph="/g) || []).length === 2);

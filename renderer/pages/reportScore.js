@@ -1,6 +1,6 @@
 import { state } from '../state.js';
 import { esc, toast, modal, avatarHTML } from '../utils.js';
-import { openPickupGameModal } from './players.js';
+import { openPickupGameModal } from './ladderMatch.js';
 
 // ===== REPORT A SCORE =====
 // One page for every score a player might report. It replaces the two separate

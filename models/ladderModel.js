@@ -1,6 +1,7 @@
 const { getDB } = require('../database/db');
 const elo = require('../lib/elo');
 const seasonsLib = require('../lib/seasons');
+const { memo } = require('../lib/memo');
 const matchModel = require('./matchModel');
 const seasonModel = require('./seasonModel');
 
@@ -175,7 +176,7 @@ function getLadder(asOfDate = null) {
 
   // The ladder is empty until people join it; nobody is present before their
   // own arrival, which is what keeps a new member out of finished seasons.
-  let ranking = [];
+  const ranking = [];
 
   // Best position ever held. Nothing persists historical standings, so it is
   // derived from the same replay that produces the current ranking.
@@ -224,7 +225,7 @@ function getLadder(asOfDate = null) {
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   let rankingSevenDaysAgo = null;
 
-  let replayRanking = [];
+  const replayRanking = [];
   for (const event of timeline) {
     if (asOfDate && event.day && event.day > asOfDate) continue;
     if (rankingSevenDaysAgo === null && (event.day || '') >= cutoff) {
@@ -275,6 +276,13 @@ const getLastMatchDates    = matchModel.getLastMatchDates;
  * positional ladder ended on.
  */
 function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
+  // Memoised on the database's write stamp (lib/memo.js): the replay runs
+  // once per distinct question until something changes.
+  return memo(`elo:${seasonKey}:${asOfDate || ''}:${includeHidden ? 1 : 0}:${withRankChange ? 1 : 0}:${JSON.stringify(settings)}`,
+    () => _computeEloLadder(seasonKey, settings, asOfDate, { includeHidden, withRankChange }));
+}
+
+function _computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
   // `includeHidden` keeps the players who have not played yet in the result,
   // carrying the rating they would enter on. Used by the movement comparison
   // below, and by anything that wants to say where a member would come in.
@@ -300,11 +308,9 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
 
   // Seed from where players finished the season before ratings began.
   const firstRatedRange = seasonsLib.seasonRange(
-    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay
+    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay,
   );
   const priorOrder = getLadder(_dayBefore(firstRatedRange.start));
-  const priorSize = priorOrder.length;
-  const priorByIdMap = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
   // Played anything by the time ratings began? Judged at that fixed moment
   // rather than "have they played yet", so a seed cannot change under a player
@@ -550,10 +556,9 @@ function getPlayerMatchRatingDeltas(playerId) {
   if (cutoverYear == null || latestYear == null || latestYear < cutoverYear) return deltas;
 
   const firstRange = seasonsLib.seasonRange(
-    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay
+    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay,
   );
   const priorOrder = getLadder(_dayBefore(firstRange.start));
-  const priorById = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
   // Seeded exactly as the ladder seeds, so the number shown against a match on
   // a profile is the one that moved the standings.
@@ -611,6 +616,11 @@ function getPlayerMatchRatingDeltas(playerId) {
  * to season; only the season's wins, losses and movement start over.
  */
 function computeDoublesEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
+  return memo(`dbl:${seasonKey}:${asOfDate || ''}:${includeHidden ? 1 : 0}:${withRankChange ? 1 : 0}:${JSON.stringify(settings)}`,
+    () => _computeDoublesEloLadder(seasonKey, settings, asOfDate, { includeHidden, withRankChange }));
+}
+
+function _computeDoublesEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
   const db = getDB();
   const cfg = elo.config(settings);
   const monthDay = seasonsLib.startMonthDay(settings);

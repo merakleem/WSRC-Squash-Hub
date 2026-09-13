@@ -46,7 +46,7 @@ suite('schema migrations', async ({ ok, t }) => {
   let threw = null;
   try { runMigrations(db); } catch (err) { threw = err; }
   MIGRATIONS.pop();
-  ok('throws, naming the migration', threw && /\[migration 27: broken on purpose\]/.test(threw.message), threw?.message);
+  ok('throws, naming the migration', threw && threw.message.startsWith(`[migration ${LATEST + 1}: broken on purpose]`), threw?.message);
   ok('its first statement is rolled back', !db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'half_done'").get());
   ok('and it is not recorded, so the next boot retries it', currentVersion(db) === LATEST);
   ok('foreign keys are back on afterwards', db.pragma('foreign_keys', { simple: true }) === 1);

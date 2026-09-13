@@ -452,6 +452,26 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    id: 27, name: 'court holds live in the database',
+    // A player's five-minute hold on a slot while they finish booking used to
+    // sit in a Map in the process: gone on every deploy, and invisible to a
+    // second instance. expires_at is epoch milliseconds.
+    up: (db, h) => {
+      h.createTable(`CREATE TABLE reservations (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         court_id INTEGER NOT NULL,
+         date TEXT NOT NULL,
+         start_time TEXT NOT NULL,
+         duration_minutes INTEGER NOT NULL,
+         player_id INTEGER NOT NULL,
+         expires_at INTEGER NOT NULL,
+         FOREIGN KEY (court_id) REFERENCES courts(id) ON DELETE CASCADE,
+         FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+       )`);
+      h.createIndex(`CREATE INDEX idx_reservations_day ON reservations (date, court_id)`);
+    },
+  },
 ];
 
 /**

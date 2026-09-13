@@ -546,8 +546,7 @@ function _wire(content) {
   document.getElementById('evWithdraw')?.addEventListener('click', async () => {
     if (ev.busy) return;
     ev.busy = true;
-    try { await window.api.withdrawFromEvent(e.id); }
-    catch (err) { toast(err.message, 'error'); }
+    try { await window.api.withdrawFromEvent(e.id); } catch (err) { toast(err.message, 'error'); }
     ev.busy = false;
     _refresh();
   });
@@ -555,8 +554,7 @@ function _wire(content) {
     if (ev.busy) return;
     if (e.my_signup) {
       ev.busy = true;
-      try { await window.api.updateEventSignup(e.id, { guests: (e.my_signup.guests || 0) + delta }); }
-      catch (err) { toast(err.message, 'error'); }
+      try { await window.api.updateEventSignup(e.id, { guests: (e.my_signup.guests || 0) + delta }); } catch (err) { toast(err.message, 'error'); }
       ev.busy = false;
       _refresh();
     } else {
@@ -574,8 +572,7 @@ function _wire(content) {
   });
   content.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', async (evt) => {
     evt.stopPropagation();
-    try { await window.api.removeEventAttendee(e.id, Number(b.dataset.remove)); }
-    catch (err) { toast(err.message, 'error'); }
+    try { await window.api.removeEventAttendee(e.id, Number(b.dataset.remove)); } catch (err) { toast(err.message, 'error'); }
     _refresh();
   }));
   document.getElementById('evExportBtn')?.addEventListener('click', () => {
@@ -708,8 +705,7 @@ function _wireModal(content) {
 
   document.getElementById('evDelete')?.addEventListener('click', async () => {
     if (!ev.confirmDelete) { ev.confirmDelete = true; _paintModalOnly(); return; }
-    try { await window.api.deleteEvent(ev.modal.id); }
-    catch (err) { toast(err.message, 'error'); return; }
+    try { await window.api.deleteEvent(ev.modal.id); } catch (err) { toast(err.message, 'error'); return; }
     ev.modal = null;
     ev.form = null;
     _load(true);

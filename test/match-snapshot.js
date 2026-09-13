@@ -31,7 +31,7 @@ const bookings = require(`${ROOT}/models/bookingModel`);
 const tourns   = require(`${ROOT}/models/tournamentModel`);
 
 const out = {};
-const ids = db.prepare('SELECT id FROM players ORDER BY id').all().map(r => r.id);
+const ids = db.prepare('SELECT id FROM players ORDER BY id').all().map((r) => r.id);
 
 // --- ladder ---------------------------------------------------------------
 out.ladder = ladder.getLadder();
@@ -66,12 +66,12 @@ for (const l of leagues.getAllLeagues()) {
   const perWeek = {};
   for (const w of weeks) {
     const matchups = leagues.getMatchups(w.id);
-    perWeek[w.id] = matchups.map(mu => ({ matchup: mu, matches: leagues.getMatches(mu.id) }));
+    perWeek[w.id] = matchups.map((mu) => ({ matchup: mu, matches: leagues.getMatches(mu.id) }));
   }
   out.leagues[l.id] = {
     league: leagues.getLeagueById(l.id),
     weeks, perWeek,
-    byes: weeks.map(w => leagues.getWeekByes(w.id)),
+    byes: weeks.map((w) => leagues.getWeekByes(w.id)),
     players: leagues.getLeaguePlayers(l.id),
     divisions: leagues.getDivisions(l.id),
   };
@@ -85,7 +85,7 @@ const dates = db.prepare(`
     SELECT date AS d FROM bookings
     UNION SELECT date FROM weeks
   ) WHERE d IS NOT NULL ORDER BY d
-`).all().map(r => r.d);
+`).all().map((r) => r.d);
 out.scheduleDates = dates;
 out.schedule = {};
 for (const d of dates) out.schedule[d] = bookings.getScheduleForDate(d);

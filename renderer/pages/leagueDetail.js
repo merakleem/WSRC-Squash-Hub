@@ -70,15 +70,15 @@ export function renderLeagueDetail() {
       ${leagueEditMode ? 'Done Editing' : (isDoubles ? 'Edit Pairs' : 'Edit Players')}
     </button>
     <div class="options-menu" id="optionsMenu">
-      <button class="btn btn-outline" id="optionsBtn">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
-      <div class="options-dropdown" id="optionsDropdown">
-        ${isDoubles ? '' : `<button class="options-item" data-action="print-boxes">Print Boxes</button>
-        <button class="options-item" data-action="box-scores">Submit scores by box view</button>`}
-        ${league.setup_type === 'modern' || isDoubles ? `<button class="options-item" data-action="print-schedule">Print Schedule</button>` : ''}
-        <button class="options-item" data-action="message-players">Message Players</button>
-        <button class="options-item" data-action="bulk-invite">Send Account Invites</button>
-        ${league.status !== 'completed' ? `<button class="options-item options-item-danger" data-action="end-league">End League</button>` : ''}
-        <button class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
+      <button class="btn btn-outline" id="optionsBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="optionsDropdown">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>
+      <div class="options-dropdown" id="optionsDropdown" role="menu" aria-label="League options">
+        ${isDoubles ? '' : `<button role="menuitem" class="options-item" data-action="print-boxes">Print Boxes</button>
+        <button role="menuitem" class="options-item" data-action="box-scores">Submit scores by box view</button>`}
+        ${league.setup_type === 'modern' || isDoubles ? `<button role="menuitem" class="options-item" data-action="print-schedule">Print Schedule</button>` : ''}
+        <button role="menuitem" class="options-item" data-action="message-players">Message Players</button>
+        <button role="menuitem" class="options-item" data-action="bulk-invite">Send Account Invites</button>
+        ${league.status !== 'completed' ? `<button role="menuitem" class="options-item options-item-danger" data-action="end-league">End League</button>` : ''}
+        <button role="menuitem" class="options-item options-item-danger" data-action="delete-league" data-id="${league.id}" data-name="${esc(league.name)}">Delete League</button>
       </div>
     </div>` : '';
 
@@ -90,7 +90,8 @@ export function renderLeagueDetail() {
 
     document.getElementById('optionsBtn').addEventListener('click', (e) => {
       e.stopPropagation();
-      document.getElementById('optionsDropdown').classList.toggle('open');
+      const open = document.getElementById('optionsDropdown').classList.toggle('open');
+      e.currentTarget.setAttribute('aria-expanded', String(open));
     });
     document.getElementById('optionsDropdown').addEventListener('click', (e) => {
       const action = e.target.dataset.action;
@@ -222,16 +223,16 @@ export function renderLeagueDetail() {
   // The pills keep #schFilter and .std-tab[data-div-id]: they are the same
   // control the schedule filter has always been, now shared with Standings.
   const pillsHTML = divisions.length > 1 ? `
-    <div class="sch-filter lg-pills" id="schFilter">
-      ${divisions.map((d) => `<button class="std-tab lg-pill" data-div-id="${d.id}">${esc(d.name)}</button>`).join('')}
+    <div class="sch-filter lg-pills" id="schFilter" role="group" aria-label="Division">
+      ${divisions.map((d) => `<button class="std-tab lg-pill" data-div-id="${d.id}" aria-pressed="false">${esc(d.name)}</button>`).join('')}
     </div>` : '';
 
   const tabsHTML = `
     <div class="lg-tabbar">
-      <div class="lg-tabs" id="lgTabs">
-        <button class="lg-tab" data-lg-tab="standings">Standings</button>
-        <button class="lg-tab" data-lg-tab="schedule">Schedule</button>
-        ${adminMode ? `<button class="lg-tab" data-lg-tab="players">${isDoubles ? 'Pairs' : 'Players'}<span class="lg-admin-chip">ADMIN</span></button>` : ''}
+      <div class="lg-tabs" id="lgTabs" role="tablist" aria-label="League sections">
+        <button class="lg-tab" role="tab" data-lg-tab="standings" aria-controls="lgPanelStandings">Standings</button>
+        <button class="lg-tab" role="tab" data-lg-tab="schedule" aria-controls="lgPanelSchedule">Schedule</button>
+        ${adminMode ? `<button class="lg-tab" role="tab" data-lg-tab="players" aria-controls="lgPanelPlayers">${isDoubles ? 'Pairs' : 'Players'}<span class="lg-admin-chip">ADMIN</span></button>` : ''}
       </div>
       ${pillsHTML}
     </div>`;
@@ -248,16 +249,16 @@ export function renderLeagueDetail() {
     <div class="lg-page">
       ${heroHTML}
       ${tabsHTML}
-      <div class="lg-panel" id="lgPanelStandings">
+      <div class="lg-panel" id="lgPanelStandings" role="tabpanel">
         ${isDoubles ? renderStandingsDoubles(league) : renderStandings(league)}
       </div>
-      <div class="lg-panel" id="lgPanelSchedule" hidden>
+      <div class="lg-panel" id="lgPanelSchedule" role="tabpanel" hidden>
         <div class="schedule-list${adminMode ? ' is-admin' : ''}" id="scheduleList">
           ${weeks.map((w) => renderWeekCard(w, league, adminMode, w.id === currentWeekId)).join('')}
         </div>
       </div>
       ${adminMode ? `
-      <div class="lg-panel" id="lgPanelPlayers" hidden>
+      <div class="lg-panel" id="lgPanelPlayers" role="tabpanel" hidden>
         <div class="lg-roster-hint">
           <span class="lg-roster-hint-text">${rosterHint}</span>
         </div>
@@ -277,7 +278,10 @@ export function renderLeagueDetail() {
   const applyDivision = () => {
     const divId = _leagueDivision;
     if (pillsEl) {
-      pillsEl.querySelectorAll('.std-tab').forEach((p) => p.classList.toggle('active', p.dataset.divId === divId));
+      pillsEl.querySelectorAll('.std-tab').forEach((p) => {
+        p.classList.toggle('active', p.dataset.divId === divId);
+        p.setAttribute('aria-pressed', String(p.dataset.divId === divId));
+      });
     }
     // Schedule rows: the filtering behaviour #schFilter has always had, now
     // always scoped to one division.
@@ -300,7 +304,12 @@ export function renderLeagueDetail() {
   };
 
   const applyTab = () => {
-    tabsEl.querySelectorAll('.lg-tab').forEach((t) => t.classList.toggle('active', t.dataset.lgTab === _leagueTab));
+    tabsEl.querySelectorAll('.lg-tab').forEach((t) => {
+      const on = t.dataset.lgTab === _leagueTab;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+    });
     for (const [key, el] of Object.entries(panels)) {
       if (el) el.hidden = key !== _leagueTab;
     }
@@ -316,6 +325,18 @@ export function renderLeagueDetail() {
     _leagueTab = tab.dataset.lgTab;
     applyTab();
   });
+  // Arrow keys move between tabs, as a tablist is expected to.
+  tabsEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const tabs = [...tabsEl.querySelectorAll('.lg-tab')];
+    const i = tabs.findIndex((t) => t.dataset.lgTab === _leagueTab);
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    if (!next) return;
+    e.preventDefault();
+    _leagueTab = next.dataset.lgTab;
+    applyTab();
+    next.focus();
+  });
 
   if (pillsEl) {
     pillsEl.addEventListener('click', (e) => {
@@ -330,8 +351,15 @@ export function renderLeagueDetail() {
 
   // Week toggle
   content.querySelectorAll('.week-header').forEach((header) => {
-    header.addEventListener('click', () => {
-      header.closest('.week-card').classList.toggle('open');
+    const toggle = () => {
+      const open = header.closest('.week-card').classList.toggle('open');
+      header.setAttribute('aria-expanded', String(open));
+    };
+    header.setAttribute('aria-expanded', String(header.closest('.week-card').classList.contains('open')));
+    header.addEventListener('click', toggle);
+    // A div made a button: Enter and Space open it as they would a real one.
+    header.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     });
   });
 
@@ -676,7 +704,7 @@ function renderWeekCardDoubles(week, league, adminMode = true, isCurrent = false
   }).join('');
   return `
     <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
-      <div class="week-header lg-week-header">
+      <div class="week-header lg-week-header" role="button" tabindex="0" aria-expanded="${isCurrent ? 'true' : 'false'}" aria-label="Week ${week.week_number}, ${formatDate(week.date)}">
         <div class="lg-week-lead">
           <span class="lg-week-num">Week ${week.week_number}</span>
           ${isCurrent ? '<span class="lg-thisweek">THIS WEEK</span>' : ''}
@@ -816,8 +844,7 @@ export function computeStandings(league) {
         p1.gamesLost += match.player2_score;
         p2.gamesWon  += match.player2_score;
         p2.gamesLost += match.player1_score;
-        if (match.winner_id === match.player1_id) { p1.wins++; p2.losses++; }
-        else if (match.winner_id === match.player2_id) { p2.wins++; p1.losses++; }
+        if (match.winner_id === match.player1_id) { p1.wins++; p2.losses++; } else if (match.winner_id === match.player2_id) { p2.wins++; p1.losses++; }
       }
     }
   }
@@ -841,7 +868,7 @@ export function computeStandings(league) {
     divData.players.sort((a, b) =>
       b.wins !== a.wins ? b.wins - a.wins :
       b.gameDiff !== a.gameDiff ? b.gameDiff - a.gameDiff :
-      a.skillRank - b.skillRank
+      a.skillRank - b.skillRank,
     );
   }
 
@@ -851,7 +878,7 @@ export function computeStandings(league) {
 function renderStandings(league) {
   const standings = computeStandings(league);
   const divIds = Object.keys(standings).sort(
-    (a, b) => standings[a].division.level - standings[b].division.level
+    (a, b) => standings[a].division.level - standings[b].division.level,
   );
 
   if (divIds.length === 0) {
@@ -920,7 +947,7 @@ function openTimingModal(btn) {
         <select class="form-control" id="timingCourt">
           <option value="">No court</option>
           ${leagueCourts.map((c) =>
-            `<option value="${c.id}" ${currentCourtId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`
+            `<option value="${c.id}" ${currentCourtId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`,
           ).join('')}
         </select>
       </div>`;
@@ -931,7 +958,7 @@ function openTimingModal(btn) {
         <select class="form-control" id="timingCourt">
           <option value="">No court</option>
           ${Array.from({ length: numCourts }, (_, i) => i + 1).map((n) =>
-            `<option value="${n}" ${Number(currentCourtNumber) === n ? 'selected' : ''}>Court ${n}</option>`
+            `<option value="${n}" ${Number(currentCourtNumber) === n ? 'selected' : ''}>Court ${n}</option>`,
           ).join('')}
         </select>
       </div>`;
@@ -1092,7 +1119,7 @@ function renderWeekCard(week, league, adminMode = true, isCurrent = false) {
 
   return `
     <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
-      <div class="week-header lg-week-header">
+      <div class="week-header lg-week-header" role="button" tabindex="0" aria-expanded="${isCurrent ? 'true' : 'false'}" aria-label="Week ${week.week_number}, ${formatDate(week.date)}">
         <div class="lg-week-lead">
           <span class="lg-week-num">Week ${week.week_number}</span>
           ${isCurrent ? '<span class="lg-thisweek">THIS WEEK</span>' : ''}
@@ -1126,7 +1153,7 @@ function renderWeekCardModern(week, league, adminMode = true, isCurrent = false)
 
   return `
     <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
-      <div class="week-header lg-week-header">
+      <div class="week-header lg-week-header" role="button" tabindex="0" aria-expanded="${isCurrent ? 'true' : 'false'}" aria-label="Week ${week.week_number}, ${formatDate(week.date)}">
         <div class="lg-week-lead">
           <span class="lg-week-num">Week ${week.week_number}</span>
           ${isCurrent ? '<span class="lg-thisweek">THIS WEEK</span>' : ''}
@@ -1274,7 +1301,7 @@ async function saveMatchScore(btn) {
       <button class="btn btn-success btn-sm score-save-btn lg-save"
         data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="true">Save</button>`;
     row.querySelector('.score-save-btn').addEventListener('click', () =>
-      saveMatchScore(row.querySelector('.score-save-btn'))
+      saveMatchScore(row.querySelector('.score-save-btn')),
     );
     return;
   }
@@ -1297,7 +1324,7 @@ async function saveMatchScore(btn) {
       <button class="btn btn-success btn-sm score-save-btn lg-save"
         data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="true">Save</button>`;
     row.querySelector('.score-save-btn').addEventListener('click', () =>
-      saveMatchScore(row.querySelector('.score-save-btn'))
+      saveMatchScore(row.querySelector('.score-save-btn')),
     );
     return;
   }
@@ -1332,7 +1359,7 @@ async function saveMatchScore(btn) {
     <button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
       data-match-id="${matchId}" data-p1-id="${p1Id}" data-p2-id="${p2Id}" data-editing="false">Edit</button>`;
   row.querySelector('.score-save-btn').addEventListener('click', () =>
-    saveMatchScore(row.querySelector('.score-save-btn'))
+    saveMatchScore(row.querySelector('.score-save-btn')),
   );
 }
 
@@ -1361,7 +1388,7 @@ async function openBoxScoreModal(league) {
     .map((d) => ({
       ...d,
       players: d.players.slice().sort((a, b) =>
-        isModern ? (a.skill_rank - b.skill_rank) : (a.team_order - b.team_order)
+        isModern ? (a.skill_rank - b.skill_rank) : (a.team_order - b.team_order),
       ),
     }));
 
@@ -1386,7 +1413,7 @@ async function openBoxScoreModal(league) {
       });
 
       const colHeaders = players.map((p) =>
-        `<th class="bsm-col-header"><div class="bsm-col-name">${esc(p.player_name)}</div></th>`
+        `<th class="bsm-col-header"><div class="bsm-col-name">${esc(p.player_name)}</div></th>`,
       ).join('');
 
       const rows = players.map((rowP) => {
@@ -1494,7 +1521,7 @@ async function openBoxScoreModal(league) {
         }
         // Mirror cell
         const mirror = document.querySelector(
-          `.bsm-cell-match[data-match-id="${matchId}"][data-row-player-id="${colPlayerId}"][data-col-player-id="${rowPlayerId}"]`
+          `.bsm-cell-match[data-match-id="${matchId}"][data-row-player-id="${colPlayerId}"][data-col-player-id="${rowPlayerId}"]`,
         );
         if (mirror) {
           mirror.querySelector('.bsm-input-mine').value = theirs != null ? String(theirs) : '';

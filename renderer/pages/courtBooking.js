@@ -34,7 +34,8 @@ function minToTime(min) {
 }
 
 function fmtTime(min) {
-  let h = Math.floor(min / 60), m = min % 60;
+  let h = Math.floor(min / 60);
+  const m = min % 60;
   const ap = (h < 12 || h === 24) ? 'AM' : 'PM';
   h = h % 12 || 12;
   return `${h}:${String(m).padStart(2,'0')} ${ap}`;
@@ -102,7 +103,7 @@ function fmtLongDate(dateStr) {
 
 function isMine(slot) {
   const pid = state.currentUser?.playerId;
-  return pid != null && Array.isArray(slot.players) && slot.players.some(p => p.id === pid);
+  return pid != null && Array.isArray(slot.players) && slot.players.some((p) => p.id === pid);
 }
 
 // Being on a booking colours it yours; only having made it lets you change it.
@@ -117,8 +118,8 @@ function bookedByMe(slot) {
 // booking is titled by its type, so this lists everyone on it.
 function _subLine(slot, { short = false } = {}) {
   const names = (slot.players || [])
-    .filter(p => p.id !== slot.bookedBy)
-    .map(p => short ? abbrevName(p.name) : p.name)
+    .filter((p) => p.id !== slot.bookedBy)
+    .map((p) => short ? abbrevName(p.name) : p.name)
     .filter(Boolean);
   if (!names.length) return '';
   return slot.bookedBy ? `with ${names.join(', ')}` : names.join(', ');
@@ -140,8 +141,8 @@ function getCourtSlots(dateStr, courtId) {
   const data = cb.scheduleCache?.[dateStr];
   if (!data) return [];
   return (data.slots || [])
-    .filter(s => _coversCourt(s, courtId))
-    .map(s => ({ ...s, startMin: timeToMin(s.startTime) }))
+    .filter((s) => _coversCourt(s, courtId))
+    .map((s) => ({ ...s, startMin: timeToMin(s.startTime) }))
     .sort((a, b) => a.startMin - b.startMin);
 }
 
@@ -160,7 +161,7 @@ function getMaxEnd(slots, startMin, editId = null) {
 }
 
 function myName() {
-  const me = state.players?.find(p => p.id === state.currentUser?.playerId);
+  const me = state.players?.find((p) => p.id === state.currentUser?.playerId);
   return me?.name || 'You';
 }
 
@@ -229,7 +230,7 @@ async function _init() {
   try {
     const courts = await window.api.getCourts();
     if (_instance !== myInstance) return;
-    cb.courts = courts.filter(c => c.active);
+    cb.courts = courts.filter((c) => c.active);
     if (cb.courts.length > 0) {
       cb.courtId = cb.courts[0].id;
       cb.mCourt = cb.courts[0].id;
@@ -278,7 +279,7 @@ async function _loadMyBookings() {
   try {
     const rows = await window.api.getMyBookings();
     if (_instance !== myInstance) return;
-    cb.myBookings = (rows || []).map(b => ({ ...b, startMin: timeToMin(b.startTime) }));
+    cb.myBookings = (rows || []).map((b) => ({ ...b, startMin: timeToMin(b.startTime) }));
     _refreshTabs();
     if (cb.tab === 'mine' || isMobile()) _renderBody();
   } catch (_) {}
@@ -324,7 +325,7 @@ function _refreshTabs() {
 }
 
 function _attachTabListeners() {
-  document.querySelectorAll('.cb-tab').forEach(tab => {
+  document.querySelectorAll('.cb-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const next = tab.dataset.tab;
       if (next === cb.tab) return;
@@ -345,7 +346,7 @@ function _weekStrip() {
   // Seven days from today, not a calendar week: the strip is for "the next few
   // days", and a Sunday start would waste most of it on days already gone.
   const today = todayStr();
-  return Array.from({ length: 7 }, (_, i) => addDays(today, i)).map(d => {
+  return Array.from({ length: 7 }, (_, i) => addDays(today, i)).map((d) => {
     const dt = new Date(d + 'T12:00:00');
     const sel = d === cb.date;
     const isToday = d === today;
@@ -385,7 +386,7 @@ function _calendarHTML() {
           <button class="cb-cal-nav" id="cbCalNext" aria-label="Next month">${ICON.chevR}</button>
         </div>
       </div>
-      <div class="cb-cal-wd">${['S','M','T','W','T','F','S'].map(w => `<span>${w}</span>`).join('')}</div>
+      <div class="cb-cal-wd">${['S','M','T','W','T','F','S'].map((w) => `<span>${w}</span>`).join('')}</div>
       <div class="cb-cal-grid">${cells.join('')}</div>
     </div>`;
 }
@@ -444,7 +445,7 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
     bands += `<div class="cb-band" style="top:${topFor(h * 60)}px"></div>`;
   }
 
-  const blocks = slots.map(s => {
+  const blocks = slots.map((s) => {
     const h = topFor(s.startMin + s.durationMinutes) - topFor(s.startMin);
     const mine = isMine(s);
     const league = !mine && s.source && s.source !== 'custom';
@@ -471,7 +472,7 @@ function _buildCourtColumn(courtId, isToday, isPast, nm) {
   // it says why when you point at it.
   let openSlots = '';
   for (let m = DAY_START; m < DAY_END; m += SLOT_MIN) {
-    const covered = slots.some(s => m < s.startMin + s.durationMinutes && (m + SLOT_MIN) > s.startMin);
+    const covered = slots.some((s) => m < s.startMin + s.durationMinutes && (m + SLOT_MIN) > s.startMin);
     if (covered) continue;
     const gone = isPast || (isToday && m < nm);
     if (gone) {
@@ -512,11 +513,11 @@ function _buildGrid() {
     ${isPast ? '<div class="cb-past-banner">Past date · view only</div>' : ''}
     <div class="cb-court-header">
       <div class="cb-court-header-spacer"></div>
-      ${cb.courts.map(c => `<div class="cb-court-header-cell">${esc(c.name)}</div>`).join('')}
+      ${cb.courts.map((c) => `<div class="cb-court-header-cell">${esc(c.name)}</div>`).join('')}
     </div>
     <div class="cb-grid" style="height:${GRID_H}px">
       <div class="cb-gutter">${hours.join('')}${nowChip}</div>
-      ${cb.courts.map(c => `<div class="cb-col">${_buildCourtColumn(c.id, isToday, isPast, nm)}</div>`).join('')}
+      ${cb.courts.map((c) => `<div class="cb-col">${_buildCourtColumn(c.id, isToday, isPast, nm)}</div>`).join('')}
     </div>`;
 }
 
@@ -541,10 +542,10 @@ function _buildMobileBooking() {
   if (cb.status === 'error')   return `<div class="cb-centered cb-error">Couldn't load the schedule. Please try again.</div>`;
   if (!cb.courts.length)       return `<div class="cb-centered">No courts available.</div>`;
 
-  if (cb.mCourt == null || !cb.courts.some(c => c.id === cb.mCourt)) cb.mCourt = cb.courts[0].id;
+  if (cb.mCourt == null || !cb.courts.some((c) => c.id === cb.mCourt)) cb.mCourt = cb.courts[0].id;
 
-  const tabs = cb.courts.map(c =>
-    `<button class="cb-mtab${c.id === cb.mCourt ? ' cb-mtab--on' : ''}" data-mcourt="${c.id}">${esc(c.name)}</button>`
+  const tabs = cb.courts.map((c) =>
+    `<button class="cb-mtab${c.id === cb.mCourt ? ' cb-mtab--on' : ''}" data-mcourt="${c.id}">${esc(c.name)}</button>`,
   ).join('');
 
   // Rows come from two lists merged in time order: every booking on this court
@@ -555,11 +556,11 @@ function _buildMobileBooking() {
   const mins = _mMins();
   const from = mins.length ? mins[0] : null;
   const slots = from == null ? [] : getCourtSlots(cb.date, cb.mCourt)
-    .filter(bk => bk.startMin + bk.durationMinutes > from);
-  const openSteps = mins.filter(m => !slots.some(bk => m < bk.startMin + bk.durationMinutes && m + SLOT_MIN > bk.startMin));
+    .filter((bk) => bk.startMin + bk.durationMinutes > from);
+  const openSteps = mins.filter((m) => !slots.some((bk) => m < bk.startMin + bk.durationMinutes && m + SLOT_MIN > bk.startMin));
   const entries = [
-    ...slots.map(bk => ({ min: bk.startMin, bk })),
-    ...openSteps.map(m => ({ min: m, bk: null })),
+    ...slots.map((bk) => ({ min: bk.startMin, bk })),
+    ...openSteps.map((m) => ({ min: m, bk: null })),
   ].sort((a, b) => a.min - b.min || (a.bk ? -1 : 1));
 
   const rows = entries.map(({ min: m, bk }) => {
@@ -594,7 +595,7 @@ function _buildMobileBooking() {
     </div>`;
   }).join('');
 
-  const dots = cb.courts.map(c =>
+  const dots = cb.courts.map((c) =>
     `<span class="cb-mdot${c.id === cb.mCourt ? ' cb-mdot--on' : ''}"></span>`).join('');
 
   return `
@@ -608,7 +609,7 @@ function _buildMobileBooking() {
 // ── My Bookings ───────────────────────────────────────────────────────────────
 function _otherNames(b) {
   const me = state.currentUser?.playerId;
-  return (b.players || []).filter(p => p.id !== me).map(p => p.name);
+  return (b.players || []).filter((p) => p.id !== me).map((p) => p.name);
 }
 
 function _buildMyBookingsDesktop() {
@@ -628,7 +629,7 @@ function _buildMyBookingsDesktop() {
       </div>`;
   }
 
-  const cards = cb.myBookings.map(b => {
+  const cards = cb.myBookings.map((b) => {
     const d = new Date(b.date + 'T12:00:00');
     const editing = cb.panel === 'edit' && String(cb.panelBooking?.id) === String(b.id);
     const confirming = String(cb.listConfirm) === String(b.id);
@@ -675,7 +676,7 @@ function _buildMyBookingsDesktop() {
 
 function _buildMyBookingsMobile() {
   const n = cb.myBookings.length;
-  const rows = cb.myBookings.map(b => {
+  const rows = cb.myBookings.map((b) => {
     const d = new Date(b.date + 'T12:00:00');
     return `
       <div class="cb-mmine-row" data-bid="${b.id}">
@@ -775,10 +776,10 @@ function _attachBodyListeners() {
   });
   document.getElementById('cbCalPrev')?.addEventListener('click', () => { cb.calMonth = _shiftMonth(cb.calMonth, -1); _renderBody(); });
   document.getElementById('cbCalNext')?.addEventListener('click', () => { cb.calMonth = _shiftMonth(cb.calMonth, 1); _renderBody(); });
-  document.querySelectorAll('[data-caldate]').forEach(el => {
+  document.querySelectorAll('[data-caldate]').forEach((el) => {
     el.addEventListener('click', () => _setDate(el.dataset.caldate));
   });
-  document.querySelectorAll('.cb-day').forEach(el => {
+  document.querySelectorAll('.cb-day').forEach((el) => {
     el.addEventListener('click', () => _setDate(el.dataset.date));
   });
 
@@ -867,14 +868,14 @@ function _attachMobileListeners() {
 
   // A tab changes the page. An open sheet for another court stays open - the
   // selection simply isn't highlighted on the page now showing.
-  document.querySelectorAll('.cb-mtab').forEach(tab => {
+  document.querySelectorAll('.cb-mtab').forEach((tab) => {
     tab.addEventListener('click', () => {
       cb.mCourt = Number(tab.dataset.mcourt);
       _renderBody();
     });
   });
 
-  document.querySelectorAll('.cb-mslot[data-mstart]').forEach(row => {
+  document.querySelectorAll('.cb-mslot[data-mstart]').forEach((row) => {
     row.addEventListener('click', () => {
       if (cb.date < todayStr()) return;
       cb.courtId = cb.mCourt;
@@ -883,10 +884,10 @@ function _attachMobileListeners() {
   });
 
   // Your own booking opens its edit sheet, as on the desktop grid.
-  document.querySelectorAll('.cb-mslot[data-mbid]').forEach(row => {
+  document.querySelectorAll('.cb-mslot[data-mbid]').forEach((row) => {
     row.addEventListener('click', () => {
       cb.courtId = cb.mCourt;
-      const booking = getCourtSlots(cb.date, cb.courtId).find(s => String(s.id) === String(row.dataset.mbid));
+      const booking = getCourtSlots(cb.date, cb.courtId).find((s) => String(s.id) === String(row.dataset.mbid));
       if (booking) _openPanel('edit', { booking });
     });
   });
@@ -907,7 +908,7 @@ function _attachMobileListeners() {
       const dy = e.changedTouches[0].clientY - sy;
       sx = sy = null;
       if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy)) return;
-      const idx = cb.courts.findIndex(c => c.id === cb.mCourt);
+      const idx = cb.courts.findIndex((c) => c.id === cb.mCourt);
       const nextIdx = dx < 0 ? idx + 1 : idx - 1;
       if (nextIdx < 0 || nextIdx >= cb.courts.length) return;
       cb.mCourt = cb.courts[nextIdx].id;
@@ -926,41 +927,41 @@ function _attachGridListeners() {
   const isPast = cb.date < todayStr();
   if (isPast) return;
 
-  document.querySelectorAll('.cb-slot--open').forEach(slot => {
+  document.querySelectorAll('.cb-slot--open').forEach((slot) => {
     slot.addEventListener('click', () => {
       if (slot.dataset.court) cb.courtId = Number(slot.dataset.court);
       _startReservation(Number(slot.dataset.start));
     });
   });
 
-  document.querySelectorAll('.cb-block--editable').forEach(block => {
+  document.querySelectorAll('.cb-block--editable').forEach((block) => {
     block.addEventListener('click', () => {
       if (block.dataset.court) cb.courtId = Number(block.dataset.court);
       const slots   = getCourtSlots(cb.date, cb.courtId);
-      const booking = slots.find(s => String(s.id) === String(block.dataset.bid));
+      const booking = slots.find((s) => String(s.id) === String(block.dataset.bid));
       if (booking) _openPanel('edit', { booking });
     });
   });
 }
 
 function _attachMineListeners() {
-  document.querySelectorAll('[data-edit]').forEach(btn => {
+  document.querySelectorAll('[data-edit]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       _editFromList(Number(btn.dataset.edit));
     });
   });
-  document.querySelectorAll('[data-del]').forEach(btn => {
+  document.querySelectorAll('[data-del]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       cb.listConfirm = Number(btn.dataset.del);
       _renderBody();
     });
   });
-  document.querySelectorAll('[data-keep]').forEach(btn => {
+  document.querySelectorAll('[data-keep]').forEach((btn) => {
     btn.addEventListener('click', () => { cb.listConfirm = null; _renderBody(); });
   });
-  document.querySelectorAll('[data-confirmdel]').forEach(btn => {
+  document.querySelectorAll('[data-confirmdel]').forEach((btn) => {
     btn.addEventListener('click', () => _cancelFromList(Number(btn.dataset.confirmdel)));
   });
 }
@@ -968,7 +969,7 @@ function _attachMineListeners() {
 // Editing from the list moves the grid to that booking's day and switches back
 // to Book a Court, so the panel opens with its slot visible behind it.
 async function _editFromList(id) {
-  const b = cb.myBookings.find(x => String(x.id) === String(id));
+  const b = cb.myBookings.find((x) => String(x.id) === String(id));
   if (!b) return;
   cb.listConfirm = null;
   cb.tab = 'book';
@@ -978,7 +979,7 @@ async function _editFromList(id) {
   _renderBody();
   await _loadSchedule(cb.date);
   const slots = getCourtSlots(cb.date, b.courtId);
-  const booking = slots.find(s => String(s.id) === String(id)) || b;
+  const booking = slots.find((s) => String(s.id) === String(id)) || b;
   _openPanel('edit', { booking });
 }
 
@@ -1005,7 +1006,7 @@ function _openPanel(mode, opts = {}) {
     ? _fitDuration(opts.booking?.durationMinutes || SLOT_MIN, opts.booking?.durationMinutes || SLOT_MIN)
     : SLOT_MIN;
   cb.panelPlayers   = mode === 'edit'
-    ? (opts.booking?.players || []).filter(p => p.id !== state.currentUser?.playerId).map(p => p.id)
+    ? (opts.booking?.players || []).filter((p) => p.id !== state.currentUser?.playerId).map((p) => p.id)
     : [];
   cb.panelSearch    = '';
   cb.panelBusy      = false;
@@ -1039,7 +1040,7 @@ function _buildPanelInner() {
   const startMin = _panelStartMin();
   const date     = _panelDate();
   const rsv  = cb.reservation;
-  const court = cb.courts.find(c => c.id === cb.courtId);
+  const court = cb.courts.find((c) => c.id === cb.courtId);
   const courtName = isEdit ? (booking?.courtName || court?.name || 'Court') : (court?.name || 'Court');
 
   if (rsv?.expired) {
@@ -1061,18 +1062,18 @@ function _buildPanelInner() {
   const canShrink = cb.panelDuration > SLOT_MIN;
 
   const taken = new Set([state.currentUser?.playerId, ...cb.panelPlayers].filter(Boolean));
-  const playerChips = cb.panelPlayers.map(pid => {
-    const p = state.players?.find(pl => pl.id === pid);
+  const playerChips = cb.panelPlayers.map((pid) => {
+    const p = state.players?.find((pl) => pl.id === pid);
     return `<span class="cb-chip cb-chip--other">${esc(p?.name || 'Player')}<button class="cb-chip-x" data-remove="${pid}" aria-label="Remove">×</button></span>`;
   }).join('');
 
   const results = cb.panelSearch.trim()
-    ? (state.players || []).filter(p => !taken.has(p.id) && p.name.toLowerCase().includes(cb.panelSearch.trim().toLowerCase())).slice(0, 8)
+    ? (state.players || []).filter((p) => !taken.has(p.id) && p.name.toLowerCase().includes(cb.panelSearch.trim().toLowerCase())).slice(0, 8)
     : [];
   const searchDropdown = (results.length || cb.panelSearch.trim()) ? `
     <div class="cb-search-results" id="cbSearchDropdown">
       ${results.length
-        ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${avatarInner(p)}</span><span>${esc(p.name)}</span></div>`).join('')
+        ? results.map((p) => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${avatarInner(p)}</span><span>${esc(p.name)}</span></div>`).join('')
         : '<div class="cb-search-empty">No players found</div>'}
     </div>` : '';
 
@@ -1211,9 +1212,9 @@ function _attachPanelListeners() {
   document.getElementById('cbDurMinus')?.addEventListener('click', () => _stepDuration(-SLOT_MIN));
   document.getElementById('cbDurPlus')?.addEventListener('click', () => _stepDuration(SLOT_MIN));
 
-  document.querySelectorAll('.cb-chip-x').forEach(btn => {
+  document.querySelectorAll('.cb-chip-x').forEach((btn) => {
     btn.addEventListener('click', () => {
-      cb.panelPlayers = cb.panelPlayers.filter(id => id !== Number(btn.dataset.remove));
+      cb.panelPlayers = cb.panelPlayers.filter((id) => id !== Number(btn.dataset.remove));
       _renderPanel();
     });
   });
@@ -1226,7 +1227,7 @@ function _attachPanelListeners() {
     });
   }
 
-  document.querySelectorAll('#cbSearchDropdown .cb-search-result').forEach(result => {
+  document.querySelectorAll('#cbSearchDropdown .cb-search-result').forEach((result) => {
     result.addEventListener('click', () => _addPlayer(Number(result.dataset.pid)));
   });
 }
@@ -1260,9 +1261,9 @@ function _updateSearchDropdown() {
 
   const taken = new Set([state.currentUser?.playerId, ...cb.panelPlayers].filter(Boolean));
   const results = cb.panelSearch.trim()
-    ? (state.players || []).filter(p =>
-        !taken.has(p.id) && p.name.toLowerCase().includes(cb.panelSearch.trim().toLowerCase())
-      ).slice(0, 8)
+    ? (state.players || []).filter((p) =>
+      !taken.has(p.id) && p.name.toLowerCase().includes(cb.panelSearch.trim().toLowerCase()),
+    ).slice(0, 8)
     : [];
 
   if (!results.length && !cb.panelSearch.trim()) return;
@@ -1274,11 +1275,11 @@ function _updateSearchDropdown() {
   div.className = 'cb-search-results';
   div.id = 'cbSearchDropdown';
   div.innerHTML = results.length
-    ? results.map(p => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${avatarInner(p)}</span><span>${esc(p.name)}</span></div>`).join('')
+    ? results.map((p) => `<div class="cb-search-result" data-pid="${p.id}"><span class="cb-res-av">${avatarInner(p)}</span><span>${esc(p.name)}</span></div>`).join('')
     : '<div class="cb-search-empty">No players found</div>';
 
   wrap.appendChild(div);
-  div.querySelectorAll('.cb-search-result').forEach(result => {
+  div.querySelectorAll('.cb-search-result').forEach((result) => {
     result.addEventListener('click', () => _addPlayer(Number(result.dataset.pid)));
   });
 }

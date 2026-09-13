@@ -1,4 +1,3 @@
-import { state } from './state.js';
 import { esc, toast, modal, avatarHTML } from './utils.js';
 
 // ===== MATCH CARD =====
@@ -64,7 +63,7 @@ function _strip(c) {
   return { kind: 'unscheduled', title: 'Not yet scheduled', sub: 'No court or time set for this match.' };
 }
 
-function _playerHTML(p, c) {
+function _playerHTML(p, _c) {
   const meta = [
     p.position ? `#${p.position} on ladder` : 'Not on ladder yet',
     p.rating != null ? Math.round(p.rating) : null,

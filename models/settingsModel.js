@@ -16,7 +16,7 @@ function getSetting(key, fallback = null) {
 function setSetting(key, value) {
   run(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
-    [key, value == null ? null : String(value)]
+    [key, value == null ? null : String(value)],
   );
   return { key, value };
 }

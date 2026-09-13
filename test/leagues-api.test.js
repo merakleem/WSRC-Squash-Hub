@@ -6,9 +6,12 @@ const { suite, scratchDb } = require('./lib/suite');
 const { boot, client } = require('./lib/client');
 
 // Dates relative to today, so "elapsed" is exercised rather than hard-coded.
+// Today on the club's clock, not UTC: from early evening in Winnipeg the two
+// disagree, and the server counts weeks by the club's date.
+const { clubToday } = require('../lib/clock');
 const day = (offset) => {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
+  const d = new Date(`${clubToday()}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + offset);
   return d.toISOString().slice(0, 10);
 };
 

@@ -1,5 +1,5 @@
-import { state, isAdmin } from '../state.js';
-import { esc, formatDate, toast, modal, avatarHTML } from '../utils.js';
+import { state } from '../state.js';
+import { esc, toast, modal, avatarHTML } from '../utils.js';
 
 // ===== CREATE LEAGUE WIZARD =====
 // Five steps: League info → Add players → Structure → Blackout dates → Preview.
@@ -406,15 +406,15 @@ async function renderStep2() {
           <span class="wz-lempty-t">${buildAvailable().length === 0 ? 'Every club player is in' : 'No players match'}</span>
         </div>`
       : filtered.map((p) => {
-          const li = ladderOrder.indexOf(p.id);
-          return `
+        const li = ladderOrder.indexOf(p.id);
+        return `
             <div class="wz-prow" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
               ${avatarHTML(p, 'wz-avatar')}
               <span class="wz-pname">${esc(p.name)}</span>
               <span class="wz-prank">${li === -1 ? '' : `#${li + 1}`}</span>
               <button class="wz-pbtn" type="button" tabindex="-1">+</button>
             </div>`;
-        }).join('');
+      }).join('');
   }
 
   function renderSelectedList() {
@@ -566,8 +566,7 @@ function renderStep2Doubles({ allPlayers, ladderOrder }) {
 
   const addPlayer = (id) => {
     const open = w.pairs.find((pr) => !(pr[0] && pr[1]));
-    if (open) { if (!open[0]) open[0] = id; else open[1] = id; }
-    else w.pairs.push([id, null]);
+    if (open) { if (!open[0]) open[0] = id; else open[1] = id; } else w.pairs.push([id, null]);
   };
   const removePlayer = (id) => {
     const pr = w.pairs.find((x) => x[0] === id || x[1] === id);
@@ -586,15 +585,15 @@ function renderStep2Doubles({ allPlayers, ladderOrder }) {
           <span class="wz-lempty-t">${buildAvailable().length === 0 ? 'Every club player is in' : 'No players match'}</span>
         </div>`
       : filtered.map((p) => {
-          const li = ladderOrder.indexOf(p.id);
-          return `
+        const li = ladderOrder.indexOf(p.id);
+        return `
             <div class="wz-prow" data-action="add-player" data-id="${p.id}" data-name="${esc(p.name)}">
               ${avatarHTML(p, 'wz-avatar')}
               <span class="wz-pname">${esc(p.name)}</span>
               <span class="wz-prank">${li === -1 ? '' : `#${li + 1}`}</span>
               <button class="wz-pbtn" type="button" tabindex="-1">+</button>
             </div>`;
-        }).join('');
+      }).join('');
   }
 
   const slotHTML = (id) => (id ? `
@@ -619,9 +618,9 @@ function renderStep2Doubles({ allPlayers, ladderOrder }) {
           <span class="wz-lempty-s">Click two names on the left to form the first pair.</span>
         </div>`
       : ordered.map((pr) => {
-          const complete = pr[0] && pr[1];
-          if (complete) seed++;
-          return `
+        const complete = pr[0] && pr[1];
+        if (complete) seed++;
+        return `
             <div class="wz-pair${complete ? '' : ' wz-pair--open'}">
               <div class="wz-pair-head">
                 <span class="wz-pair-seed">${complete ? seed : ''}</span>
@@ -630,7 +629,7 @@ function renderStep2Doubles({ allPlayers, ladderOrder }) {
               </div>
               ${slotHTML(pr[0])}${slotHTML(pr[1])}
             </div>`;
-        }).join('');
+      }).join('');
   }
 
   function refresh() {
@@ -713,8 +712,7 @@ function renderStep2Doubles({ allPlayers, ladderOrder }) {
   document.getElementById('wizardCard').addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
     if (!el) return;
-    if (el.dataset.action === 'add-player') { addPlayer(Number(el.dataset.id)); w.modernDivisionPlayers = null; refresh(); }
-    else if (el.dataset.action === 'remove-pair-player') { removePlayer(Number(el.dataset.id)); refresh(); }
+    if (el.dataset.action === 'add-player') { addPlayer(Number(el.dataset.id)); w.modernDivisionPlayers = null; refresh(); } else if (el.dataset.action === 'remove-pair-player') { removePlayer(Number(el.dataset.id)); refresh(); }
   });
   _flushError();
 }
@@ -1344,7 +1342,7 @@ function renderStep5Modern() {
 }
 
 function openEditDivisionsModal() {
-  let workingDivs = state.wizard.modernDivisionPlayers.map((d) => [...d]);
+  const workingDivs = state.wizard.modernDivisionPlayers.map((d) => [...d]);
   let dragSource = null;
 
   const unit = _isDoubles() ? 'pairs' : 'players';
@@ -1419,7 +1417,7 @@ function renderStep5Traditional() {
   // Initialise / resize teamNames, preserving any custom names already entered
   if (state.wizard.teamNames.length !== numTeams) {
     state.wizard.teamNames = Array.from({ length: numTeams }, (_, i) =>
-      state.wizard.teamNames[i] || `Team ${LABELS[i]}`
+      state.wizard.teamNames[i] || `Team ${LABELS[i]}`,
     );
   }
   const teamNames = state.wizard.teamNames;
@@ -1450,7 +1448,7 @@ function renderStep5Traditional() {
         <span class="wz-fixlabel">Fixtures</span>
         ${round.map((mu) => mu.bye != null
           ? `<span class="wz-fixline wz-fixline--bye">${esc(teams[mu.bye].name)} &middot; bye</span>`
-          : `<span class="wz-fixline">${esc(teams[mu.team1].name)} vs ${esc(teams[mu.team2].name)}</span>`
+          : `<span class="wz-fixline">${esc(teams[mu.team1].name)} vs ${esc(teams[mu.team2].name)}</span>`,
         ).join('')}
       </div>
     </div>`).join('');
@@ -1484,8 +1482,8 @@ function renderStep5Traditional() {
 function openEditTeamsModal(numTeams, numDivisions) {
   const LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   // Work on a mutable copy of rankedPlayers and teamNames
-  let workingPlayers = [...state.wizard.rankedPlayers];
-  let workingNames = [...state.wizard.teamNames];
+  const workingPlayers = [...state.wizard.rankedPlayers];
+  const workingNames = [...state.wizard.teamNames];
 
   const getPlayer = (divIdx, teamIdx) => workingPlayers[divIdx * numTeams + teamIdx];
 
@@ -1601,7 +1599,7 @@ function addDaysPreview(dateStr, days) {
 
 function previewRoundRobin(indexes) {
   if (indexes.length < 2) return [];
-  let list = [...indexes];
+  const list = [...indexes];
   if (list.length % 2 === 1) list.push('BYE');
   const numRounds = list.length - 1;
   const half = list.length / 2;
@@ -1630,7 +1628,7 @@ async function submitCreateLeague() {
   btn.innerHTML = '<span class="spinner"></span> Creating…';
 
   const { leagueName, startDate, setupType, numRounds, blackoutDates,
-          matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
+    matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
 
   let payload;
   if (setupType === 'doubles') {
@@ -1638,7 +1636,7 @@ async function submitCreateLeague() {
       name: leagueName, startDate, setup_type: 'doubles',
       numRounds, blackoutDates, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPairs, dIdx) =>
-        divPairs.map((pr, pIdx) => ({ playerIds: [pr.a.id, pr.b.id], rank: dIdx * 1000 + pIdx + 1 }))
+        divPairs.map((pr, pIdx) => ({ playerIds: [pr.a.id, pr.b.id], rank: dIdx * 1000 + pIdx + 1 })),
       ),
     };
   } else if (setupType === 'modern') {
@@ -1646,7 +1644,7 @@ async function submitCreateLeague() {
       name: leagueName, startDate, setup_type: 'modern',
       numRounds, blackoutDates, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPlayers, dIdx) =>
-        divPlayers.map((p, pIdx) => ({ playerId: p.id, rank: dIdx * 1000 + pIdx + 1 }))
+        divPlayers.map((p, pIdx) => ({ playerId: p.id, rank: dIdx * 1000 + pIdx + 1 })),
       ),
     };
   } else {

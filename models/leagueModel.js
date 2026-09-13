@@ -16,7 +16,7 @@ function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_typ
        match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [name, startDate, numTeams, numDivisions, setup_type, numRounds, JSON.stringify(blackoutDates),
-     matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken]
+      matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken],
   );
   return result.lastID;
 }
@@ -28,14 +28,14 @@ function deleteLeague(id) {
 function getTeams(leagueId) {
   return all(
     'SELECT * FROM teams WHERE league_id = ? ORDER BY team_order ASC',
-    [leagueId]
+    [leagueId],
   );
 }
 
 function getDivisions(leagueId) {
   return all(
     'SELECT * FROM divisions WHERE league_id = ? ORDER BY level ASC',
-    [leagueId]
+    [leagueId],
   );
 }
 
@@ -50,14 +50,14 @@ function getLeaguePlayers(leagueId) {
      JOIN divisions d    ON lp.division_id = d.id
      WHERE lp.league_id = ?
      ORDER BY lp.skill_rank ASC`,
-    [leagueId]
+    [leagueId],
   );
 }
 
 function getWeeks(leagueId) {
   return all(
     'SELECT * FROM weeks WHERE league_id = ? ORDER BY week_number ASC',
-    [leagueId]
+    [leagueId],
   );
 }
 
@@ -76,7 +76,7 @@ function getMatchups(weekId) {
      LEFT JOIN divisions d ON tm.division_id = d.id
      WHERE tm.week_id = ?
      ORDER BY d.level ASC`,
-    [weekId]
+    [weekId],
   );
 }
 
@@ -95,7 +95,7 @@ function getWeekByes(weekId) {
      LEFT JOIN players pp2 ON pp2.id = lp.player2_id
      WHERE wb.week_id = ?
      ORDER BY d.level ASC`,
-    [weekId]
+    [weekId],
   );
 }
 
@@ -112,7 +112,7 @@ function getLeaguePairs(leagueId) {
      JOIN divisions d ON d.id = lp.division_id
      WHERE lp.league_id = ?
      ORDER BY d.level ASC, lp.skill_rank ASC`,
-    [leagueId]
+    [leagueId],
   );
 }
 
@@ -162,7 +162,7 @@ function getMatches(matchupId) {
      LEFT JOIN players sp4    ON sp4.id = s4.sub_player_id
      WHERE m.matchup_id = ?
      ORDER BY d.level ASC`,
-    [matchupId]
+    [matchupId],
   );
 }
 
@@ -179,7 +179,7 @@ function updateMatchScore({ matchId, player1Score, player2Score, winnerId, submi
        : `'played'`},
      played_at = ${clearing ? 'NULL' : "COALESCE(played_at, datetime('now'))"},
      submitted_by_player_id = ? WHERE id = ?`,
-    [player1Score ?? null, player2Score ?? null, winnerId ?? null, submittedByPlayerId ?? null, matchId]
+    [player1Score ?? null, player2Score ?? null, winnerId ?? null, submittedByPlayerId ?? null, matchId],
   );
 }
 
@@ -187,14 +187,14 @@ function setMatchSub(matchId, originalPlayerId, subPlayerId) {
   return run(
     `INSERT INTO match_subs (match_id, original_player_id, sub_player_id) VALUES (?, ?, ?)
      ON CONFLICT (match_id, original_player_id) DO UPDATE SET sub_player_id = excluded.sub_player_id`,
-    [matchId, originalPlayerId, subPlayerId]
+    [matchId, originalPlayerId, subPlayerId],
   );
 }
 
 function removeMatchSub(matchId, originalPlayerId) {
   return run(
     'DELETE FROM match_subs WHERE match_id = ? AND original_player_id = ?',
-    [matchId, originalPlayerId]
+    [matchId, originalPlayerId],
   );
 }
 
@@ -210,7 +210,7 @@ function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
      WHERE w.league_id = ?
        AND m.player1_score IS NULL
        AND (m.player1_id = ? OR m.player2_id = ? OR m.player1_partner_id = ? OR m.player2_partner_id = ?)`,
-    [leagueId, originalPlayerId, originalPlayerId, originalPlayerId, originalPlayerId]
+    [leagueId, originalPlayerId, originalPlayerId, originalPlayerId, originalPlayerId],
   );
   for (const m of remaining) {
     setMatchSub(m.id, originalPlayerId, subPlayerId);
@@ -225,7 +225,7 @@ function updateMatchTiming(matchId, matchTime, courtNumber, courtId = null) {
                      WHEN ? IS NOT NULL AND ? IS NOT NULL THEN 'scheduled'
                      ELSE 'unscheduled' END
      WHERE id = ?`,
-    [matchTime || null, courtNumber || null, courtId || null, matchId]
+    [matchTime || null, courtNumber || null, courtId || null, matchId],
   );
 }
 
@@ -235,7 +235,7 @@ function getLeagueCourts(leagueId) {
      JOIN league_courts lc ON lc.court_id = c.id
      WHERE lc.league_id = ?
      ORDER BY c.sort_order ASC, c.id ASC`,
-    [leagueId]
+    [leagueId],
   );
 }
 

@@ -90,9 +90,9 @@ function _groupsHTML() {
   const playerId = state.currentUser?.playerId;
   const groups = isAdmin()
     ? [['Active', shown.filter((l) => l.status === 'active')],
-       ['Completed', shown.filter((l) => l.status === 'completed')]]
+      ['Completed', shown.filter((l) => l.status === 'completed')]]
     : [['My Leagues', shown.filter((l) => (l.player_ids || []).includes(playerId))],
-       ['Other Leagues', shown.filter((l) => !(l.player_ids || []).includes(playerId))]];
+      ['Other Leagues', shown.filter((l) => !(l.player_ids || []).includes(playerId))]];
 
   const withCards = groups.filter(([, items]) => items.length > 0);
   if (withCards.length === 0) {
@@ -299,7 +299,7 @@ export function printBoxes(league) {
     .map((d) => ({
       ...d,
       players: d.players.slice().sort((a, b) =>
-        isModern ? (a.skill_rank - b.skill_rank) : (a.team_order - b.team_order)
+        isModern ? (a.skill_rank - b.skill_rank) : (a.team_order - b.team_order),
       ),
     }));
 
@@ -673,7 +673,6 @@ export function openMessagePlayersModal(league) {
 
 // ===== BULK INVITE =====
 export function openBulkInviteModal(league) {
-  const players = (league.players || []).filter((p) => p.player_email);
   modal.open('Send Account Invites', `
     <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px">
       This will send a personalized account activation email to every player in this league

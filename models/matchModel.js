@@ -289,8 +289,7 @@ function getHeadToHead(playerA, playerB, { limit = 5 } = {}) {
     // Games won by each side, oriented winner-first, which is how a squash
     // score is read aloud.
     let hi = r.player1_score, lo = r.player2_score;
-    if (hi == null || lo == null) { hi = null; lo = null; }
-    else if (r.won_side === 2) { [hi, lo] = [lo, hi]; }
+    if (hi == null || lo == null) { hi = null; lo = null; } else if (r.won_side === 2) { [hi, lo] = [lo, hi]; }
     return {
       id: r.id,
       type: r.type,

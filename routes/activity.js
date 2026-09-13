@@ -20,7 +20,7 @@ router.get('/activity', wrap(async (req, res) => {
       name ASC
   `).all();
   const ladderPlayerIds = new Set(players.map((p) => p.id));
-  let ranking = players.map((p) => p.id);
+  const ranking = players.map((p) => p.id);
 
   // One query over one table. The feed used to assemble three - league,
   // tournament and ladder - each with its own idea of the match date and of who

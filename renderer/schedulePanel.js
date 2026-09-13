@@ -675,7 +675,7 @@ async function doDelete(scope) {
       scope === 'future' ? 'Deleted this and all future events'
         : scope === 'all' ? 'Deleted all events'
         : `Deleted ${title}`,
-      !opts
+      !opts,
     );
     onDone?.(null);
   } catch (err) {

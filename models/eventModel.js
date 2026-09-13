@@ -94,7 +94,7 @@ function listEvents({ scope, today, viewerId, isAdmin = false }) {
   const rows = db.prepare(
     past
       ? `SELECT * FROM events WHERE event_date < ? ORDER BY event_date DESC, start_time ASC, id ASC`
-      : `SELECT * FROM events WHERE event_date >= ? ORDER BY event_date ASC, start_time ASC, id ASC`
+      : `SELECT * FROM events WHERE event_date >= ? ORDER BY event_date ASC, start_time ASC, id ASC`,
   ).all(today).filter((e) => !e.members_only || seesMembersOnly);
   return rows.map((e) => _shape(db, e, viewerId));
 }

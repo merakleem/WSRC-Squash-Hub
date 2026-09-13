@@ -229,7 +229,7 @@ router.post('/players/send-invite', requireAdmin, emailLimiter, wrap(async (req,
     const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
     db.prepare(`INSERT INTO user_accounts (player_id, invite_token, invite_expires)
       VALUES (?, ?, ?)
-      ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`
+      ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`,
     ).run(id, token, expires);
 
     const result = await sendEmail({
@@ -261,7 +261,7 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
 
   db.prepare(`INSERT INTO user_accounts (player_id, invite_token, invite_expires)
     VALUES (?, ?, ?)
-    ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`
+    ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires`,
   ).run(playerId, token, expires);
 
   const inviteUrl = `${appUrl(req)}/invite/${token}`;

@@ -84,10 +84,13 @@ export function avatarHTML(player, className) {
 }
 
 // ===== TOAST =====
+// The container is an aria-live region (index.html), so each toast is read
+// out as it lands; an error is an alert, which is announced at once.
 export function toast(msg, type = 'default') {
   const container = document.getElementById('toastContainer');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
   el.textContent = msg;
   container.appendChild(el);
   requestAnimationFrame(() => el.classList.add('show'));
@@ -101,10 +104,20 @@ export function toast(msg, type = 'default') {
 // `sticky` opts a modal out of close-on-backdrop-click (the backdrop nudges
 // instead); `onRequestClose` intercepts every polite close (✕, Esc, backdrop)
 // so a modal can confirm before discarding work. modal.close() always closes.
+//
+// The dialog is a real one for the keyboard and a screen reader: role=dialog
+// and aria-modal (index.html), focus moves into it on open, Tab cycles inside
+// it while it is open, and whatever had focus before gets it back on close.
+// A page may still focus a specific field after opening; that wins.
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export const modal = {
   _sticky: false,
   _onRequestClose: null,
+  _opener: null,
   open(title, bodyHTML, { wide = false, medium = false, sticky = false, onRequestClose = null } = {}) {
+    const wasOpen = document.getElementById('modalOverlay').classList.contains('open');
+    if (!wasOpen) this._opener = document.activeElement;
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = bodyHTML;
     document.getElementById('modal').classList.toggle('modal-wide', wide);
@@ -112,12 +125,38 @@ export const modal = {
     document.getElementById('modalOverlay').classList.add('open');
     this._sticky = sticky;
     this._onRequestClose = onRequestClose;
+    // The dialog itself takes focus (it has tabindex=-1), so the first Tab
+    // lands on its first control and a reader announces the title.
+    const dialog = document.getElementById('modal');
+    if (!dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
   },
   close() {
     document.getElementById('modal').classList.remove('modal-wide');
     document.getElementById('modalOverlay').classList.remove('open');
     this._sticky = false;
     this._onRequestClose = null;
+    const opener = this._opener;
+    this._opener = null;
+    if (opener && opener.isConnected && typeof opener.focus === 'function' && opener !== document.body) {
+      opener.focus({ preventScroll: true });
+    }
+  },
+  isOpen() {
+    return document.getElementById('modalOverlay').classList.contains('open');
+  },
+  /** Keep Tab inside the dialog while it is open. */
+  _trapTab(e) {
+    const dialog = document.getElementById('modal');
+    const items = [...dialog.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement);
+    if (!items.length) { e.preventDefault(); dialog.focus(); return; }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const inside = dialog.contains(document.activeElement);
+    if (e.shiftKey) {
+      if (!inside || document.activeElement === first || document.activeElement === dialog) { e.preventDefault(); last.focus(); }
+    } else if (!inside || document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
   },
   requestClose() {
     if (this._onRequestClose) this._onRequestClose();
@@ -141,9 +180,9 @@ document.getElementById('modalOverlay').addEventListener('click', (e) => {
   modal.close();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('modalOverlay').classList.contains('open')) {
-    modal.requestClose();
-  }
+  if (!modal.isOpen()) return;
+  if (e.key === 'Escape') modal.requestClose();
+  else if (e.key === 'Tab') modal._trapTab(e);
 });
 
 

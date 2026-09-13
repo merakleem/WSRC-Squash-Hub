@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal, avatarHTML } from '../utils.js';
+import { esc, modal, avatarHTML } from '../utils.js';
 
 // Which ladder: the singles rating ladder, or the doubles one beside it. Kept
 // across navigation, so coming back lands on the ladder you left.
