@@ -30,6 +30,20 @@ const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }
 const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
 const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
+// Pin the clock to 3 PM today, wherever this runs. The fixture stamps its
+// matches relative to now, so just after midnight a "yesterday, 90 minutes
+// earlier" stamp fell into the day before and the page grouped four days -
+// which is how the suite passed in Winnipeg and failed in a UTC CI runner.
+{
+  const RealDate = Date;
+  const fixed = new RealDate(); fixed.setHours(15, 0, 0, 0);
+  const FIXED = fixed.getTime();
+  window.Date = class extends RealDate {
+    constructor(...a) { a.length ? super(...a) : super(FIXED); }
+    static now() { return FIXED; }
+  };
+}
+
 const { state } = await import('../renderer/state.js');
 state.currentUser = { role: 'user', playerId: 99 };
 

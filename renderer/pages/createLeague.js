@@ -33,10 +33,17 @@ export function startCreateLeague() {
   window.navigate('createLeague');
 }
 
+// YYYY-MM-DD of a Date in the browser's own zone. toISOString() is UTC, and
+// from any zone past UTC+12 (or a local midnight anywhere east of Greenwich)
+// it names the day before.
+function localISODate(d) {
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
 function defaultStartDate() {
   const d = new Date();
   d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7 || 7)); // next Monday
-  return d.toISOString().split('T')[0];
+  return localISODate(d);
 }
 
 const STEP_LABELS = ['League info', 'Add players', 'Structure', 'Blackout dates', 'Preview'];
@@ -1594,7 +1601,7 @@ function openEditTeamsModal(numTeams, numDivisions) {
 function addDaysPreview(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return localISODate(d);
 }
 
 function previewRoundRobin(indexes) {
