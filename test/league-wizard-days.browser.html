@@ -102,6 +102,7 @@ try {
   ok('each week chip lists its play days', $$('.wz-wkchip-days').map(txt).join('|') === 'Mon 14 · Wed 16|Mon 21 · Wed 23|Mon 28 · Wed 30', $$('.wz-wkchip-days').map(txt).join('|'));
   type($('#wBlackoutDate'), '2026-09-15'); click($('#wAddBlackout')); await settle();   // a Tuesday
   ok('a blackout on a day the league does not play skips nothing', $$('.wz-wkchip-d').map(txt).join() === 'Sep 14,Sep 21,Sep 28', $$('.wz-wkchip-d').map(txt).join());
+  ok('and its row says so', txt($('.wz-bonote')) === 'Not a play day — nothing is skipped', txt($('.wz-bonote')));
   click($('[data-action="remove-blackout"]')); await settle();
   type($('#wBlackoutDate'), '2026-09-16'); click($('#wAddBlackout')); await settle();   // the Wednesday
   ok('a blackout on the Wednesday skips the whole week, Monday too', $$('.wz-wkchip-d').map(txt).join() === 'Sep 21,Sep 28,Oct 5', $$('.wz-wkchip-d').map(txt).join());

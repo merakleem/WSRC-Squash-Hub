@@ -187,6 +187,17 @@ function _divSizes(n, numDivisions) {
     Math.floor(n / numDivisions) + (i < n % numDivisions ? 1 : 0));
 }
 
+// What a blackout date does: a date on a play day skips its whole week; a
+// date the league does not play on skips nothing, and the row says so rather
+// than promising a shift the chips will not show.
+function _blackoutNote(dateStr) {
+  const days = _orderedPlayDays();
+  const dow = new Date(dateStr + 'T12:00:00').getDay();
+  if (!days.includes(dow)) return 'Not a play day &mdash; nothing is skipped';
+  if (days.length > 1) return `Whole week of ${_fmtShort(_weekAnchorOf(dateStr))} skipped &mdash; schedule shifts a week later`;
+  return 'Schedule shifts a week later';
+}
+
 // The first play day of the week a date falls in.
 function _weekAnchorOf(dateStr) {
   const dow = new Date(dateStr + 'T12:00:00').getDay();
@@ -1223,7 +1234,7 @@ function renderStep4() {
             : w.blackoutDates.map((d, i) => `
                 <div class="wz-borow">
                   <span class="wz-bodate">${_fmtLong(d)}</span>
-                  <span class="wz-bonote">${_orderedPlayDays().length > 1 ? `Whole week of ${_fmtShort(_weekAnchorOf(d))} skipped &mdash; schedule shifts a week later` : 'Schedule shifts a week later'}</span>
+                  <span class="wz-bonote">${_blackoutNote(d)}</span>
                   <button class="btn btn-outline btn-sm" data-action="remove-blackout" data-idx="${i}">Remove</button>
                 </div>`).join('')}
         </div>

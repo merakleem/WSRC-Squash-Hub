@@ -190,6 +190,9 @@ ok('and pushes the weeks back', $$('.wz-wkchip-d').map((e) => e.textContent).joi
 click($('[data-action="remove-blackout"]'));
 await settle();
 ok('remove restores the run', $$('.wz-wkchip-d')[1]?.textContent === 'Sep 21');
+type($('#wBlackoutDate'), '2026-09-22'); click($('#wAddBlackout')); await settle();   // a Tuesday on a Monday league
+ok('a date the league does not play on says it skips nothing', $('.wz-bonote')?.textContent === 'Not a play day — nothing is skipped' && $$('.wz-wkchip-d')[1]?.textContent === 'Sep 21', $('.wz-bonote')?.textContent);
+click($('[data-action="remove-blackout"]')); await settle();
 type($('#wBlackoutDate'), '2026-09-21');
 click($('#wAddBlackout'));
 await settle();
