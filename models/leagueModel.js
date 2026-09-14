@@ -1,22 +1,36 @@
 const { run, all, get, getDB } = require('../database/db');
 const crypto = require('crypto');
 
+/** leagues.play_days as an array of weekday numbers; [] when unset or unreadable. */
+function parsePlayDays(raw) {
+  try {
+    const arr = JSON.parse(raw || '[]');
+    return Array.isArray(arr) ? arr.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function _withPlayDays(row) {
+  return row ? { ...row, play_days: parsePlayDays(row.play_days) } : row;
+}
+
 function getAllLeagues() {
-  return all('SELECT * FROM leagues ORDER BY created_at DESC');
+  return all('SELECT * FROM leagues ORDER BY created_at DESC').map(_withPlayDays);
 }
 
 function getLeagueById(id) {
-  return get('SELECT * FROM leagues WHERE id = ?', [id]);
+  return _withPlayDays(get('SELECT * FROM leagues WHERE id = ?', [id]));
 }
 
-function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_type = 'traditional', numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_type = 'traditional', numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, playDays = [] }) {
   const publicToken = crypto.randomBytes(2).toString('hex');
   const result = run(
     `INSERT INTO leagues (name, start_date, num_teams, num_divisions, setup_type, num_rounds, blackout_dates,
-       match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token, play_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [name, startDate, numTeams, numDivisions, setup_type, numRounds, JSON.stringify(blackoutDates),
-     matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken]
+      matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken, JSON.stringify(playDays)],
   );
   return result.lastID;
 }
@@ -28,14 +42,14 @@ function deleteLeague(id) {
 function getTeams(leagueId) {
   return all(
     'SELECT * FROM teams WHERE league_id = ? ORDER BY team_order ASC',
-    [leagueId]
+    [leagueId],
   );
 }
 
 function getDivisions(leagueId) {
   return all(
     'SELECT * FROM divisions WHERE league_id = ? ORDER BY level ASC',
-    [leagueId]
+    [leagueId],
   );
 }
 
@@ -50,14 +64,14 @@ function getLeaguePlayers(leagueId) {
      JOIN divisions d    ON lp.division_id = d.id
      WHERE lp.league_id = ?
      ORDER BY lp.skill_rank ASC`,
-    [leagueId]
+    [leagueId],
   );
 }
 
 function getWeeks(leagueId) {
   return all(
     'SELECT * FROM weeks WHERE league_id = ? ORDER BY week_number ASC',
-    [leagueId]
+    [leagueId],
   );
 }
 
@@ -76,19 +90,43 @@ function getMatchups(weekId) {
      LEFT JOIN divisions d ON tm.division_id = d.id
      WHERE tm.week_id = ?
      ORDER BY d.level ASC`,
-    [weekId]
+    [weekId],
   );
 }
 
 function getWeekByes(weekId) {
+  // A doubles bye belongs to a pair; player_id still carries the pair's first
+  // player so older readers keep working.
   return all(
-    `SELECT wb.*, p.name AS player_name, d.name AS division_name, d.level AS division_level
+    `SELECT wb.*, p.name AS player_name, d.name AS division_name, d.level AS division_level,
+            lp.player1_id AS pair_player1_id, pp1.name AS pair_player1_name,
+            lp.player2_id AS pair_player2_id, pp2.name AS pair_player2_name
      FROM week_byes wb
      JOIN players p ON wb.player_id = p.id
      JOIN divisions d ON wb.division_id = d.id
+     LEFT JOIN league_pairs lp ON lp.id = wb.pair_id
+     LEFT JOIN players pp1 ON pp1.id = lp.player1_id
+     LEFT JOIN players pp2 ON pp2.id = lp.player2_id
      WHERE wb.week_id = ?
      ORDER BY d.level ASC`,
-    [weekId]
+    [weekId],
+  );
+}
+
+/** The pairs of a doubles league, seeded order within each division. */
+function getLeaguePairs(leagueId) {
+  return all(
+    `SELECT lp.*,
+            p1.name AS player1_name, p1.photo_path AS player1_photo,
+            p2.name AS player2_name, p2.photo_path AS player2_photo,
+            d.name AS division_name, d.level AS division_level
+     FROM league_pairs lp
+     JOIN players p1 ON p1.id = lp.player1_id
+     JOIN players p2 ON p2.id = lp.player2_id
+     JOIN divisions d ON d.id = lp.division_id
+     WHERE lp.league_id = ?
+     ORDER BY d.level ASC, lp.skill_rank ASC`,
+    [leagueId],
   );
 }
 
@@ -96,17 +134,34 @@ function getMatches(matchupId) {
   return all(
     `SELECT m.*,
             p1.name  AS player1_name,
+            p1.photo_path AS player1_photo,
             p2.name  AS player2_name,
+            p2.photo_path AS player2_photo,
             d.id     AS division_id,
             d.name   AS division_name,
             d.level  AS division_level,
             s1.sub_player_id AS sub1_id,
             sp1.name         AS sub1_name,
+            sp1.photo_path   AS sub1_photo,
             s2.sub_player_id AS sub2_id,
             sp2.name         AS sub2_name,
+            sp2.photo_path   AS sub2_photo,
+            -- Doubles: the partners and their substitutes. Null on singles rows.
+            p1b.name         AS player1_partner_name,
+            p1b.photo_path   AS player1_partner_photo,
+            p2b.name         AS player2_partner_name,
+            p2b.photo_path   AS player2_partner_photo,
+            s3.sub_player_id AS sub3_id,
+            sp3.name         AS sub3_name,
+            sp3.photo_path   AS sub3_photo,
+            s4.sub_player_id AS sub4_id,
+            sp4.name         AS sub4_name,
+            sp4.photo_path   AS sub4_photo,
             -- The column is scheduled_time now; match_time is what every view of a
-            -- league match already calls it.
-            m.scheduled_time AS match_time
+            -- league match already calls it. scheduled_date is the match's own
+            -- play day: a week can have several, so the week's date is not it.
+            m.scheduled_time AS match_time,
+            m.scheduled_date
      FROM matches m
      JOIN players p1   ON m.player1_id = p1.id
      JOIN players p2   ON m.player2_id = p2.id
@@ -115,9 +170,15 @@ function getMatches(matchupId) {
      LEFT JOIN players sp1    ON sp1.id = s1.sub_player_id
      LEFT JOIN match_subs s2  ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
      LEFT JOIN players sp2    ON sp2.id = s2.sub_player_id
+     LEFT JOIN players p1b    ON p1b.id = m.player1_partner_id
+     LEFT JOIN players p2b    ON p2b.id = m.player2_partner_id
+     LEFT JOIN match_subs s3  ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+     LEFT JOIN players sp3    ON sp3.id = s3.sub_player_id
+     LEFT JOIN match_subs s4  ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
+     LEFT JOIN players sp4    ON sp4.id = s4.sub_player_id
      WHERE m.matchup_id = ?
      ORDER BY d.level ASC`,
-    [matchupId]
+    [matchupId],
   );
 }
 
@@ -134,7 +195,7 @@ function updateMatchScore({ matchId, player1Score, player2Score, winnerId, submi
        : `'played'`},
      played_at = ${clearing ? 'NULL' : "COALESCE(played_at, datetime('now'))"},
      submitted_by_player_id = ? WHERE id = ?`,
-    [player1Score ?? null, player2Score ?? null, winnerId ?? null, submittedByPlayerId ?? null, matchId]
+    [player1Score ?? null, player2Score ?? null, winnerId ?? null, submittedByPlayerId ?? null, matchId],
   );
 }
 
@@ -142,14 +203,14 @@ function setMatchSub(matchId, originalPlayerId, subPlayerId) {
   return run(
     `INSERT INTO match_subs (match_id, original_player_id, sub_player_id) VALUES (?, ?, ?)
      ON CONFLICT (match_id, original_player_id) DO UPDATE SET sub_player_id = excluded.sub_player_id`,
-    [matchId, originalPlayerId, subPlayerId]
+    [matchId, originalPlayerId, subPlayerId],
   );
 }
 
 function removeMatchSub(matchId, originalPlayerId) {
   return run(
     'DELETE FROM match_subs WHERE match_id = ? AND original_player_id = ?',
-    [matchId, originalPlayerId]
+    [matchId, originalPlayerId],
   );
 }
 
@@ -164,8 +225,8 @@ function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
      JOIN weeks w ON tm.week_id = w.id
      WHERE w.league_id = ?
        AND m.player1_score IS NULL
-       AND (m.player1_id = ? OR m.player2_id = ?)`,
-    [leagueId, originalPlayerId, originalPlayerId]
+       AND (m.player1_id = ? OR m.player2_id = ? OR m.player1_partner_id = ? OR m.player2_partner_id = ?)`,
+    [leagueId, originalPlayerId, originalPlayerId, originalPlayerId, originalPlayerId],
   );
   for (const m of remaining) {
     setMatchSub(m.id, originalPlayerId, subPlayerId);
@@ -174,14 +235,14 @@ function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
 }
 
 function updateMatchTiming(matchId, matchTime, courtNumber, courtId = null) {
-  return run(
-    `UPDATE matches SET scheduled_time = ?, court_number = ?, court_id = ?,
+  // Scheduled means a time and a court, whichever way the court is named.
+  return getDB().prepare(
+    `UPDATE matches SET scheduled_time = @time, court_number = @courtNumber, court_id = @courtId,
        status = CASE WHEN status = 'played' THEN 'played'
-                     WHEN ? IS NOT NULL AND ? IS NOT NULL THEN 'scheduled'
+                     WHEN @time IS NOT NULL AND @court IS NOT NULL THEN 'scheduled'
                      ELSE 'unscheduled' END
-     WHERE id = ?`,
-    [matchTime || null, courtNumber || null, courtId || null, matchId]
-  );
+     WHERE id = @id`,
+  ).run({ time: matchTime || null, courtNumber: courtNumber || null, courtId: courtId || null, court: courtId || courtNumber || null, id: matchId });
 }
 
 function getLeagueCourts(leagueId) {
@@ -190,7 +251,7 @@ function getLeagueCourts(leagueId) {
      JOIN league_courts lc ON lc.court_id = c.id
      WHERE lc.league_id = ?
      ORDER BY c.sort_order ASC, c.id ASC`,
-    [leagueId]
+    [leagueId],
   );
 }
 
@@ -227,7 +288,49 @@ function replacePlayerInLeague(leagueId, oldPlayerId, newPlayerId) {
   })();
 }
 
+/**
+ * Swap one partner out of a pair for the rest of a doubles league. The pair
+ * keeps its id, its fixtures, its results and its seed; only the person
+ * changes, everywhere the old player appears for this league.
+ */
+function replacePairPlayer(leagueId, pairId, oldPlayerId, newPlayerId) {
+  const db = getDB();
+  const pair = db.prepare('SELECT * FROM league_pairs WHERE id = ? AND league_id = ?').get(pairId, leagueId);
+  if (!pair) throw _validationError('Pair not found.');
+  if (pair.player1_id !== oldPlayerId && pair.player2_id !== oldPlayerId) throw _validationError('That player is not in this pair.');
+  if (!db.prepare('SELECT 1 FROM players WHERE id = ?').get(newPlayerId)) throw _validationError('Replacement player not found.');
+  const taken = db.prepare('SELECT 1 FROM league_pairs WHERE league_id = ? AND (player1_id = ? OR player2_id = ?)').get(leagueId, newPlayerId, newPlayerId);
+  if (taken) throw _validationError('That player is already in a pair in this league.');
+
+  db.transaction(() => {
+    const col = pair.player1_id === oldPlayerId ? 'player1_id' : 'player2_id';
+    db.prepare(`UPDATE league_pairs SET ${col} = ? WHERE id = ?`).run(newPlayerId, pairId);
+    db.prepare('UPDATE league_players SET player_id = ? WHERE player_id = ? AND league_id = ?')
+      .run(newPlayerId, oldPlayerId, leagueId);
+    const inPair = `league_id = ? AND (pair1_id = ? OR pair2_id = ?)`;
+    for (const c of ['player1_id', 'player1_partner_id', 'player2_id', 'player2_partner_id', 'winner_id']) {
+      db.prepare(`UPDATE matches SET ${c} = ? WHERE ${c} = ? AND ${inPair}`).run(newPlayerId, oldPlayerId, leagueId, pairId, pairId);
+    }
+    const subMatches = `match_id IN (SELECT id FROM matches WHERE ${inPair})`;
+    db.prepare(`UPDATE match_subs SET original_player_id = ? WHERE original_player_id = ? AND ${subMatches}`)
+      .run(newPlayerId, oldPlayerId, leagueId, pairId, pairId);
+    db.prepare(`UPDATE match_subs SET sub_player_id = ? WHERE sub_player_id = ? AND ${subMatches}`)
+      .run(newPlayerId, oldPlayerId, leagueId, pairId, pairId);
+    db.prepare('UPDATE week_byes SET player_id = ? WHERE player_id = ? AND pair_id = ?')
+      .run(newPlayerId, oldPlayerId, pairId);
+  })();
+}
+
+function _validationError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
 module.exports = {
+  parsePlayDays,
+  getLeaguePairs,
+  replacePairPlayer,
   getAllLeagues,
   getLeagueById,
   createLeagueRecord,

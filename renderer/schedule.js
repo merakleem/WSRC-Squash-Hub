@@ -383,7 +383,7 @@ export async function renderSchedule() {
     </div>` : '';
 
   const courtColumnsHTML = courts.map((court) =>
-    `<div class="sch-court-col" style="height:${BASE_GRID_H}px" data-court-id="${court.id}">${gridLinesHTML}</div>`
+    `<div class="sch-court-col" style="height:${BASE_GRID_H}px" data-court-id="${court.id}">${gridLinesHTML}</div>`,
   ).join('');
 
   // The veil dims everything already gone; the now line marks the moment.
@@ -624,8 +624,7 @@ export async function renderSchedule() {
       let _playersCache = null;
       async function openPanel(mode, extra) {
         if (!_playersCache) {
-          try { _playersCache = await window.api.getPlayers(); }
-          catch (err) { toast(err.message, 'error'); return; }
+          try { _playersCache = await window.api.getPlayers(); } catch (err) { toast(err.message, 'error'); return; }
         }
         openBookingPanel({
           mode,

@@ -110,19 +110,19 @@ function addBooking({ courtId, courtIds, date, startTime, durationMinutes, booki
   if (effectiveCourtIds.length === 1) {
     const result = run(
       'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, booked_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, bookedBy || null]
+      [effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, bookedBy || null],
     );
     _setBookingPlayers(db, result.lastID, playerIds);
     const booking = get(
       'SELECT b.*, bt.name AS type_name, bt.color AS type_color FROM bookings b LEFT JOIN booking_types bt ON bt.id = b.booking_type_id WHERE b.id = ?',
-      [result.lastID]
+      [result.lastID],
     );
     booking.players = db.prepare('SELECT p.id, p.name FROM booking_players bp JOIN players p ON p.id = bp.player_id WHERE bp.booking_id = ? ORDER BY bp.id ASC').all(result.lastID);
     return booking;
   } else {
     const first = run(
       'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null]
+      [effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null],
     );
     const groupId = first.lastID;
     run('UPDATE bookings SET group_id = ? WHERE id = ?', [groupId, groupId]);
@@ -131,7 +131,7 @@ function addBooking({ courtId, courtIds, date, startTime, durationMinutes, booki
     for (let i = 1; i < effectiveCourtIds.length; i++) {
       const r = run(
         'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [effectiveCourtIds[i], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, groupId]
+        [effectiveCourtIds[i], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, groupId],
       );
       memberIds.push(r.lastID);
     }
@@ -181,7 +181,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
 
     run(
       'UPDATE bookings SET court_id=?, date=?, start_time=?, duration_minutes=?, booking_type_id=?, name=?, info=?, group_id=? WHERE id=?',
-      [newCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, newCourtIds.length > 1 ? groupId : null, groupId]
+      [newCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, newCourtIds.length > 1 ? groupId : null, groupId],
     );
     for (const row of memberRows) {
       if (row.id !== groupId) run('DELETE FROM bookings WHERE id = ?', [row.id]);
@@ -189,7 +189,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
     for (let i = 1; i < newCourtIds.length; i++) {
       run(
         'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [newCourtIds[i], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, groupId]
+        [newCourtIds[i], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, groupId],
       );
     }
     _setBookingPlayers(db, groupId, playerIds);
@@ -197,7 +197,7 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
     if (newCourtIds.length === 1) {
       return get(
         'SELECT b.*, bt.name AS type_name, bt.color AS type_color FROM bookings b LEFT JOIN booking_types bt ON bt.id = b.booking_type_id WHERE b.id = ?',
-        [groupId]
+        [groupId],
       );
     }
     const newMembers = db.prepare('SELECT id, court_id FROM bookings WHERE group_id = ?').all(groupId);
@@ -209,12 +209,12 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
       }
       run(
         'UPDATE bookings SET court_id=?, date=?, start_time=?, duration_minutes=?, booking_type_id=?, name=?, info=? WHERE id=?',
-        [newCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, id]
+        [newCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, id],
       );
       _setBookingPlayers(db, Number(id), playerIds);
       return get(
         'SELECT b.*, bt.name AS type_name, bt.color AS type_color FROM bookings b LEFT JOIN booking_types bt ON bt.id = b.booking_type_id WHERE b.id = ?',
-        [id]
+        [id],
       );
     } else {
       for (const cId of newCourtIds) {
@@ -225,14 +225,14 @@ function updateBooking({ id, courtId, courtIds, date, startTime, durationMinutes
       const groupId = Number(id);
       run(
         'UPDATE bookings SET court_id=?, date=?, start_time=?, duration_minutes=?, booking_type_id=?, name=?, info=?, group_id=? WHERE id=?',
-        [newCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, groupId, id]
+        [newCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, groupId, id],
       );
       _setBookingPlayers(db, groupId, playerIds);
       const memberIds = [groupId];
       for (let i = 1; i < newCourtIds.length; i++) {
         const r = run(
           'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [newCourtIds[i], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, groupId]
+          [newCourtIds[i], date, startTime, durationMinutes, bookingTypeId || null, newName, newInfo, groupId],
         );
         memberIds.push(r.lastID);
       }
@@ -284,7 +284,7 @@ function createRepeatBookings(baseData, repeatOptions) {
   const txn = db.transaction(() => {
     for (const date of dates) {
       const hasLeagueConflict = effectiveCourtIds.some((cId) =>
-        _checkLeagueConflict(db, cId, date, startTime, durationMinutes)
+        _checkLeagueConflict(db, cId, date, startTime, durationMinutes),
       );
       if (hasLeagueConflict) {
         leagueConflicts.push(date);
@@ -293,7 +293,7 @@ function createRepeatBookings(baseData, repeatOptions) {
       }
 
       const hasBookingConflict = effectiveCourtIds.some((cId) =>
-        _checkConflict(cId, date, startTime, durationMinutes, [])
+        _checkConflict(cId, date, startTime, durationMinutes, []),
       );
 
       if (hasBookingConflict) {
@@ -320,7 +320,7 @@ function createRepeatBookings(baseData, repeatOptions) {
 
       if (effectiveCourtIds.length === 1) {
         const r = db.prepare(
-          'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         ).run(effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, null);
         const newId = r.lastInsertRowid;
         if (repeatGroupId === null) repeatGroupId = newId;
@@ -329,7 +329,7 @@ function createRepeatBookings(baseData, repeatOptions) {
         createdIds.push(newId);
       } else {
         const r = db.prepare(
-          'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         ).run(effectiveCourtIds[0], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, null);
         const firstId = r.lastInsertRowid;
         db.prepare('UPDATE bookings SET group_id = ? WHERE id = ?').run(firstId, firstId);
@@ -339,7 +339,7 @@ function createRepeatBookings(baseData, repeatOptions) {
         createdIds.push(firstId);
         for (let i = 1; i < effectiveCourtIds.length; i++) {
           db.prepare(
-            'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, group_id, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO bookings (court_id, date, start_time, duration_minutes, booking_type_id, name, info, group_id, repeat_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
           ).run(effectiveCourtIds[i], date, startTime, durationMinutes, bookingTypeId || null, name || null, info || null, firstId, repeatGroupId);
         }
       }
@@ -403,7 +403,7 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
     `SELECT bp.booking_id, bp.player_id, p.name AS player_name
      FROM booking_players bp JOIN players p ON p.id = bp.player_id
      WHERE bp.booking_id IN (${ids.map(() => '?').join(',')})
-     ORDER BY bp.id ASC`
+     ORDER BY bp.id ASC`,
   ).all(...ids);
 
   const playersByBookingId = new Map();
@@ -421,7 +421,7 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
       `SELECT b.group_id, c.name AS court_name
        FROM bookings b LEFT JOIN courts c ON c.id = b.court_id
        WHERE b.group_id IN (${groupIds.map(() => '?').join(',')})
-       ORDER BY c.sort_order ASC, b.court_id ASC`
+       ORDER BY c.sort_order ASC, b.court_id ASC`,
     ).all(...groupIds);
     for (const row of spans) {
       if (!courtsByGroup.has(row.group_id)) courtsByGroup.set(row.group_id, []);
@@ -475,6 +475,9 @@ function getScheduleForDate(date) {
       l.match_duration,
       COALESCE(sp1.name, p1.name) AS eff_p1_name,
       COALESCE(sp2.name, p2.name) AS eff_p2_name,
+      m.format,
+      COALESCE(sp3.name, p1b.name) AS eff_p1b_name,
+      COALESCE(sp4.name, p2b.name) AS eff_p2b_name,
       l.name AS league_name
     FROM matches m
     JOIN leagues l        ON l.id = m.league_id
@@ -484,6 +487,12 @@ function getScheduleForDate(date) {
     LEFT JOIN match_subs s2  ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
     LEFT JOIN players sp1    ON sp1.id = s1.sub_player_id
     LEFT JOIN players sp2    ON sp2.id = s2.sub_player_id
+    LEFT JOIN players p1b    ON p1b.id = m.player1_partner_id
+    LEFT JOIN players p2b    ON p2b.id = m.player2_partner_id
+    LEFT JOIN match_subs s3  ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+    LEFT JOIN match_subs s4  ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
+    LEFT JOIN players sp3    ON sp3.id = s3.sub_player_id
+    LEFT JOIN players sp4    ON sp4.id = s4.sub_player_id
     WHERE m.type = 'league' AND m.scheduled_date = ?
       AND m.court_id IS NOT NULL
       AND m.scheduled_time IS NOT NULL
@@ -546,7 +555,7 @@ function getScheduleForDate(date) {
       const groupId = rows[0].group_id;
       const rep = rows.find((r) => r.id === groupId) || rows[0];
       const sorted = [...rows].sort(
-        (a, b2) => (courtOrderById.get(a.court_id) ?? 999) - (courtOrderById.get(b2.court_id) ?? 999)
+        (a, b2) => (courtOrderById.get(a.court_id) ?? 999) - (courtOrderById.get(b2.court_id) ?? 999),
       );
       return {
         id: groupId,
@@ -592,7 +601,12 @@ function getScheduleForDate(date) {
       startTime: m.start_time,
       durationMinutes: m.match_duration || 45,
       title: 'League Match',
-      info: `${m.eff_p1_name} vs ${m.eff_p2_name}`,
+      // A doubles fixture names both pairs, so the grid never shows two
+      // pair leaders as if they were playing singles.
+      format: m.format || 'singles',
+      info: m.format === 'doubles'
+        ? `${m.eff_p1_name} & ${m.eff_p1b_name} vs ${m.eff_p2_name} & ${m.eff_p2b_name}`
+        : `${m.eff_p1_name} vs ${m.eff_p2_name}`,
       color: '#6b7589',
       players: [],
       repeatGroupId: null,

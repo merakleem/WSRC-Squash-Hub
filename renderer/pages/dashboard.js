@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal, formatShortDate, abbrevName, playerInitials, clubNow, clubTodayStr } from '../utils.js';
+import { esc, toast, modal, formatShortDate, abbrevName, avatarInner, clubNow, clubTodayStr } from '../utils.js';
 
 // ===== DASHBOARD HELPERS =====
 function timeAgo(utcStr) {
@@ -109,19 +109,36 @@ function _caDaySub(date) {
 
 function _caShape(m) {
   const p1Won = m.won_side != null ? m.won_side === 1 : m.winner_id === m.player1_id;
+  const { date, minutes } = _caWhen(m.confirmed_at);
+  // A doubles result: two sides of two, no ladder places, tagged as the
+  // doubles ladder or its league.
+  if (m.format === 'doubles') {
+    const t1 = (m.team1 || []).map((p) => ({ id: p.id, name: p.name, photo_path: p.photo_path || null, pos: null }));
+    const t2 = (m.team2 || []).map((p) => ({ id: p.id, name: p.name, photo_path: p.photo_path || null, pos: null }));
+    const wScore = p1Won ? m.player1_score : m.player2_score;
+    const lScore = p1Won ? m.player2_score : m.player1_score;
+    return {
+      id: m.id, source: m.source, format: 'doubles',
+      winners: p1Won ? t1 : t2, losers: p1Won ? t2 : t1,
+      score: `${wScore}–${lScore}`, date, minutes,
+      tag: m.source === 'league' ? (m.league_name || 'League') : 'Doubles ladder',
+      moved: 0,
+      by: m.submitted_by_name || '',
+    };
+  }
   const side = (one) => ({
     id: one ? (m.eff_p1_id ?? m.player1_id) : (m.eff_p2_id ?? m.player2_id),
     name: one ? m.p1_name : m.p2_name,
+    photo_path: (one ? m.p1_photo : m.p2_photo) || null,
     pos: one ? m.p1_pos : m.p2_pos,
     score: one ? m.player1_score : m.player2_score,
   });
   const w = side(p1Won), l = side(!p1Won);
-  const { date, minutes } = _caWhen(m.confirmed_at);
   const tag = m.source === 'league' ? (m.league_name || 'League')
     : m.source === 'tournament' ? [m.tournament_name || 'Tournament', _roundLabels[m.round] || m.round || ''].filter(Boolean).join(' · ')
     : 'Ladder';
   return {
-    id: m.id, source: m.source, winners: [w], losers: [l],
+    id: m.id, source: m.source, format: 'singles', winners: [w], losers: [l],
     score: `${w.score}–${l.score}`, date, minutes, tag,
     moved: m.places_moved > 0 ? m.places_moved : 0,
     by: m.submitted_by_name || '',
@@ -141,14 +158,14 @@ function _caMatching() {
 
 function _caRowHTML(m, admin) {
   const avatars = [...m.winners.map((p) => ({ ...p, win: true })), ...m.losers.map((p) => ({ ...p, win: false }))]
-    .map((p) => `<span class="ca-av${p.win ? '' : ' ca-av--lost'}" title="${esc(p.name)}" style="background:${CA_AVATAR_COLORS[Math.abs(Number(p.id) || 0) % CA_AVATAR_COLORS.length]}">${esc(playerInitials(p.name))}</span>`)
+    .map((p) => `<span class="ca-av${p.win ? '' : ' ca-av--lost'}" title="${esc(p.name)}"${p.photo_path ? '' : ` style="background:${CA_AVATAR_COLORS[Math.abs(Number(p.id) || 0) % CA_AVATAR_COLORS.length]}"`}>${avatarInner(p)}</span>`)
     .join('');
   const moved = m.moved
     ? `<span class="ca-moved">${CA_ICON.up}${esc(abbrevName(m.winners[0].name))} up ${m.moved} place${m.moved !== 1 ? 's' : ''}</span>` : '';
   const by = admin && m.source !== 'tournament'
     ? `<span class="ca-by">Submitted by ${esc(abbrevName(m.by) || 'Admin')}</span>` : '';
   const del = admin && m.source === 'pickup'
-    ? `<button class="ca-del" data-del="${m.id}" aria-label="Delete this ladder match" title="Delete">${CA_ICON.trash}</button>` : '';
+    ? `<button class="ca-del" data-del="${m.id}" data-format="${m.format || 'singles'}" aria-label="Delete this ladder match" title="Delete">${CA_ICON.trash}</button>` : '';
   return `
     <article class="ca-row" data-match="${m.id}">
       <div class="ca-avs">${avatars}</div>
@@ -317,7 +334,8 @@ function _caRenderDialog() {
   wrap.querySelector('#caConfirmDelete').addEventListener('click', async () => {
     const id = ca.confirmId;
     try {
-      await window.api.deletePickupMatch(id);
+      if (m.format === 'doubles') await window.api.deleteDoublesMatch(id);
+      else await window.api.deletePickupMatch(id);
       ca.all = ca.all.filter((x) => x.id !== id);
       ca.confirmId = null;
       wrap.remove();
@@ -370,8 +388,7 @@ export async function renderClubActivity() {
 // browsers without supportedValuesOf get a short list of plausible zones.
 function _timezoneOptionsHTML(current) {
   let zones;
-  try { zones = Intl.supportedValuesOf('timeZone'); }
-  catch (_) {
+  try { zones = Intl.supportedValuesOf('timeZone'); } catch (_) {
     zones = ['America/Winnipeg', 'America/Toronto', 'America/Vancouver', 'America/Edmonton',
       'America/Regina', 'America/Halifax', 'America/St_Johns', 'UTC'];
   }
@@ -893,7 +910,7 @@ function _courtStatus(court, slots, nowMins) {
   }
 
   const courtSlots = slots.filter((s) =>
-    s.courtId === court.id || (s.courtIds && s.courtIds.includes(court.id))
+    s.courtId === court.id || (s.courtIds && s.courtIds.includes(court.id)),
   ).map((s) => ({ ...s, _startMins: _parseTimeMins(s.startTime) }))
     .filter((s) => s._startMins !== null);
 
@@ -1015,14 +1032,32 @@ export async function renderDashboard() {
 
   // Player dashboard — fetch data in parallel
   const playerId = user.playerId;
-  const [playerData, ladder, activity] = await Promise.all([
+  const [playerData, ladder, activity, doubles] = await Promise.all([
     fetch(`/api/players/${playerId}/history`).then((r) => r.json()),
     window.api.getLadder(),
     window.api.getActivity(),
+    Promise.resolve().then(() => (window.api.getPlayerDoubles ? window.api.getPlayerDoubles(playerId) : null)).catch(() => null),
   ]);
 
-  const upcoming = playerData.upcoming || [];
-  const history = (playerData.history || []).slice(0, 8);
+  // Doubles fixtures and results sit beside the singles ones here, tagged, so
+  // the next match is the next match whatever the format. The rank ring and
+  // the season record stay singles, as the profile header does.
+  const pairName = (list) => (list || []).map((o) => o.name).join(' & ');
+  const dblUpcoming = (doubles?.upcoming || []).map((m) => ({
+    id: m.id, week_date: m.week_date, match_time: m.match_time, court_name: m.court_name,
+    league_name: m.league_name, division_name: m.division_name, week_number: m.week_number,
+    opponent_id: null, opponent_name: pairName(m.opponents), partner_name: m.partner?.name || '', format: 'doubles',
+  }));
+  const dblHistory = (doubles?.history || []).map((m) => ({
+    id: m.id, week_date: m.played_at, result: m.result, opponent_id: null, opponent_name: pairName(m.opponents),
+    partner_name: m.partner?.name || '', format: 'doubles', my_score: m.my_score, their_score: m.their_score,
+  }));
+  const upcoming = [...(playerData.upcoming || []), ...dblUpcoming]
+    .sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
+  const history = [...(playerData.history || []), ...dblHistory]
+    .sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''))
+    .slice(0, 8);
+  const dblChip = (m) => (m?.format === 'doubles' ? '<span class="db-dbl-chip">Doubles</span>' : '');
   const ladderVisible = ladder.filter((p) => !p.exclude_from_ladder);
   const ladderPos = ladderVisible.findIndex((p) => p.id === playerId);
   const rank = ladderPos >= 0 ? ladderPos + 1 : null;
@@ -1063,17 +1098,13 @@ export async function renderDashboard() {
     return new Date(parts[0], parts[1] - 1, parts[2])
       .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
-
-  function countdownLabel(dStr, tStr) {
-    if (!dStr) return null;
-    const base = new Date(dStr + 'T' + (tStr || '12:00') + ':00');
-    const diff = base - new Date();
-    if (diff <= 0) return 'Today';
-    const days = Math.floor(diff / 86400000);
-    const hrs = Math.floor((diff % 86400000) / 3600000);
-    if (days > 0) return `In ${days}d ${hrs}h`;
-    const mins = Math.floor((diff % 3600000) / 60000);
-    return `In ${hrs}h ${mins}m`;
+  // A scheduled match names its weekday: a league can play several days a
+  // week, and the day is what a player needs to know.
+  function fmtUpcomingDate(d) {
+    if (!d) return '';
+    const parts = d.slice(0, 10).split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2])
+      .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
   // Hero card (full-width, card-styled, left/right layout)
@@ -1084,6 +1115,7 @@ export async function renderDashboard() {
       nextMatch.match_time ? `<span class="dh-pill">${esc(nextMatch.match_time)}</span>` : '',
       isAdmin() && (nextMatch.court_name || (nextMatch.schedule_courts && nextMatch.court_number)) ? `<span class="dh-pill">${nextMatch.court_name || `Court ${nextMatch.court_number}`}</span>` : '',
       nextMatch.division_name ? `<span class="dh-pill">${esc(nextMatch.division_name)}</span>` : '',
+      nextMatch.partner_name ? `<span class="dh-pill">with ${esc(nextMatch.partner_name)}</span>` : '',
     ].filter(Boolean).join('') : '';
     const countdownInnerHTML = (() => {
       if (!nextMatch?.week_date) return '';
@@ -1103,7 +1135,7 @@ export async function renderDashboard() {
           ${nextMatch ? `
             <div class="dh-hero-left">
               <div class="dh-match-label">${esc(leagueLabel)}</div>
-              <div class="dh-matchup" data-match="${nextMatch.id}">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}</div>
+              <div class="dh-matchup" data-match="${nextMatch.id}">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}${dblChip(nextMatch)}</div>
               <div class="dh-pills">${pills}</div>
             </div>
             ${countdownInnerHTML ? `
@@ -1185,8 +1217,8 @@ export async function renderDashboard() {
         : `<div class="db-upcoming-rows">
             ${upcoming.slice(0, 5).map((m) => `
               <div class="db-upcoming-row">
-                <div class="db-upcoming-date">${fmtShortDate(m.week_date)}</div>
-                <div class="db-upcoming-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</div>
+                <div class="db-upcoming-date">${fmtUpcomingDate(m.week_date)}</div>
+                <div class="db-upcoming-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}${dblChip(m)}</div>
                 <div class="db-upcoming-time">${m.match_time ? esc(m.match_time) : '—'}</div>
               </div>`).join('')}
           </div>
@@ -1222,7 +1254,7 @@ export async function renderDashboard() {
           return `
             <div class="db-result-card ${win ? 'db-result-win' : 'db-result-loss'}">
               <div class="db-result-badge">${win ? 'WIN' : 'LOSS'}</div>
-              <div class="db-result-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}</div>
+              <div class="db-result-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}${dblChip(m)}</div>
               ${scoreStr ? `<div class="db-result-score">${scoreStr}</div>` : ''}
               <div class="db-result-date">${fmtShortDate(m.week_date)}</div>
             </div>`;

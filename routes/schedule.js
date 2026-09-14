@@ -1,6 +1,6 @@
 const express = require('express');
 const bookingModel = require('../models/bookingModel');
-const { reservations } = require('../lib/reservations');
+const { activeReservations } = require('../lib/reservations');
 const { wrap } = require('../middleware');
 
 const router = express.Router();
@@ -8,9 +8,7 @@ const router = express.Router();
 router.get('/schedule', wrap(async (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0, 10);
   const data = bookingModel.getScheduleForDate(date);
-  const now = Date.now();
-  const rsvSlots = [...reservations.values()]
-    .filter((r) => r.date === date && r.expiresAt > now)
+  const rsvSlots = activeReservations(date)
     .map((r) => ({
       id: `rsv_${r.id}`,
       source: 'reservation',

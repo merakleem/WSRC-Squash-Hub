@@ -5,11 +5,19 @@ const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
-const { sendBatch, isConfigured: emailConfigured, appUrl } = require('../lib/email');
+const { sendBatch, isConfigured: emailConfigured, appUrl, sendMany } = require('../lib/email');
 const { clubToday } = require('../lib/clock');
 const sanitizeHtml = require('sanitize-html');
 
+const { playDates } = require('../services/leagueService');
+
 const router = express.Router();
+
+function lastPlayDate(weekDate, playDays) {
+  const days = Array.isArray(playDays) && playDays.length ? playDays : [];
+  const dates = days.length ? playDates(weekDate, days) : [weekDate];
+  return dates.reduce((a, b) => (a > b ? a : b));
+}
 
 router.get('/leagues', wrap(async (req, res) => {
   const leagues = await leagueModel.getAllLeagues();
@@ -33,13 +41,14 @@ router.get('/leagues', wrap(async (req, res) => {
   for (const row of matchCounts) countMap[row.league_id] = row;
 
   // Week progress, for the card's segmented bar. One grouped query rather than
-  // one per league. "Elapsed" is measured against the club's today, not SQLite's
-  // UTC now, so an evening viewer in Winnipeg doesn't see the week tick over a
-  // day early.
+  // one per league. A week starts on its own date and stays current until the
+  // next week's date arrives - the same rule the league page uses - so
+  // "weeks started" counts dates on or before the club's today (not SQLite's
+  // UTC now, which is already tomorrow by a Winnipeg evening).
   const weekRows = db.prepare(`
     SELECT w.league_id,
            COUNT(*) AS total_weeks,
-           SUM(CASE WHEN w.date < @today THEN 1 ELSE 0 END) AS weeks_elapsed,
+           SUM(CASE WHEN w.date <= @today THEN 1 ELSE 0 END) AS weeks_started,
            MAX(w.date) AS last_week_date
     FROM weeks w
     GROUP BY w.league_id
@@ -62,6 +71,21 @@ router.get('/leagues', wrap(async (req, res) => {
     for (const row of rows) myDivision[row.league_id] = row.level;
   }
 
+  // Doubles: how many pairs, and who the signed-in player's partner is.
+  const pairCount = {};
+  for (const row of db.prepare('SELECT league_id, COUNT(*) AS n FROM league_pairs GROUP BY league_id').all()) pairCount[row.league_id] = row.n;
+  const myPartner = {};
+  if (playerId) {
+    const rows = db.prepare(`
+      SELECT lp.league_id, CASE WHEN lp.player1_id = @id THEN p2.name ELSE p1.name END AS partner
+      FROM league_pairs lp
+      JOIN players p1 ON p1.id = lp.player1_id
+      JOIN players p2 ON p2.id = lp.player2_id
+      WHERE lp.player1_id = @id OR lp.player2_id = @id
+    `).all({ id: playerId });
+    for (const row of rows) myPartner[row.league_id] = row.partner;
+  }
+
   res.json(leagues.map((l) => {
     const counts = countMap[l.id];
     const status = counts && counts.total > 0 && counts.done === counts.total ? 'completed' : 'active';
@@ -71,9 +95,14 @@ router.get('/leagues', wrap(async (req, res) => {
       player_ids: memberMap[l.id] || [],
       status,
       total_weeks: weeks?.total_weeks || 0,
-      weeks_elapsed: weeks?.weeks_elapsed || 0,
+      weeks_started: weeks?.weeks_started || 0,
       last_week_date: weeks?.last_week_date || null,
+      // The last day actually played: the last week's first day plus the
+      // furthest play day. A player reads the range to know when it is over.
+      last_night_date: weeks?.last_week_date ? lastPlayDate(weeks.last_week_date, l.play_days) : null,
       my_division_level: myDivision[l.id] ?? null,
+      pair_count: l.setup_type === 'doubles' ? (pairCount[l.id] || 0) : null,
+      my_partner_name: myPartner[l.id] ?? null,
     };
   }));
 }));
@@ -122,6 +151,13 @@ router.post('/leagues/:id/replace-player', requireAdmin, wrap(async (req, res) =
   res.json({ ok: true });
 }));
 
+router.post('/leagues/:id/replace-pair-player', requireAdmin, wrap(async (req, res) => {
+  const { pairId, oldPlayerId, newPlayerId } = req.body;
+  if (!pairId || !oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'pairId, oldPlayerId and newPlayerId are required' });
+  leagueModel.replacePairPlayer(Number(req.params.id), Number(pairId), Number(oldPlayerId), Number(newPlayerId));
+  res.json({ ok: true });
+}));
+
 router.put('/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) => {
   const { originalPlayerId, subPlayerId } = req.body;
   const count = await leagueModel.setSubForRemaining(Number(req.params.id), originalPlayerId, subPlayerId);
@@ -157,12 +193,17 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/\n/g, '<br>')}</p>`;
 
-  const { sent, failed } = await sendBatch(recipients.map((player) => ({
+  // Only the two fields Resend reads; anything else the client sent is dropped.
+  const files = (Array.isArray(attachments) ? attachments : [])
+    .filter((a) => a && typeof a.filename === 'string' && typeof a.content === 'string')
+    .map((a) => ({ filename: a.filename, content: a.content }));
+
+  const { sent, failed } = await sendMany(recipients.map((player) => ({
     to: [player.player_email],
     subject,
     html,
     ...(body ? { text: body } : {}),
-    ...(attachments && attachments.length ? { attachments } : {}),
+    ...(files.length ? { attachments: files } : {}),
   })));
 
   res.json({ sent, failed });

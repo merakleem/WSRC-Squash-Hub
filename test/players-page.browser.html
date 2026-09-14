@@ -67,6 +67,7 @@ const { state } = await import('../renderer/state.js');
 state.currentUser = { role: 'admin' };
 state.page = 'players';
 const mod = await import('../renderer/pages/players.js');
+const ladderMatch = await import('../renderer/pages/ladderMatch.js');
 
 // =====================================================================
 log.textContent += '\nADMIN TABLE\n';
@@ -282,7 +283,7 @@ log.textContent += '\nLADDER MATCH MODAL\n';
 // A tester is an ordinary player in every list, so she can find herself here.
 state.players = PLAYERS.map((p) => ({ ...p }));
 state.currentUser = { role: 'player', playerId: 5, name: 'Test Tessa', photo_path: null };
-await mod.openPickupGameModal();
+await ladderMatch.openPickupGameModal();
 await settle();
 ok('the self card names you, not a placeholder', $('.em-self-name')?.textContent === 'Test Tessa', $('.em-self-name')?.textContent);
 
@@ -315,7 +316,7 @@ ok('the confirm line names you properly', /Test Tessa beat Sofia Duarte 3.1/.tes
 esc();
 await settle();
 state.players = PLAYERS.filter((p) => p.id !== 5).map((p) => ({ ...p }));
-await mod.openPickupGameModal();
+await ladderMatch.openPickupGameModal();
 await settle();
 ok('a list that does not carry you still names you', $('.em-self-name')?.textContent === 'Test Tessa', $('.em-self-name')?.textContent);
 $('#puP2Search').dispatchEvent(new FocusEvent('focus', { bubbles: true }));

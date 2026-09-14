@@ -6,7 +6,10 @@ import { renderSchedule } from './schedule.js';
 import { renderClubActivity, renderClubSettings, renderDashboard } from './pages/dashboard.js';
 import { openMatchCard } from './matchCard.js';
 import { renderReportScore } from './pages/reportScore.js';
-import { renderPlayers, renderPlayerProfile, openPlayerProfile, openPickupGameModal, openReportScoreModal } from './pages/players.js';
+import { renderPlayers } from './pages/players.js';
+import { renderPlayerProfile, openPlayerProfile } from './pages/playerProfile.js';
+import { openPickupGameModal } from './pages/ladderMatch.js';
+import { openReportScoreModal } from './pages/reportScoreModal.js';
 import { renderLadder, resetLadderSeason } from './pages/ladder.js';
 import { renderLeagues } from './pages/leagues.js';
 import { renderLeagueDetail, resetLeagueEditMode } from './pages/leagueDetail.js';
@@ -208,6 +211,12 @@ window.renderDashboard = renderDashboard;
 
 // ===== INIT =====
 window.addEventListener('DOMContentLoaded', async () => {
+  // The offline shell (public/sw.js). Registration is best effort: a browser
+  // without service workers, or a file:// test page, simply goes without.
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker?.register('/sw.js').catch(() => {});
+  }
+
   // Mark the initial browser history entry as the app base so that
   // swiping back past all in-app pages exits to the previous URL (login).
   history.replaceState({ inApp: false }, '');

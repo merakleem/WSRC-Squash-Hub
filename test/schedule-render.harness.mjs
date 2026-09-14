@@ -14,17 +14,17 @@ const { window } = parseHTML(`<!doctype html><html><body>
  <div id="modalOverlay"><div id="modal"><div id="modalTitle"></div><div id="modalBody"></div><button id="modalClose"></button></div></div>
  <div id="toastContainer"></div></body></html>`);
 globalThis.document=window.document; globalThis.window=window;
-window.matchMedia=()=>({matches:false});
-globalThis.requestAnimationFrame=f=>f(); window.requestAnimationFrame=globalThis.requestAnimationFrame;
-globalThis.sessionStorage={getItem:()=>null,setItem(){},removeItem(){}}; window.sessionStorage=globalThis.sessionStorage;
-globalThis.fetch=async()=>({ok:true,json:async()=>({})});
-Object.defineProperty(window,'innerWidth',{get:()=>1500});
+window.matchMedia=()=>({ matches:false });
+globalThis.requestAnimationFrame=(f)=>f(); window.requestAnimationFrame=globalThis.requestAnimationFrame;
+globalThis.sessionStorage={ getItem:()=>null,setItem(){},removeItem(){} }; window.sessionStorage=globalThis.sessionStorage;
+globalThis.fetch=async()=>({ ok:true,json:async()=>({}) });
+Object.defineProperty(window,'innerWidth',{ get:()=>1500 });
 const PLAYERS=['Sofia Duarte','Marcus Lang','Priya Raman','Tom Beckett','Elena Sorokin','Dev Patel','Ruth Okonjo','Callum Reid','James Whitfield']
-  .map((name,i)=>({id:i+1,name}));
+  .map((name,i)=>({ id:i+1,name }));
 window.api={ getSchedule:async()=>payload, getCourts:async()=>payload.courts,
   getBookingTypes:async()=>payload.types||[], getPlayers:async()=>PLAYERS };
 for (const [src,dst] of [['renderer/state.js','state.mjs'],['renderer/utils.js','utils.mjs'],
-                         ['renderer/schedulePanel.js','schedPanel.mjs'],['renderer/schedule.js','sched.mjs']]) {
+  ['renderer/schedulePanel.js','schedPanel.mjs'],['renderer/schedule.js','sched.mjs']]) {
   writeFileSync(`${HERE}${dst}`, readFileSync(`${REPO}/${src}`,'utf8')
     .replace(/'\.\.?\/state\.js'/,"'./state.mjs'").replace(/'\.\.?\/utils\.js'/,"'./utils.mjs'")
     .replace(/'\.\/schedulePanel\.js'/,"'./schedPanel.mjs'")
@@ -32,11 +32,11 @@ for (const [src,dst] of [['renderer/state.js','state.mjs'],['renderer/utils.js',
 }
 writeFileSync(`${HERE}stub.mjs`,'export const x=1; export function openPickupGameModal(){}\n');
 const { state } = await import(pathToFileURL(`${HERE}state.mjs`).href);
-state.currentUser={role:'admin',playerId:null};
+state.currentUser={ role:'admin',playerId:null };
 state.scheduleDate=process.argv[4];
 const sched = await import(pathToFileURL(`${HERE}sched.mjs`).href);
 await sched.renderSchedule();
-await new Promise(r=>setTimeout(r,60));
+await new Promise((r)=>setTimeout(r,60));
 
 if (MODE.startsWith('panel:')) {
   const panel = await import(pathToFileURL(`${HERE}schedPanel.mjs`).href);
@@ -48,7 +48,7 @@ if (MODE.startsWith('panel:')) {
     courtIds: [2, 3], start: 19*60, dur: 90,
     slot: editSlot,
   });
-  await new Promise(r=>setTimeout(r,20));
+  await new Promise((r)=>setTimeout(r,20));
 }
 
 const inner=document.getElementById('mainContent').innerHTML;

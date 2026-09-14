@@ -27,7 +27,11 @@ try {
 }
 const { state } = await import('../renderer/state.js');
 state.currentUser = { role:'user', playerId:42 };
-state.players = [{ id:42, name:'Merak Lee' }];
+state.players = [
+  { id:42, name:'Merak Lee', photo_path:null },
+  { id:7, name:'Sofia Duarte', photo_path:'/uploads/avatars/7-sofia.jpg' },
+  { id:8, name:'Priya Raman', photo_path:null },
+];
 const t=(m)=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 const today = new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const courts=[1,2,3,4,5].map(i=>({id:i,name:i===5?'Doubles Court':'Court '+i,active:1,sort_order:i}));
@@ -45,6 +49,8 @@ const slots=[
   // starts at 9:15 - on no 30-minute step at all.
   mk(5,3,20*60+30,45,'League Match',{source:'league',info:'Merak Lee vs Sofia Duarte'}),
   mk(6,3,21*60+15,45,'League Match',{source:'league',info:'Priya Raman vs Alex Hupé'}),
+  // A doubles fixture names both pairs; every name is shortened on a phone.
+  mk(10,5,19*60,60,'League Match',{source:'league',info:'Ann Pair & Bo Pair vs Cy Pair & Di Pair',format:'doubles'}),
 ];
 const calls=[];
 let myRows=[];   // filled below, before the page first loads it
@@ -62,6 +68,11 @@ myRows=[
   {...slots.find(x=>x.id===7), courtName:'Court 4', courtCount:1},
   {...slots.find(x=>x.id===8), courtName:'Court 4', courtCount:1},
 ];
+// The page refreshes the schedule every 30 seconds; the suite catches that
+// timer so it can fire it when it wants to.
+const refreshers=[]; const realSetInterval=window.setInterval;
+window.setInterval=(fn,ms,...rest)=>{ if(ms===30000) refreshers.push(fn); return realSetInterval(fn,ms,...rest); };
+document.getElementById('topbarActions').innerHTML='<span id="leftover">1 upcoming</span>';
 const { renderCourtBooking } = await import('../renderer/pages/courtBooking.js');
 const $=(s)=>document.querySelector(s), $$=(s)=>[...document.querySelectorAll(s)];
 const tick=(ms=150)=>new Promise(r=>setTimeout(r,ms));
@@ -69,6 +80,7 @@ const tick=(ms=150)=>new Promise(r=>setTimeout(r,ms));
 renderCourtBooking(); await tick(300);
 
 // ---- structure ----
+ok('the top bar is cleared of the last page\'s leftovers', !document.getElementById('leftover') && document.getElementById('topbarActions').textContent==='');
 ok('five court tabs in club order', $$('.cb-mtab').map(x=>x.textContent).join('|')==='Court 1|Court 2|Court 3|Court 4|Doubles Court');
 ok('Court 1 selected by default', $('.cb-mtab').classList.contains('cb-mtab--on'));
 ok('five dots, first elongated', $$('.cb-mdot').length===5 && $('.cb-mdot').classList.contains('cb-mdot--on'));
@@ -108,6 +120,11 @@ ok('the ones around them still are', openAt.includes(20*60) && openAt.includes(2
 const order=$$('.cb-mslot').map(r=>r.querySelector('.cb-mslot-t').textContent).join(',');
 ok('rows read in time order', order.indexOf('8:30')<order.indexOf('9:15'));
 
+// ---- a doubles league fixture ----
+$$('.cb-mtab')[4].click(); await tick(300);
+const dblRow=$('.cb-mslot--league');
+ok('a doubles fixture shortens all four names, pairs kept', dblRow?.querySelector('.cb-mslot-l1')?.textContent==='A. Pair & B. Pair vs C. Pair & D. Pair', dblRow?.querySelector('.cb-mslot-l1')?.textContent);
+
 // ---- bookings I am on but did not make ----
 $$('.cb-mtab')[3].click(); await tick(300);
 const onMe=$$('.cb-mslot--mine');
@@ -124,7 +141,30 @@ $('.cb-mslot[data-mstart]').click(); await tick(250);
 const rsv=calls.find(c=>c[0]==='reserve');
 ok('tapping an open row reserves on the shown court', rsv && rsv[1].courtId===2, rsv&&JSON.stringify(rsv[1]));
 ok('the sheet opens', !!$('.cb-panel'));
+// Adding someone to the booking searches the club list; a player with a photo
+// is shown by it, not by their initials.
+const search=$('#cbPlayerSearch');
+search.value='a'; search.dispatchEvent(new Event('input',{bubbles:true})); await tick(120);
+const results=$$('.cb-search-result');
+ok('the player search lists club players', results.length>0, results.length);
+const sofiaOpt=results.find(r=>r.textContent.includes('Sofia Duarte'));
+ok('one with a photo shows it', sofiaOpt?.querySelector('.cb-res-av img')?.getAttribute('src')==='/uploads/avatars/7-sofia.jpg', sofiaOpt?.querySelector('.cb-res-av')?.innerHTML);
+ok('one without keeps their initials', results.find(r=>r.textContent.includes('Priya Raman'))?.querySelector('.cb-res-av')?.textContent==='PR', results.find(r=>r.textContent.includes('Priya Raman'))?.querySelector('.cb-res-av')?.textContent);
+search.value=''; search.dispatchEvent(new Event('input',{bubbles:true})); await tick(120);
 ok('the tapped row shows Selected', $('.cb-mslot--sel')?.querySelector('.cb-mslot-m').textContent==='Selected');
+
+// ---- your own hold never caps the duration ----
+// After a refresh the schedule carries the hold as a Reserved slot at the
+// very start being booked; the + button used to lock against it.
+const durBefore=$('#cbDurValue')?.textContent;
+slots.push(mk('rsv_r1',2,Number(rsv[1].startTime.slice(0,2))*60+Number(rsv[1].startTime.slice(3,5)),30,'Reserved',{source:'reservation'}));
+ok('the refresh timer was caught', refreshers.length>0);
+await refreshers.at(-1)?.(); await tick(150);
+ok('the sheet is still open after the refresh', !!$('.cb-panel') && !!$('#cbDurPlus'));
+ok('the + button is not locked by your own hold', !$('#cbDurPlus').disabled);
+$('#cbDurPlus').click(); await tick();
+ok('and adds half an hour', $('#cbDurValue')?.textContent!==durBefore, `${durBefore} -> ${$('#cbDurValue')?.textContent}`);
+slots.pop();
 
 // ---- switching court keeps the sheet open ----
 $$('.cb-mtab')[0].click(); await tick();

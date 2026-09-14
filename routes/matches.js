@@ -3,8 +3,7 @@ const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
 const matchModel = require('../models/matchModel');
 const seasonModel = require('../models/seasonModel');
-const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
-const { sendEmail, isConfigured: emailConfigured } = require('../lib/email');
+const { wrap, requireAdmin, requireAuth } = require('../middleware');
 
 const router = express.Router();
 
@@ -13,13 +12,14 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
   const { matchTime, courtNumber, courtId } = req.body;
   const db = getDB();
 
+  // A conflict is another match of this league on the same day at the same
+  // court and time. The day, not the week: a week can have several play days,
+  // and Monday 7pm on court 1 does not stop Wednesday 7pm on court 1.
   const ctx = db.prepare(`
-    SELECT l.schedule_courts, l.num_courts, tm.week_id
+    SELECT l.schedule_courts, l.num_courts, l.id AS league_id, m.scheduled_date
     FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w ON tm.week_id = w.id
-    JOIN leagues l ON w.league_id = l.id
-    WHERE m.id = ?
+    JOIN leagues l ON l.id = m.league_id
+    WHERE m.id = ? AND m.type = 'league'
   `).get(matchId);
 
   if (!ctx) return res.status(404).json({ error: 'Match not found' });
@@ -30,29 +30,29 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
     if (courtId) {
       const conflict = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        WHERE m.week_id = ? AND m.court_id = ? AND m.scheduled_time = ? AND m.id != ?
-      `).get(ctx.week_id, courtId, matchTime, matchId);
+        WHERE m.league_id = ? AND m.scheduled_date IS ? AND m.court_id = ? AND m.scheduled_time = ? AND m.id != ?
+      `).get(ctx.league_id, ctx.scheduled_date, courtId, matchTime, matchId);
       if (conflict.cnt > 0) {
         const courtName = db.prepare('SELECT name FROM courts WHERE id = ?').get(courtId)?.name || `Court ${courtId}`;
-        return res.status(409).json({ error: `${courtName} is already booked at ${matchTime} this week.` });
+        return res.status(409).json({ error: `${courtName} is already booked at ${matchTime} that day.` });
       }
     } else if (ctx.schedule_courts && courtNumber) {
       const conflict = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        WHERE m.week_id = ? AND m.court_number = ? AND m.scheduled_time = ? AND m.id != ?
-      `).get(ctx.week_id, courtNumber, matchTime, matchId);
+        WHERE m.league_id = ? AND m.scheduled_date IS ? AND m.court_number = ? AND m.scheduled_time = ? AND m.id != ?
+      `).get(ctx.league_id, ctx.scheduled_date, courtNumber, matchTime, matchId);
       if (conflict.cnt > 0) {
-        return res.status(409).json({ error: `Court ${courtNumber} is already booked at ${matchTime} this week.` });
+        return res.status(409).json({ error: `Court ${courtNumber} is already booked at ${matchTime} that day.` });
       }
     }
 
     if (!courtId && ctx.num_courts > 0) {
       const atSameTime = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        WHERE m.week_id = ? AND m.scheduled_time = ? AND m.id != ?
-      `).get(ctx.week_id, matchTime, matchId);
+        WHERE m.league_id = ? AND m.scheduled_date IS ? AND m.scheduled_time = ? AND m.id != ?
+      `).get(ctx.league_id, ctx.scheduled_date, matchTime, matchId);
       if (atSameTime.cnt >= ctx.num_courts) {
-        warning = `All ${ctx.num_courts} court${ctx.num_courts !== 1 ? 's' : ''} are already booked at ${matchTime} this week.`;
+        warning = `All ${ctx.num_courts} court${ctx.num_courts !== 1 ? 's' : ''} are already booked at ${matchTime} that day.`;
       }
     }
   }
@@ -69,19 +69,24 @@ router.put('/matches/:id/score', requireAdmin, wrap(async (req, res) => {
 router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   const matchId  = Number(req.params.id);
   const playerId = req.session.playerId;
-  const myScore    = Number(req.body.myScore);
-  const theirScore = Number(req.body.theirScore);
+  // A doubles report may say mySideScore / theirSideScore; same numbers.
+  const myScore    = Number(req.body.myScore ?? req.body.mySideScore);
+  const theirScore = Number(req.body.theirScore ?? req.body.theirSideScore);
 
   const db = getDB();
   // Works for a league match or a ladder one. The match carries its own league,
   // so there is no chain to walk, and a ladder match simply has none.
   const match = db.prepare(`
-    SELECT m.id, m.type, m.status, m.skipped, m.player1_id, m.player2_id, m.player1_score,
+    SELECT m.id, m.type, m.status, m.skipped, m.format, m.player1_id, m.player2_id, m.player1_score,
+           m.player1_partner_id, m.player2_partner_id,
            s1.sub_player_id AS p1_sub, s2.sub_player_id AS p2_sub,
+           s3.sub_player_id AS p1b_sub, s4.sub_player_id AS p2b_sub,
            l.status AS league_status
     FROM matches m
     LEFT JOIN match_subs s1 ON s1.match_id = m.id AND s1.original_player_id = m.player1_id
     LEFT JOIN match_subs s2 ON s2.match_id = m.id AND s2.original_player_id = m.player2_id
+    LEFT JOIN match_subs s3 ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+    LEFT JOIN match_subs s4 ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
     LEFT JOIN leagues l ON l.id = m.league_id
     WHERE m.id = ?
   `).get(matchId);
@@ -95,8 +100,13 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
 
   const effP1 = match.p1_sub ?? match.player1_id;
   const effP2 = match.p2_sub ?? match.player2_id;
-  const isP1  = effP1 === playerId;
-  const isP2  = effP2 === playerId;
+  // Doubles: either partner on a side may report for it. The score is read
+  // from the reporter's side, and the winner recorded is that side's first
+  // player, which is what every reader of winner_id expects.
+  const side1 = match.format === 'doubles' ? [effP1, match.p1b_sub ?? match.player1_partner_id] : [effP1];
+  const side2 = match.format === 'doubles' ? [effP2, match.p2b_sub ?? match.player2_partner_id] : [effP2];
+  const isP1  = side1.includes(playerId);
+  const isP2  = side2.includes(playerId);
 
   if (!isP1 && !isP2) return res.status(403).json({ error: 'You are not a player in this match' });
 
@@ -107,7 +117,7 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
     && p1Score >= 0 && p1Score <= 3 && p2Score >= 0 && p2Score <= 3
     && (p1Score === 3 || p2Score === 3) && p1Score !== p2Score;
 
-  if (!valid) return res.status(400).json({ error: 'Invalid score. One player must win 3 games (e.g. 3–1, 3–2)' });
+  if (!valid) return res.status(400).json({ error: `Invalid score. One ${match.format === 'doubles' ? 'pair' : 'player'} must win 3 games (e.g. 3–1, 3–2)` });
 
   // The winner is recorded as whoever actually played, so nothing downstream
   // has to guess which of the two conventions this row followed.
@@ -188,7 +198,7 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
   const winnerId = player1Score > player2Score ? player1Id : player2Id;
   db.prepare(
     `INSERT INTO matches (type, status, player1_id, player2_id, player1_score, player2_score, winner_id, submitted_by_player_id, played_at, confirmed_at)
-     VALUES ('ladder', 'played', ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`
+     VALUES ('ladder', 'played', ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`,
   ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId, playedAt);
 
   res.json({ ok: true });
@@ -196,6 +206,70 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
 
 router.delete('/matches/pickup/:id', requireAdmin, wrap(async (req, res) => {
   getDB().prepare(`DELETE FROM matches WHERE id = ? AND type = 'ladder'`).run(Number(req.params.id));
+  res.json({ ok: true });
+}));
+
+// When a reported match was played: a date, today at the latest, and not
+// before the current season. Shared by the singles and doubles ladder routes.
+// Returns { playedAt } or { error }.
+function _playedAtFrom(playedOn) {
+  if (!playedOn) return { playedAt: null };
+  const day = String(playedOn).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(new Date(`${day}T00:00:00Z`).getTime())) {
+    return { error: 'Invalid date.' };
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  if (day > today) return { error: 'A match cannot be played in the future.' };
+  const season = seasonModel.getCurrentSeason();
+  if (season && day < season.start_date) return { error: `That date is before the ${season.name} season started.` };
+  return { playedAt: `${day} 12:00:00` };
+}
+
+// A doubles ladder match: two pairs, best of five. Anyone signed in may record
+// one they played in; an admin may record any. It lands in the same table as
+// every other match, marked doubles, and moves all four doubles ratings.
+router.post('/matches/doubles', requireAuth, wrap(async (req, res) => {
+  const submitterId = req.session.playerId;
+  const isAdminUser = req.session.role === 'admin';
+  const { team1, team2, playedOn } = req.body;
+  const team1Score = Number(req.body.team1Score);
+  const team2Score = Number(req.body.team2Score);
+
+  const ids = [...(Array.isArray(team1) ? team1 : []), ...(Array.isArray(team2) ? team2 : [])].map(Number);
+  if (ids.length !== 4 || ids.some((id) => !Number.isInteger(id) || id <= 0) || isNaN(team1Score) || isNaN(team2Score)) {
+    return res.status(400).json({ error: 'Missing required fields.' });
+  }
+  if (new Set(ids).size !== 4) return res.status(400).json({ error: 'All four players must be different.' });
+  if (!isAdminUser && !ids.includes(submitterId)) {
+    return res.status(403).json({ error: 'You can only submit scores for matches you played in.' });
+  }
+  const db = getDB();
+  const known = db.prepare(`SELECT COUNT(*) AS n FROM players WHERE id IN (${ids.join(',')})`).get().n;
+  if (known !== 4) return res.status(400).json({ error: 'One of those players does not exist.' });
+
+  const valid = Number.isInteger(team1Score) && Number.isInteger(team2Score)
+    && team1Score >= 0 && team1Score <= 3 && team2Score >= 0 && team2Score <= 3
+    && (team1Score === 3 || team2Score === 3) && team1Score !== team2Score;
+  if (!valid) return res.status(400).json({ error: 'Invalid score. One pair must win 3 games (e.g. 3–1, 2–3).' });
+
+  const when = _playedAtFrom(playedOn);
+  if (when.error) return res.status(400).json({ error: when.error });
+
+  // winner_id names the winning pair's first player, which is what every
+  // existing reader of winner_id expects to find there.
+  const [a, b, c, d] = ids;
+  const winnerId = team1Score > team2Score ? a : c;
+  const result = db.prepare(
+    `INSERT INTO matches (type, status, format, player1_id, player1_partner_id, player2_id, player2_partner_id,
+                          player1_score, player2_score, winner_id, submitted_by_player_id, played_at, confirmed_at)
+     VALUES ('ladder', 'played', 'doubles', ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`,
+  ).run(a, b, c, d, team1Score, team2Score, winnerId, submitterId, when.playedAt);
+
+  res.json({ ok: true, id: Number(result.lastInsertRowid) });
+}));
+
+router.delete('/matches/doubles/:id', requireAdmin, wrap(async (req, res) => {
+  getDB().prepare(`DELETE FROM matches WHERE id = ? AND type = 'ladder' AND format = 'doubles'`).run(Number(req.params.id));
   res.json({ ok: true });
 }));
 
@@ -216,55 +290,5 @@ router.delete('/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-router.post('/matches/:id/message-opponent', requireAuth, emailLimiter, wrap(async (req, res) => {
-  const playerId = req.session.playerId;
-  if (!playerId) return res.status(403).json({ error: 'Admin accounts cannot use this feature.' });
-
-  const { message } = req.body;
-  if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required.' });
-
-  if (!emailConfigured()) return res.status(500).json({ error: 'Email service is not configured.' });
-
-  const db = getDB();
-  const match = db.prepare(`
-    SELECT m.player1_id, m.player2_id,
-           p1.name AS p1_name, p1.email AS p1_email,
-           p2.name AS p2_name, p2.email AS p2_email
-    FROM matches m
-    JOIN players p1 ON p1.id = m.player1_id
-    JOIN players p2 ON p2.id = m.player2_id
-    WHERE m.id = ?
-  `).get(Number(req.params.id));
-
-  if (!match) return res.status(404).json({ error: 'Match not found.' });
-
-  const isP1 = playerId === match.player1_id;
-  const isP2 = playerId === match.player2_id;
-  if (!isP1 && !isP2) return res.status(403).json({ error: 'You are not a player in this match.' });
-
-  const sender   = isP1 ? { name: match.p1_name, email: match.p1_email } : { name: match.p2_name, email: match.p2_email };
-  const opponent = isP1 ? { name: match.p2_name, email: match.p2_email } : { name: match.p1_name, email: match.p1_email };
-
-  if (!sender.email)   return res.status(400).json({ error: 'Your account does not have an email on file. Contact your administrator.' });
-  if (!opponent.email) return res.status(400).json({ error: 'Your opponent does not have an email address on file.' });
-
-  const htmlMessage = message.trim()
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
-
-  const result = await sendEmail({
-    reply_to: sender.email,
-    to: [opponent.email],
-    subject: `Message from ${sender.name} via Play WSRC`,
-    html: `<p>Hi ${opponent.name},</p>
-<p>${sender.name} sent you a message through Play WSRC:</p>
-<blockquote style="border-left:3px solid #dce3ed;margin:12px 0;padding:8px 16px;color:#444">${htmlMessage}</blockquote>
-<p style="color:#6b7e93;font-size:12px">Reply to this email to respond directly to ${sender.name}. This message was sent through Play WSRC.</p>`,
-  });
-
-  if (!result.ok) return res.status(502).json({ error: result.error });
-
-  res.json({ ok: true });
-}));
 
 module.exports = router;

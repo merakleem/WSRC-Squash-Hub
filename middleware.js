@@ -8,13 +8,11 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // ===== ERROR WRAPPER =====
 
+// A rejected handler goes to the app's error handler (app.js), which answers
+// a 4xx with its message and a 5xx with a generic one after logging and
+// reporting it with the request's id and who was signed in.
 function wrap(fn) {
-  return (req, res) =>
-    fn(req, res).catch((err) => {
-      console.error(err);
-      if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message });
-      res.status(500).json({ error: 'An internal error occurred' });
-    });
+  return (req, res, next) => fn(req, res, next).catch(next);
 }
 
 // ===== SESSION TOKENS =====

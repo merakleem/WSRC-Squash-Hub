@@ -2,7 +2,7 @@ const express = require('express');
 const { getDB } = require('../database/db');
 const { clubNow } = require('../lib/clock');
 const bookingModel = require('../models/bookingModel');
-const { reservations, RESERVATION_TTL_MS, hasBookingConflict, hasReservationConflict, nextReservationId } = require('../lib/reservations');
+const { hasBookingConflict, createReservation, getReservation, deleteReservation } = require('../lib/reservations');
 const { wrap, requireAdmin, requireAuth, requireMember } = require('../middleware');
 
 const router = express.Router();
@@ -14,28 +14,21 @@ router.post('/reservations', requireAuth, requireMember, wrap(async (req, res) =
   if (!courtId || !date || !startTime || !durationMinutes) {
     return res.status(400).json({ error: 'Missing required fields.' });
   }
-  if (hasBookingConflict(Number(courtId), date, startTime, Number(durationMinutes))) {
-    return res.status(409).json({ error: 'This slot is already booked.' });
-  }
-  if (hasReservationConflict(Number(courtId), date, startTime, Number(durationMinutes), null)) {
-    return res.status(409).json({ error: 'This slot is currently reserved by another player.' });
-  }
-  const id = nextReservationId();
-  const expiresAt = Date.now() + RESERVATION_TTL_MS;
-  reservations.set(id, {
-    id, courtId: Number(courtId), date, startTime,
-    durationMinutes: Number(durationMinutes),
-    playerId: req.session.playerId, expiresAt,
+  const taken = createReservation({
+    courtId: Number(courtId), date, startTime, durationMinutes: Number(durationMinutes),
+    playerId: req.session.playerId,
   });
-  res.json({ reservationId: id, expiresAt });
+  if (taken.conflict === 'booked') return res.status(409).json({ error: 'This slot is already booked.' });
+  if (taken.conflict === 'held') return res.status(409).json({ error: 'This slot is currently reserved by another player.' });
+  res.json({ reservationId: String(taken.reservation.id), expiresAt: taken.reservation.expiresAt });
 }));
 
 router.delete('/reservations/:id', requireAuth, requireMember, wrap(async (req, res) => {
-  const r = reservations.get(req.params.id);
+  const r = getReservation(req.params.id);
   if (r && r.playerId !== req.session.playerId) {
     return res.status(403).json({ error: 'Not your reservation.' });
   }
-  reservations.delete(req.params.id);
+  deleteReservation(req.params.id);
   res.json({ ok: true });
 }));
 
@@ -43,11 +36,11 @@ router.delete('/reservations/:id', requireAuth, requireMember, wrap(async (req, 
 
 router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res) => {
   const { reservationId, durationMinutes, playerIds } = req.body;
-  const rsv = reservationId ? reservations.get(String(reservationId)) : null;
+  const rsv = reservationId ? getReservation(reservationId) : null;
   if (!rsv) return res.status(400).json({ error: 'Reservation not found or expired. Please try again.' });
   if (rsv.playerId !== req.session.playerId) return res.status(403).json({ error: 'Not your reservation.' });
   if (rsv.expiresAt <= Date.now()) {
-    reservations.delete(String(reservationId));
+    deleteReservation(reservationId);
     return res.status(410).json({ error: 'Reservation has expired.' });
   }
   const finalDuration = Number(durationMinutes) || rsv.durationMinutes;
@@ -59,7 +52,7 @@ router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res
   }
   const db = getDB();
   if (hasBookingConflict(rsv.courtId, rsv.date, rsv.startTime, finalDuration)) {
-    reservations.delete(String(reservationId));
+    deleteReservation(reservationId);
     return res.status(409).json({ error: 'This slot was booked by someone else. Please try again.' });
   }
   const player = db.prepare('SELECT name FROM players WHERE id = ?').get(req.session.playerId);
@@ -74,7 +67,7 @@ router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res
     playerIds: allIds,
     bookedBy: req.session.playerId,
   });
-  reservations.delete(String(reservationId));
+  deleteReservation(reservationId);
   res.json(booking);
 }));
 
@@ -189,7 +182,7 @@ router.post('/bookings/repeat', requireAdmin, wrap(async (req, res) => {
   if (!Array.isArray(daysOfWeek) || daysOfWeek.length === 0) return res.status(400).json({ error: 'Select at least one day of week' });
   const result = bookingModel.createRepeatBookings(
     { courtId, courtIds, startTime, durationMinutes, bookingTypeId, name, info, playerIds },
-    { startDate, daysOfWeek, weeks: weeks || 52, conflictMode: conflictMode || 'skip' }
+    { startDate, daysOfWeek, weeks: weeks || 52, conflictMode: conflictMode || 'skip' },
   );
   res.json(result);
 }));

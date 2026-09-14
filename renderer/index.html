@@ -177,11 +177,11 @@
     </div>
 
     <!-- Toast container -->
-    <div class="toast-container" id="toastContainer"></div>
+    <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="false"></div>
 
     <!-- Modal -->
     <div class="modal-overlay" id="modalOverlay">
-      <div class="modal" id="modal">
+      <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
         <div class="modal-header">
           <h2 class="modal-title" id="modalTitle"></h2>
           <button class="modal-close" id="modalClose" aria-label="Close">&times;</button>

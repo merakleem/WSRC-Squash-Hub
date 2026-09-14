@@ -7,7 +7,7 @@ function getAllCourts() {
 function addCourt({ name }) {
   const result = run(
     'INSERT INTO courts (name, sort_order) VALUES (?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM courts))',
-    [name]
+    [name],
   );
   return get('SELECT * FROM courts WHERE id = ?', [result.lastID]);
 }

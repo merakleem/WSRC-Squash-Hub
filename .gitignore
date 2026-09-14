@@ -10,3 +10,4 @@ squash.db*
 # Rewritten module copies the test harnesses generate on each run.
 test/*.mjs
 !test/*.harness.mjs
+!test/run-browser.mjs

@@ -1,6 +1,7 @@
 const { getDB } = require('../database/db');
 const elo = require('../lib/elo');
 const seasonsLib = require('../lib/seasons');
+const { memo } = require('../lib/memo');
 const matchModel = require('./matchModel');
 const seasonModel = require('./seasonModel');
 
@@ -175,7 +176,7 @@ function getLadder(asOfDate = null) {
 
   // The ladder is empty until people join it; nobody is present before their
   // own arrival, which is what keeps a new member out of finished seasons.
-  let ranking = [];
+  const ranking = [];
 
   // Best position ever held. Nothing persists historical standings, so it is
   // derived from the same replay that produces the current ranking.
@@ -224,7 +225,7 @@ function getLadder(asOfDate = null) {
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   let rankingSevenDaysAgo = null;
 
-  let replayRanking = [];
+  const replayRanking = [];
   for (const event of timeline) {
     if (asOfDate && event.day && event.day > asOfDate) continue;
     if (rankingSevenDaysAgo === null && (event.day || '') >= cutoff) {
@@ -275,6 +276,13 @@ const getLastMatchDates    = matchModel.getLastMatchDates;
  * positional ladder ended on.
  */
 function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
+  // Memoised on the database's write stamp (lib/memo.js): the replay runs
+  // once per distinct question until something changes.
+  return memo(`elo:${seasonKey}:${asOfDate || ''}:${includeHidden ? 1 : 0}:${withRankChange ? 1 : 0}:${JSON.stringify(settings)}`,
+    () => _computeEloLadder(seasonKey, settings, asOfDate, { includeHidden, withRankChange }));
+}
+
+function _computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
   // `includeHidden` keeps the players who have not played yet in the result,
   // carrying the rating they would enter on. Used by the movement comparison
   // below, and by anything that wants to say where a member would come in.
@@ -300,11 +308,9 @@ function computeEloLadder(seasonKey, settings, asOfDate = null, { includeHidden 
 
   // Seed from where players finished the season before ratings began.
   const firstRatedRange = seasonsLib.seasonRange(
-    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay
+    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay,
   );
   const priorOrder = getLadder(_dayBefore(firstRatedRange.start));
-  const priorSize = priorOrder.length;
-  const priorByIdMap = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
   // Played anything by the time ratings began? Judged at that fixed moment
   // rather than "have they played yet", so a seed cannot change under a player
@@ -550,10 +556,9 @@ function getPlayerMatchRatingDeltas(playerId) {
   if (cutoverYear == null || latestYear == null || latestYear < cutoverYear) return deltas;
 
   const firstRange = seasonsLib.seasonRange(
-    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay
+    seasonsLib.seasonKeyForDate(`${cutoverYear}-${monthDay}`, monthDay), monthDay,
   );
   const priorOrder = getLadder(_dayBefore(firstRange.start));
-  const priorById = Object.fromEntries(priorOrder.map((r) => [r.id, r]));
 
   // Seeded exactly as the ladder seeds, so the number shown against a match on
   // a profile is the one that moved the standings.
@@ -596,6 +601,188 @@ function getPlayerMatchRatingDeltas(playerId) {
   return deltas;
 }
 
+// ===== DOUBLES =====
+// A second ladder beside the singles one, ranking individual players by a
+// doubles rating that moves with every 2v2 result, league or ladder. It is a
+// parallel path: nothing here touches the singles replay, and nothing in the
+// singles replay sees a doubles row.
+
+/**
+ * Replay every doubles match up to the season's end (or `asOfDate`) and
+ * return the doubles ladder as rows shaped like computeEloLadder's.
+ *
+ * Everyone starts at the base rating: there is no earlier ladder to convert
+ * and no Club Locker estimate for doubles. A rating then carries from season
+ * to season; only the season's wins, losses and movement start over.
+ */
+function computeDoublesEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
+  return memo(`dbl:${seasonKey}:${asOfDate || ''}:${includeHidden ? 1 : 0}:${withRankChange ? 1 : 0}:${JSON.stringify(settings)}`,
+    () => _computeDoublesEloLadder(seasonKey, settings, asOfDate, { includeHidden, withRankChange }));
+}
+
+function _computeDoublesEloLadder(seasonKey, settings, asOfDate = null, { includeHidden = false, withRankChange = true } = {}) {
+  const db = getDB();
+  const cfg = elo.config(settings);
+  const monthDay = seasonsLib.startMonthDay(settings);
+  const targetRange = seasonsLib.seasonRange(seasonKey, monthDay);
+  if (!targetRange) return [];
+
+  const horizon = asOfDate && asOfDate < targetRange.end ? asOfDate : targetRange.end;
+  const firstMatch = matchModel.getFirstDoublesMatchDates();
+  const players = db.prepare(PLAYER_SELECT).all().filter((p) => {
+    const day = _joinDay(p, firstMatch);
+    return !day || day <= horizon;
+  });
+  const playerIds = new Set(players.map((p) => p.id));
+
+  const ratings = {};
+  for (const p of players) ratings[p.id] = cfg.elo_base_rating;
+
+  const played = {}, wins = {}, losses = {};
+  const apply = (m, countIt) => {
+    const ids = [m.s1a, m.s1b, m.s2a, m.s2b];
+    if (ids.some((id) => !playerIds.has(id)) || new Set(ids).size !== 4) return;
+    const k = cfg.elo_k_factor * elo.marginMultiplier(m.winner_games, m.loser_games, cfg);
+    const d = elo.doublesDeltas([[ratings[m.s1a], ratings[m.s1b]], [ratings[m.s2a], ratings[m.s2b]]], m.won_side, k);
+    ratings[m.s1a] += d[0][0]; ratings[m.s1b] += d[0][1];
+    ratings[m.s2a] += d[1][0]; ratings[m.s2b] += d[1][1];
+    if (!countIt) return;
+    const winners = m.won_side === 1 ? [m.s1a, m.s1b] : [m.s2a, m.s2b];
+    const losers  = m.won_side === 1 ? [m.s2a, m.s2b] : [m.s1a, m.s1b];
+    for (const id of ids) played[id] = (played[id] || 0) + 1;
+    for (const id of winners) wins[id] = (wins[id] || 0) + 1;
+    for (const id of losers) losses[id] = (losses[id] || 0) + 1;
+  };
+
+  // Everything before the season carries the ratings to its start; the
+  // season's own matches count for its record too.
+  for (const m of matchModel.getCompletedDoublesMatches({ start: '0000-01-01', end: _dayBefore(targetRange.start) })) apply(m, false);
+  const seedsForTarget = { ...ratings };
+  for (const m of matchModel.getCompletedDoublesMatches({ start: targetRange.start, end: horizon })) apply(m, true);
+
+  const measuredAt = asOfDate
+    || (targetRange.end < new Date().toISOString().slice(0, 10)
+        ? targetRange.end
+        : new Date().toISOString().slice(0, 10));
+
+  // On the ladder once you have played a doubles match, and nobody else.
+  const lastMatch = matchModel.getLastDoublesMatchDates(horizon);
+
+  const rows = [];
+  for (const p of players) {
+    const unranked = !lastMatch[p.id];
+    if (unranked && !includeHidden) continue;
+    rows.push({
+      ...p,
+      unranked,
+      last_played: lastMatch[p.id] || null,
+      rating: Math.round(ratings[p.id]),
+      _exact: ratings[p.id],
+      seed_rating: Math.round(seedsForTarget[p.id]),
+      rating_change: Math.round(ratings[p.id] - seedsForTarget[p.id]),
+      matches_played: played[p.id] || 0,
+      season_wins: wins[p.id] || 0,
+      season_losses: losses[p.id] || 0,
+    });
+  }
+  rows.sort((a, b) => b._exact - a._exact || a.name.localeCompare(b.name));
+
+  // Places moved over the last week, clamped to the season start, exactly as
+  // the singles ladder reports movement.
+  const weekAgo = _daysAgo(7);
+  const since = weekAgo > targetRange.start ? weekAgo : targetRange.start;
+  const priorPos = {};
+  if (withRankChange && since < measuredAt) {
+    const before = computeDoublesEloLadder(seasonKey, settings, since, { includeHidden: true, withRankChange: false });
+    const shown = new Set(rows.map((r) => r.id));
+    before.filter((r) => shown.has(r.id)).forEach((r, i) => { priorPos[r.id] = i + 1; });
+  }
+
+  return rows.map(({ _exact, ...r }, i) => ({
+    ...r,
+    position: i + 1,
+    best_position: null,
+    rank_change: priorPos[r.id] ? priorPos[r.id] - (i + 1) : 0,
+  }));
+}
+
+/** The doubles ladder for a season, in the same envelope as the singles one. */
+function getDoublesLadderForSeason(seasonKey = null) {
+  const settings = seasonModel.getSettings();
+  const monthDay = seasonsLib.startMonthDay(settings);
+  const all = seasonModel.getAllSeasons();
+  const season = seasonKey
+    ? all.find((s) => s.key === String(seasonKey)) || null
+    : all.find((s) => s.is_current) || all[0] || null;
+  if (!season) return { season: null, system: 'elo', frozen: false, rows: [] };
+
+  const range = seasonsLib.seasonRange(season.key, monthDay);
+  const today = new Date().toISOString().slice(0, 10);
+  return { season, system: 'elo', frozen: range.end < today, rows: computeDoublesEloLadder(season.key, settings) };
+}
+
+/**
+ * This player's doubles rating change per match, keyed by match id. The same
+ * replay that builds the ladder, so a profile row always reconciles with it.
+ */
+function getPlayerDoublesRatingDeltas(playerId) {
+  const id = Number(playerId);
+  const cfg = elo.config(seasonModel.getSettings());
+  const players = getDB().prepare(PLAYER_SELECT).all();
+  const playerIds = new Set(players.map((p) => p.id));
+  const deltas = {};
+  if (!playerIds.has(id)) return deltas;
+
+  const ratings = {};
+  for (const p of players) ratings[p.id] = cfg.elo_base_rating;
+  for (const m of matchModel.getCompletedDoublesMatches()) {
+    const ids = [m.s1a, m.s1b, m.s2a, m.s2b];
+    if (ids.some((x) => !playerIds.has(x)) || new Set(ids).size !== 4) continue;
+    const k = cfg.elo_k_factor * elo.marginMultiplier(m.winner_games, m.loser_games, cfg);
+    const d = elo.doublesDeltas([[ratings[m.s1a], ratings[m.s1b]], [ratings[m.s2a], ratings[m.s2b]]], m.won_side, k);
+    const flat = { [m.s1a]: d[0][0], [m.s1b]: d[0][1], [m.s2a]: d[1][0], [m.s2b]: d[1][1] };
+    for (const [pid, delta] of Object.entries(flat)) ratings[pid] += delta;
+    if (flat[id] !== undefined) deltas[m.match_id] = Math.round(flat[id]);
+  }
+  return deltas;
+}
+
+/** All four players' doubles rating changes for one match, keyed by player id. */
+function getDoublesMatchDeltas(matchId) {
+  const target = Number(matchId);
+  const cfg = elo.config(seasonModel.getSettings());
+  const players = getDB().prepare(PLAYER_SELECT).all();
+  const playerIds = new Set(players.map((p) => p.id));
+  const ratings = {};
+  for (const p of players) ratings[p.id] = cfg.elo_base_rating;
+  for (const m of matchModel.getCompletedDoublesMatches()) {
+    const ids = [m.s1a, m.s1b, m.s2a, m.s2b];
+    if (ids.some((x) => !playerIds.has(x)) || new Set(ids).size !== 4) continue;
+    const k = cfg.elo_k_factor * elo.marginMultiplier(m.winner_games, m.loser_games, cfg);
+    const d = elo.doublesDeltas([[ratings[m.s1a], ratings[m.s1b]], [ratings[m.s2a], ratings[m.s2b]]], m.won_side, k);
+    const flat = { [m.s1a]: d[0][0], [m.s1b]: d[0][1], [m.s2a]: d[1][0], [m.s2b]: d[1][1] };
+    for (const [pid, delta] of Object.entries(flat)) ratings[pid] += delta;
+    if (m.match_id === target) return Object.fromEntries(Object.entries(flat).map(([pid, x]) => [pid, Math.round(x)]));
+  }
+  return {};
+}
+
+function getPlayerDoublesLadderStats(playerId) {
+  const { season, frozen, rows } = getDoublesLadderForSeason();
+  const row = rows.find((p) => p.id === Number(playerId)) || null;
+  const played = !!matchModel.getLastDoublesMatchDates()[Number(playerId)];
+  return {
+    system: 'elo',
+    frozen,
+    season_name: season?.name || null,
+    ladder_size: rows.length,
+    position: row?.position ?? null,
+    unranked: !row && !played,
+    rank_change: frozen ? 0 : (row?.rank_change ?? 0),
+    rating: row?.rating ?? null,
+  };
+}
+
 function getPlayerLadderStats(playerId) {
   const { season, system, frozen, rows } = getLadderForSeason();
   const row = rows.find((p) => p.id === Number(playerId)) || null;
@@ -620,4 +807,6 @@ module.exports = {
   getLadder, getPlayerLadderStats, getPlayerMatchRatingDeltas,
   getLadderForSeason, computeEloLadder, getSeasonRecords,
   getCompletedMatches, getLastMatchDates,
+  computeDoublesEloLadder, getDoublesLadderForSeason,
+  getPlayerDoublesRatingDeltas, getPlayerDoublesLadderStats, getDoublesMatchDeltas,
 };

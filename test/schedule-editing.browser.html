@@ -23,7 +23,8 @@ payload.slots.push(
   { id:'t_5', source:'tournament', courtId:5, startTime:'12:00', durationMinutes:60,
     title:'Tournament', info:'C vs D', color:'#7c3aed', players:[], repeatGroupId:null,
     date:'2026-08-12', bookingTypeId:null, name:null });
-const PLAYERS = ['Sofia Duarte','Marcus Lang','Priya Raman','Tom Beckett','Elena Sorokin','Dev Patel','Ruth Okonjo','Callum Reid','James Whitfield'].map((name,i)=>({id:i+1,name}));
+// Sofia has a profile photo; the search has to show it rather than initials.
+const PLAYERS = ['Sofia Duarte','Marcus Lang','Priya Raman','Tom Beckett','Elena Sorokin','Dev Patel','Ruth Okonjo','Callum Reid','James Whitfield'].map((name,i)=>({id:i+1,name,photo_path:i===0?'/uploads/avatars/1-sofia.jpg':null}));
 const calls=[];
 window.api = { getSchedule:async()=>payload, getCourts:async()=>payload.courts,
   getBookingTypes:async()=>payload.types, getPlayers:async()=>PLAYERS,
@@ -278,6 +279,7 @@ $$('.sch-panel [data-act="start-"]')[0].click(); await tick();
 ok('start steps back by 15 minutes', stepVals()[0]==='1:45 PM', stepVals()[0]);
 $('#schPanelSearch').value='sof';
 $('#schPanelSearch').dispatchEvent(new Event('input',{bubbles:true})); await tick();
+ok('a search result with a photo shows it, not initials', $('.sch-search-av img')?.getAttribute('src')==='/uploads/avatars/1-sofia.jpg', $('.sch-search-av')?.innerHTML);
 $('.sch-search-row').dispatchEvent(new MouseEvent('mousedown',{bubbles:true})); await tick();
 ok('picking a player makes a chip', $$('.sch-pchip').length===1 && $('.sch-panel-room').textContent==='3 of 4 free');
 $$('.sch-panel-step')[1].click(); await tick();

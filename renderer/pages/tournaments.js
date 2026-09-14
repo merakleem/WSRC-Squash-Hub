@@ -60,8 +60,8 @@ export async function renderTournaments() {
     return;
   }
 
-  const active = tournaments.filter(t => t.status !== 'completed');
-  const past   = tournaments.filter(t => t.status === 'completed');
+  const active = tournaments.filter((t) => t.status !== 'completed');
+  const past   = tournaments.filter((t) => t.status === 'completed');
 
   function cardHTML(t) {
     const { label, cls } = _trStatusLabel(t.status);
@@ -90,7 +90,7 @@ export async function renderTournaments() {
   if (past.length)   html += `<div class="leagues-section-label${active.length ? ' leagues-section-label--gap' : ''}">Past</div><div class="league-grid">${past.map(cardHTML).join('')}</div>`;
   content.innerHTML = html;
 
-  content.querySelectorAll('.league-card').forEach(el => {
+  content.querySelectorAll('.league-card').forEach((el) => {
     el.addEventListener('click', () => window.navigate('tournamentDetail', { tournamentId: Number(el.dataset.id) }));
   });
 }
@@ -118,7 +118,6 @@ export async function renderTournamentDetail() {
     });
   }
 
-  const playerMap = new Map(t.players.map(p => [p.player_id, p]));
   const groupMatchesByGroupId = {};
   const bracketMatches = {};
   for (const m of t.matches) {
@@ -132,7 +131,7 @@ export async function renderTournamentDetail() {
 
   // Local standings calc (uses new {p1,p2} score format)
   function calcStandings(groupId) {
-    const gPlayers = t.players.filter(p => p.group_id === groupId);
+    const gPlayers = t.players.filter((p) => p.group_id === groupId);
     const gMatches = groupMatchesByGroupId[groupId] || [];
     const stats = {};
     for (const p of gPlayers) stats[p.player_id] = { ...p, wins: 0, losses: 0, sw: 0, sl: 0, played: 0 };
@@ -142,8 +141,7 @@ export async function renderTournamentDetail() {
       const p1s = sc ? (sc.p1 || 0) : 0, p2s = sc ? (sc.p2 || 0) : 0;
       if (stats[m.player1_id]) { stats[m.player1_id].sw += p1s; stats[m.player1_id].sl += p2s; stats[m.player1_id].played++; }
       if (stats[m.player2_id]) { stats[m.player2_id].sw += p2s; stats[m.player2_id].sl += p1s; stats[m.player2_id].played++; }
-      if (m.winner_id === m.player1_id) { if (stats[m.player1_id]) stats[m.player1_id].wins++; if (stats[m.player2_id]) stats[m.player2_id].losses++; }
-      else { if (stats[m.player2_id]) stats[m.player2_id].wins++; if (stats[m.player1_id]) stats[m.player1_id].losses++; }
+      if (m.winner_id === m.player1_id) { if (stats[m.player1_id]) stats[m.player1_id].wins++; if (stats[m.player2_id]) stats[m.player2_id].losses++; } else { if (stats[m.player2_id]) stats[m.player2_id].wins++; if (stats[m.player1_id]) stats[m.player1_id].losses++; }
     }
     return Object.values(stats).sort((a, b) => {
       if (b.wins !== a.wins) return b.wins - a.wins;
@@ -156,7 +154,7 @@ export async function renderTournamentDetail() {
   function groupCardHTML(g) {
     const standings = calcStandings(g.id);
     const gMatches = groupMatchesByGroupId[g.id] || [];
-    const played = gMatches.filter(m => m.winner_id).length;
+    const played = gMatches.filter((m) => m.winner_id).length;
     const total = gMatches.length;
 
     const standingsHTML = standings.map((s, i) => {
@@ -170,7 +168,7 @@ export async function renderTournamentDetail() {
       </div>`;
     }).join('');
 
-    const matchRowsHTML = gMatches.map(m => {
+    const matchRowsHTML = gMatches.map((m) => {
       const sc = _trScObj(m);
       const p1s = sc ? sc.p1 : null, p2s = sc ? sc.p2 : null;
       const hasScore = m.winner_id != null;
@@ -183,7 +181,7 @@ export async function renderTournamentDetail() {
       const isMyMatch = myId && (m.player1_id === myId || m.player2_id === myId);
       const canScore = m.player1_id && m.player2_id && (isAdmin() || (isMyMatch && !hasScore));
       const scoreBtn = canScore
-        ? `<button class="tr-score-btn" data-match-id="${m.id}">${isAdmin() && hasScore ? 'Edit' : 'Score'}</button>` : '';
+        ? `<button class="tr-score-btn" data-match-id="${m.id}" aria-label="${isAdmin() && hasScore ? 'Edit' : 'Enter'} score, ${esc(m.p1_name || 'Player 1')} vs ${esc(m.p2_name || 'Player 2')}">${isAdmin() && hasScore ? 'Edit' : 'Score'}</button>` : '';
       return `<div class="tr-match-row">
         <div class="tr-match-names">
           <span class="${p1win && hasScore ? 'tr-match-winner' : ''}">${esc(m.p1_name || '?')}</span>
@@ -230,7 +228,7 @@ export async function renderTournamentDetail() {
     const isMyBracketMatch = myId2 && (m.player1_id === myId2 || m.player2_id === myId2);
     const canScoreBracket = known && (isAdmin() || (isMyBracketMatch && !hasScore));
     const scoreBtn = canScoreBracket
-      ? `<button class="tr-score-btn" data-match-id="${m.id}">${isAdmin() && hasScore ? 'Edit' : 'Score'}</button>` : '';
+      ? `<button class="tr-score-btn" data-match-id="${m.id}" aria-label="${isAdmin() && hasScore ? 'Edit' : 'Enter'} score, ${esc(m.p1_name || 'Player 1')} vs ${esc(m.p2_name || 'Player 2')}">${isAdmin() && hasScore ? 'Edit' : 'Score'}</button>` : '';
     const timeStr = m.match_date ? `${_trFmtShort(m.match_date)}${m.match_time ? ' · ' + _trFmtTime(m.match_time) : ''}` : '';
     return `<div class="tr-bracket-card${hasScore ? ' tr-bracket-card--scored' : ''}">
       <div class="tr-bc-header">
@@ -270,17 +268,17 @@ export async function renderTournamentDetail() {
     function addBracketTier(label, ids) {
       const valid = ids.filter(Boolean);
       if (!valid.length) return;
-      tiers.push({ label, players: valid.map(id => ({ id, name: (t.players.find(p => p.player_id === id) || {}).player_name || '?' })) });
-      valid.forEach(id => placedIds.add(id));
+      tiers.push({ label, players: valid.map((id) => ({ id, name: (t.players.find((p) => p.player_id === id) || {}).player_name || '?' })) });
+      valid.forEach((id) => placedIds.add(id));
     }
 
     addBracketTier('1st',    [matchWinner(bracketMatches['F'])]);
     addBracketTier('2nd',    [matchLoser(bracketMatches['F'])]);
     addBracketTier('3rd–4th', [matchLoser(bracketMatches['SF1']), matchLoser(bracketMatches['SF2'])]);
-    addBracketTier('5th–8th', ['QF1','QF2','QF3','QF4'].map(s => matchLoser(bracketMatches[s])));
+    addBracketTier('5th–8th', ['QF1','QF2','QF3','QF4'].map((s) => matchLoser(bracketMatches[s])));
 
     // Group stage players who didn't reach the bracket
-    const remaining = t.players.map(p => p.player_id).filter(id => !placedIds.has(id));
+    const remaining = t.players.map((p) => p.player_id).filter((id) => !placedIds.has(id));
     const rec = {};
     for (const id of remaining) rec[id] = { wins: 0, losses: 0, sd: 0 };
     for (const m of t.matches) {
@@ -301,7 +299,7 @@ export async function renderTournamentDetail() {
       const group = remaining.slice(i, j);
       const end = pos + group.length - 1;
       const label = pos === end ? ord(pos) : `${ord(pos)}–${ord(end)}`;
-      tiers.push({ label, players: group.map(id => ({ id, name: (t.players.find(p => p.player_id === id) || {}).player_name || '?' })) });
+      tiers.push({ label, players: group.map((id) => ({ id, name: (t.players.find((p) => p.player_id === id) || {}).player_name || '?' })) });
       pos += group.length;
       i = j;
     }
@@ -312,11 +310,11 @@ export async function renderTournamentDetail() {
   const resultsHTML = isCompleted ? (() => {
     const tiers = buildResultsTiers();
     if (!tiers.length) return '<div class="tr-results-empty">No results yet.</div>';
-    return `<div class="tr-results-list">${tiers.map(tier =>
-      tier.players.map(p => `<div class="tr-results-row">
+    return `<div class="tr-results-list">${tiers.map((tier) =>
+      tier.players.map((p) => `<div class="tr-results-row">
         <span class="tr-results-pos">${tier.label}</span>
         <span class="tr-results-name">${esc(p.name)}</span>
-      </div>`).join('')
+      </div>`).join(''),
     ).join('')}</div>`;
   })() : '';
 
@@ -354,30 +352,35 @@ export async function renderTournamentDetail() {
       <span class="tr-badge ${statusCls}">${statusLabel}</span>
       <span class="tr-detail-champ-date">Championship: ${_trFmtDate(t.championship_date)}</span>
     </div>
-    <div class="tr-tabs">
-      <button class="tr-tab active" data-tab="groups">Groups</button>
-      <button class="tr-tab" data-tab="bracket">Bracket</button>
-      ${isCompleted ? `<button class="tr-tab" data-tab="results">Results</button>` : ''}
+    <div class="tr-tabs" role="tablist" aria-label="Tournament sections">
+      <button class="tr-tab active" role="tab" aria-selected="true" aria-controls="trPanelGroups" data-tab="groups">Groups</button>
+      <button class="tr-tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="trPanelBracket" data-tab="bracket">Bracket</button>
+      ${isCompleted ? `<button class="tr-tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="trPanelResults" data-tab="results">Results</button>` : ''}
     </div>
-    <div id="trPanelGroups" class="tr-groups-grid">${groupsHTML}</div>
-    <div id="trPanelBracket" class="tr-bracket-panel" style="display:none">${bracketHTML}</div>
-    ${isCompleted ? `<div id="trPanelResults" class="tr-results-panel" style="display:none">${resultsHTML}</div>` : ''}
+    <div id="trPanelGroups" class="tr-groups-grid" role="tabpanel">${groupsHTML}</div>
+    <div id="trPanelBracket" class="tr-bracket-panel" role="tabpanel" style="display:none">${bracketHTML}</div>
+    ${isCompleted ? `<div id="trPanelResults" class="tr-results-panel" role="tabpanel" style="display:none">${resultsHTML}</div>` : ''}
   </div>`;
 
-  content.querySelectorAll('.tr-tab').forEach(btn => {
+  content.querySelectorAll('.tr-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
-      content.querySelectorAll('.tr-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      content.querySelectorAll('.tr-tab').forEach((b) => {
+        const on = b.dataset.tab === tab;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', String(on));
+        b.tabIndex = on ? 0 : -1;
+      });
       document.getElementById('trPanelGroups').style.display = tab === 'groups' ? '' : 'none';
       document.getElementById('trPanelBracket').style.display = tab === 'bracket' ? '' : 'none';
       if (isCompleted) document.getElementById('trPanelResults').style.display = tab === 'results' ? '' : 'none';
     });
   });
 
-  content.querySelectorAll('.tr-score-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
+  content.querySelectorAll('.tr-score-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const match = t.matches.find(m => m.id === Number(btn.dataset.matchId));
+      const match = t.matches.find((m) => m.id === Number(btn.dataset.matchId));
       if (match) openTournamentScoreModal(match, t);
     });
   });
@@ -397,11 +400,11 @@ function openTournamentScoreModal(match, tournament) {
   ];
 
   let selected = existingSc
-    ? presets.find(pr => pr.p1 === existingSc.p1 && pr.p2 === existingSc.p2) || null
+    ? presets.find((pr) => pr.p1 === existingSc.p1 && pr.p2 === existingSc.p2) || null
     : null;
 
   function renderModal() {
-    const btnsHTML = presets.map(pr => {
+    const btnsHTML = presets.map((pr) => {
       const isSel = selected && selected.p1 === pr.p1 && selected.p2 === pr.p2;
       const p1wins = pr.p1 > pr.p2;
       const scoreDisplay = p1wins ? `${pr.p1}–${pr.p2}` : `${pr.p2}–${pr.p1}`;
@@ -433,10 +436,10 @@ function openTournamentScoreModal(match, tournament) {
   }
 
   function attachModalListeners() {
-    document.querySelectorAll('.tr-preset-btn').forEach(btn => {
+    document.querySelectorAll('.tr-preset-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         selected = { p1: Number(btn.dataset.p1), p2: Number(btn.dataset.p2) };
-        document.querySelectorAll('.tr-preset-btn').forEach(b => b.classList.toggle('tr-preset-btn--selected',
+        document.querySelectorAll('.tr-preset-btn').forEach((b) => b.classList.toggle('tr-preset-btn--selected',
           Number(b.dataset.p1) === selected.p1 && Number(b.dataset.p2) === selected.p2));
         document.getElementById('trSaveScore').disabled = false;
       });
@@ -528,11 +531,11 @@ export async function renderCreateTournament() {
 
     function renderList(filter='') {
       const lc = filter.toLowerCase();
-      const filtered = allPlayers.filter(p => !filter || p.name.toLowerCase().includes(lc));
+      const filtered = allPlayers.filter((p) => !filter || p.name.toLowerCase().includes(lc));
       const listEl = document.getElementById('trPlayerList');
       if (!listEl) return;
       const scrollTop = listEl.scrollTop;
-      listEl.innerHTML = filtered.map(p => {
+      listEl.innerHTML = filtered.map((p) => {
         const sel = wiz.selectedPlayers.includes(p.id);
         return `<div class="picker-item${sel?' tr-pl-row--sel':''}" data-pid="${p.id}" style="${sel?'background:#eef2ff':''}">
           <div class="tr-pl-check" style="width:18px;flex-shrink:0;color:var(--primary)">${sel?'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>':''}</div>
@@ -551,8 +554,8 @@ export async function renderCreateTournament() {
     }
 
     renderList();
-    document.getElementById('trSearch').addEventListener('input', e => renderList(e.target.value));
-    document.getElementById('trPlayerList').addEventListener('click', e => {
+    document.getElementById('trSearch').addEventListener('input', (e) => renderList(e.target.value));
+    document.getElementById('trPlayerList').addEventListener('click', (e) => {
       const row = e.target.closest('[data-pid]');
       if (!row) return;
       const pid = Number(row.dataset.pid);
@@ -574,8 +577,8 @@ export async function renderCreateTournament() {
       return `<div class="tr-group-card">
         <div class="tr-group-header"><span class="tr-group-name">Group ${gName}</span></div>
         <div class="tr-swap-list">
-          ${(wiz.groups[gName]||[]).map(pid => {
-            const p = allPlayers.find(pl => pl.id === pid) || { id: pid, name: 'Unknown' };
+          ${(wiz.groups[gName]||[]).map((pid) => {
+            const p = allPlayers.find((pl) => pl.id === pid) || { id: pid, name: 'Unknown' };
             const isSel = wiz.swapTarget?.pid === pid;
             return `<div class="tr-swap-row${isSel?' tr-swap-row--sel':''}" data-pid="${pid}" data-grp="${gName}">
               ${isSel?'<span class="tr-swap-sel-dot"></span>':''}${esc(p.name)}
@@ -607,12 +610,10 @@ export async function renderCreateTournament() {
     });
     document.getElementById('trBack2').addEventListener('click', () => { wiz.step = 1; render(); });
     document.getElementById('trNext2').addEventListener('click', () => { wiz.step = 3; render(); });
-    content.querySelectorAll('.tr-swap-row').forEach(el => {
+    content.querySelectorAll('.tr-swap-row').forEach((el) => {
       el.addEventListener('click', () => {
         const pid = Number(el.dataset.pid), grp = el.dataset.grp;
-        if (!wiz.swapTarget) { wiz.swapTarget = { pid, grp }; renderStep2(); }
-        else if (wiz.swapTarget.pid === pid) { wiz.swapTarget = null; renderStep2(); }
-        else {
+        if (!wiz.swapTarget) { wiz.swapTarget = { pid, grp }; renderStep2(); } else if (wiz.swapTarget.pid === pid) { wiz.swapTarget = null; renderStep2(); } else {
           const a = wiz.swapTarget, b = { pid, grp };
           const ai = wiz.groups[a.grp].indexOf(a.pid), bi = wiz.groups[b.grp].indexOf(b.pid);
           wiz.groups[a.grp][ai] = b.pid; wiz.groups[b.grp][bi] = a.pid;
@@ -667,16 +668,16 @@ export async function renderCreateTournament() {
     document.getElementById('trBack3').addEventListener('click', () => { wiz.step = 2; render(); });
 
     (async () => {
-      const courts = (await window.api.getCourts()).filter(c => c.active);
+      const courts = (await window.api.getCourts()).filter((c) => c.active);
       document.getElementById('trCourtList').innerHTML = courts.length
-        ? courts.map(c => `<label class="tr-court-label"><input type="checkbox" value="${c.id}" checked> ${esc(c.name)}</label>`).join('')
+        ? courts.map((c) => `<label class="tr-court-label"><input type="checkbox" value="${c.id}" checked> ${esc(c.name)}</label>`).join('')
         : `<span class="form-hint">No active courts configured.</span>`;
     })();
 
     let conflictTimer = null;
     async function checkConflicts() {
       const champDate = document.getElementById('trChampDate')?.value;
-      const courtIds = [...document.querySelectorAll('#trCourtList input:checked')].map(el => Number(el.value));
+      const courtIds = [...document.querySelectorAll('#trCourtList input:checked')].map((el) => Number(el.value));
       const duration = Number(document.getElementById('trDuration')?.value) || 60;
       const buffer = Number(document.getElementById('trBuffer')?.value) || 0;
       if (!champDate || !courtIds.length) return;
@@ -685,7 +686,7 @@ export async function renderCreateTournament() {
         const warn = document.getElementById('trConflictWarn');
         if (!warn) return;
         if (conflicts.length) {
-          warn.textContent = `League conflict on ${conflicts.map(d => _trFmtShort(d)).join(', ')}. Choose a different week.`;
+          warn.textContent = `League conflict on ${conflicts.map((d) => _trFmtShort(d)).join(', ')}. Choose a different week.`;
           warn.style.display = '';
           document.getElementById('trCreate').disabled = true;
         } else {
@@ -704,7 +705,7 @@ export async function renderCreateTournament() {
     document.getElementById('trCreate').addEventListener('click', async () => {
       const name = document.getElementById('trName').value.trim();
       const championshipDate = document.getElementById('trChampDate').value;
-      const courtIds = [...document.querySelectorAll('#trCourtList input:checked')].map(el => Number(el.value));
+      const courtIds = [...document.querySelectorAll('#trCourtList input:checked')].map((el) => Number(el.value));
       const matchDurationMinutes = Number(document.getElementById('trDuration').value) || 60;
       const bufferMinutes = Number(document.getElementById('trBuffer').value) || 0;
       const errEl = document.getElementById('trError');

@@ -1,4 +1,4 @@
-const { run, all, get, getDB } = require('../database/db');
+const { all, getDB } = require('../database/db');
 
 // ===== HELPERS =====
 
@@ -37,7 +37,7 @@ function _hasLeagueConflict(db, courtId, date, startTime, durationMinutes) {
     WHERE m.type = 'league' AND m.court_id = ? AND m.scheduled_date = ?
       AND m.scheduled_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
   `).all(courtId, date);
-  return matches.some(lm => {
+  return matches.some((lm) => {
     const [bh, bm] = lm.start_time.split(':').map(Number);
     const bs = bh * 60 + bm;
     return startMin < bs + (lm.match_duration || 45) && bs < endMin;
@@ -52,7 +52,7 @@ function _scheduleMatches(matches, courts, duration, buffer, date, startHour, ma
   const perSlot = Math.min(courts.length, maxParallel || courts.length);
   let slotMinutes = startHour * 60;
   let inSlot = 0;
-  return matches.map(match => {
+  return matches.map((match) => {
     const scheduled = { ...match, match_date: date, match_time: _minutesToTime(slotMinutes), court_id: courts[inSlot].id };
     inSlot++;
     if (inSlot >= perSlot) { inSlot = 0; slotMinutes += duration + buffer; }
@@ -90,8 +90,8 @@ function _deleteConflictingBookings(db, courtId, date, startTime, durationMinute
       else singlesToDelete.add(row.id);
     }
   }
-  groupsToDelete.forEach(gid => db.prepare('DELETE FROM bookings WHERE group_id = ?').run(gid));
-  singlesToDelete.forEach(bid => db.prepare('DELETE FROM bookings WHERE id = ?').run(bid));
+  groupsToDelete.forEach((gid) => db.prepare('DELETE FROM bookings WHERE group_id = ?').run(gid));
+  singlesToDelete.forEach((bid) => db.prepare('DELETE FROM bookings WHERE id = ?').run(bid));
 }
 
 // ===== PUBLIC API =====
@@ -140,7 +140,7 @@ function checkTournamentDate({ championshipDate, courtIds, matchDurationMinutes,
   const buffer = Number(bufferMinutes) || 0;
 
   const courts = db.prepare(
-    `SELECT * FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`
+    `SELECT * FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`,
   ).all(...courtIds.map(Number));
   if (courts.length === 0) return { conflicts: [] };
 
@@ -171,7 +171,7 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
   const buffer = Number(bufferMinutes) || 0;
 
   const courts = db.prepare(
-    `SELECT * FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`
+    `SELECT * FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`,
   ).all(...courtIds.map(Number));
   if (courts.length === 0) throw new Error('No valid courts selected.');
 
@@ -195,7 +195,7 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
 
   const txn = db.transaction(() => {
     const tr = db.prepare(
-      `INSERT INTO tournaments (name, type, status, championship_date, match_duration_minutes, buffer_minutes) VALUES (?, 'groups_16', 'group_stage', ?, ?, ?)`
+      `INSERT INTO tournaments (name, type, status, championship_date, match_duration_minutes, buffer_minutes) VALUES (?, 'groups_16', 'group_stage', ?, ?, ?)`,
     ).run(name, championshipDate, duration, buffer);
     const tournamentId = tr.lastInsertRowid;
 
@@ -241,7 +241,7 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
     }
 
     // Quarterfinals (players TBD until group stage complete)
-    const qfShells = ['QF1','QF2','QF3','QF4'].map(slot => ({ tournament_id: tournamentId, round: 'quarterfinal', bracket_slot: slot }));
+    const qfShells = ['QF1','QF2','QF3','QF4'].map((slot) => ({ tournament_id: tournamentId, round: 'quarterfinal', bracket_slot: slot }));
     for (const m of _scheduleMatches(qfShells, courts, duration, buffer, satDate, 12, 1)) {
       _deleteConflictingBookings(db, m.court_id, m.match_date, m.match_time, duration);
       db.prepare(`INSERT INTO matches (type, status, tournament_id, round, bracket_slot, court_id, scheduled_date, scheduled_time)
@@ -269,7 +269,7 @@ function createTournament({ name, groups: groupAssignments, championshipDate, co
 // Auto-seed players by ladder rank and return proposed group assignments.
 function getSuggestedGroups(playerIds) {
   const db = getDB();
-  const players = playerIds.map(id => {
+  const players = playerIds.map((id) => {
     const row = db.prepare('SELECT p.id, p.name, l.position FROM players p LEFT JOIN ladder l ON l.player_id = p.id WHERE p.id = ?').get(Number(id));
     return row || { id: Number(id), name: 'Unknown', position: null };
   });
@@ -280,7 +280,7 @@ function getSuggestedGroups(playerIds) {
     if (b.position) return 1;
     return (a.name || '').localeCompare(b.name || '');
   });
-  return _snakeSeed(players.map(p => p.id));
+  return _snakeSeed(players.map((p) => p.id));
 }
 
 // Calculate current group standings for a tournament.
@@ -297,8 +297,8 @@ function getGroupStandings(tournamentId) {
 
   const standings = {};
   for (const g of groups) {
-    const gPlayers = players.filter(p => p.group_id === g.id);
-    const gMatches = matches.filter(m => m.group_id === g.id);
+    const gPlayers = players.filter((p) => p.group_id === g.id);
+    const gMatches = matches.filter((m) => m.group_id === g.id);
     const stats = {};
     for (const p of gPlayers) {
       stats[p.player_id] = { player_id: p.player_id, player_name: p.player_name, ladder_position: p.ladder_position, wins: 0, losses: 0, games_won: 0, games_lost: 0 };
@@ -310,8 +310,7 @@ function getGroupStandings(tournamentId) {
       const p2g = sc ? (sc.p2 || 0) : 0;
       stats[m.player1_id].games_won += p1g; stats[m.player1_id].games_lost += p2g;
       stats[m.player2_id].games_won += p2g; stats[m.player2_id].games_lost += p1g;
-      if (m.winner_id === m.player1_id) { stats[m.player1_id].wins++; stats[m.player2_id].losses++; }
-      else { stats[m.player2_id].wins++; stats[m.player1_id].losses++; }
+      if (m.winner_id === m.player1_id) { stats[m.player1_id].wins++; stats[m.player2_id].losses++; } else { stats[m.player2_id].wins++; stats[m.player1_id].losses++; }
     }
     standings[g.name] = Object.values(stats).sort((a, b) => {
       if (b.wins !== a.wins) return b.wins - a.wins;
@@ -353,7 +352,7 @@ function updateTournamentMatchScore(matchId, scores, winnerId) {
 
   if (match.round === 'group') {
     const allGroup = db.prepare(`SELECT winner_id FROM matches WHERE type = 'tournament' AND tournament_id = ? AND round = 'group'`).all(tid);
-    if (allGroup.every(m => m.winner_id !== null)) advanceToKnockout(db, tid);
+    if (allGroup.every((m) => m.winner_id !== null)) advanceToKnockout(db, tid);
   } else if (match.round === 'quarterfinal') {
     // QF1→SF1 player1, QF2→SF2 player1, QF3→SF1 player2, QF4→SF2 player2
     const sfMap = { QF1: ['SF1', 'player1_id'], QF2: ['SF2', 'player1_id'], QF3: ['SF1', 'player2_id'], QF4: ['SF2', 'player2_id'] };
@@ -376,7 +375,6 @@ function clearTournamentMatchScore(matchId) {
   if (!match || !match.winner_id) return;
 
   const tid = match.tournament_id;
-  const prevWinnerId = match.winner_id;
 
   db.prepare(`UPDATE matches SET scores = NULL, winner_id = NULL, confirmed_at = NULL, played_at = NULL, status = CASE WHEN court_id IS NOT NULL AND scheduled_time IS NOT NULL THEN 'scheduled' ELSE 'unscheduled' END WHERE id = ?`).run(Number(matchId));
 
@@ -426,7 +424,7 @@ function getPlayerTournamentHistory(playerId) {
     ORDER BY confirmed_at DESC, tm.scheduled_time DESC
   `).all(Number(playerId), Number(playerId));
 
-  return rows.map(m => {
+  return rows.map((m) => {
     const isP1 = m.player1_id === Number(playerId);
     const sc = m.scores ? JSON.parse(m.scores) : null;
     const mySets   = sc ? (isP1 ? sc.p1 : sc.p2) : 0;
@@ -468,7 +466,7 @@ function getPlayerTournamentUpcoming(playerId) {
     ORDER BY tm.scheduled_date ASC, tm.scheduled_time ASC
   `).all(Number(playerId), Number(playerId), today);
 
-  return rows.map(m => {
+  return rows.map((m) => {
     const isP1 = m.player1_id === Number(playerId);
     const roundLabel = { group:'Group Stage', quarterfinal:'Quarterfinal', semifinal:'Semifinal', final:'Final' }[m.round] || m.round;
     return {

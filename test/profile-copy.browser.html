@@ -50,7 +50,7 @@ window.api = {
 };
 
 const { state } = await import('../renderer/state.js');
-const mod = await import('../renderer/pages/players.js');
+const mod = await import('../renderer/pages/playerProfile.js');
 window.navigate = (page, params) => {
   calls.push(['navigate', page]);
   if (params?.player) state.currentPlayer = params.player;

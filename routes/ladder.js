@@ -27,4 +27,10 @@ router.get('/ladder/season', wrap(async (req, res) => {
   });
 }));
 
+// The doubles ladder, in the same envelope, so one renderer serves both.
+router.get('/ladder/doubles/season', wrap(async (req, res) => {
+  const result = ladderModel.getDoublesLadderForSeason(req.query.season || null);
+  res.json({ season: result.season, system: result.system, frozen: result.frozen, rows: result.rows });
+}));
+
 module.exports = router;

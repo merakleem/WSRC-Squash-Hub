@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, clubTodayStr } from '../utils.js';
+import { esc, toast, clubTodayStr, avatarInner } from '../utils.js';
 
 // ===== EVENTS =====
 // Club happenings members sign up for. One list, one detail column: socials,
@@ -77,10 +77,12 @@ function _attendWord(e) {
 const _TINTS = ['#e2e6ee', '#d8dff0', '#cdd6ec'];
 function _avatarStack(e, cls) {
   const faces = [];
-  if (e.my_signup) faces.push({ initials: 'ME', me: true });
-  for (const p of e.preview || []) faces.push({ initials: p.initials, me: false });
+  // Your own face is your photo when you have one, and the ME circle when you
+  // do not; the row is already marked as yours either way.
+  if (e.my_signup) faces.push({ label: 'ME', photo_path: state.currentUser?.photo_path || null, me: true });
+  for (const p of e.preview || []) faces.push({ label: p.initials, photo_path: p.photo_path || null, me: false });
   return faces.slice(0, 3).map((f, i) => `<span class="ev-av ${cls}${f.me ? ' ev-av--me' : ''}"
-    style="${f.me ? '' : `background:${_TINTS[i % _TINTS.length]}`}">${esc(f.initials)}</span>`).join('');
+    style="${f.me || f.photo_path ? '' : `background:${_TINTS[i % _TINTS.length]}`}">${f.photo_path ? avatarInner(f) : esc(f.label)}</span>`).join('');
 }
 
 function _typeChip(link, hero) {
@@ -173,9 +175,7 @@ async function _refresh() {
 
 // ── Top bar ───────────────────────────────────────────────────────────────────
 function _topbarHTML() {
-  const n = ev.events.length;
   return `
-    <span class="ev-count">${n} ${ev.tab === 'past' ? 'past' : 'upcoming'}</span>
     ${isAdmin() ? `
       <button class="btn btn-primary" id="evNew">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
@@ -334,7 +334,7 @@ function _rosterHTML(e) {
   const gLabel = (n) => (n === 0 ? '—' : `${n} guest${n === 1 ? '' : 's'}`);
   const rowsHTML = shown.map((a) => `
     <div class="ev-row${a.isMe ? ' ev-row--me' : ''}${admin ? ' ev-row--admin' : ''}">
-      <span class="ev-av ev-av--row${a.isMe ? ' ev-av--me' : ''}">${esc(a.isMe ? 'ME' : a.initials)}</span>
+      <span class="ev-av ev-av--row${a.isMe ? ' ev-av--me' : ''}">${a.photo_path ? avatarInner(a) : esc(a.isMe ? 'ME' : a.initials)}</span>
       <span class="ev-row-name">${esc(a.isMe ? 'You' : a.name)}</span>
       ${admin ? `<span class="ev-row-no">${esc(a.member_number || '')}</span>` : ''}
       <span class="ev-row-guests${a.guests ? '' : ' ev-row-guests--none'}${a.isMe ? ' ev-row-guests--me' : ''}">${gLabel(a.guests)}</span>
@@ -546,8 +546,7 @@ function _wire(content) {
   document.getElementById('evWithdraw')?.addEventListener('click', async () => {
     if (ev.busy) return;
     ev.busy = true;
-    try { await window.api.withdrawFromEvent(e.id); }
-    catch (err) { toast(err.message, 'error'); }
+    try { await window.api.withdrawFromEvent(e.id); } catch (err) { toast(err.message, 'error'); }
     ev.busy = false;
     _refresh();
   });
@@ -555,8 +554,7 @@ function _wire(content) {
     if (ev.busy) return;
     if (e.my_signup) {
       ev.busy = true;
-      try { await window.api.updateEventSignup(e.id, { guests: (e.my_signup.guests || 0) + delta }); }
-      catch (err) { toast(err.message, 'error'); }
+      try { await window.api.updateEventSignup(e.id, { guests: (e.my_signup.guests || 0) + delta }); } catch (err) { toast(err.message, 'error'); }
       ev.busy = false;
       _refresh();
     } else {
@@ -574,8 +572,7 @@ function _wire(content) {
   });
   content.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', async (evt) => {
     evt.stopPropagation();
-    try { await window.api.removeEventAttendee(e.id, Number(b.dataset.remove)); }
-    catch (err) { toast(err.message, 'error'); }
+    try { await window.api.removeEventAttendee(e.id, Number(b.dataset.remove)); } catch (err) { toast(err.message, 'error'); }
     _refresh();
   }));
   document.getElementById('evExportBtn')?.addEventListener('click', () => {
@@ -708,8 +705,7 @@ function _wireModal(content) {
 
   document.getElementById('evDelete')?.addEventListener('click', async () => {
     if (!ev.confirmDelete) { ev.confirmDelete = true; _paintModalOnly(); return; }
-    try { await window.api.deleteEvent(ev.modal.id); }
-    catch (err) { toast(err.message, 'error'); return; }
+    try { await window.api.deleteEvent(ev.modal.id); } catch (err) { toast(err.message, 'error'); return; }
     ev.modal = null;
     ev.form = null;
     _load(true);

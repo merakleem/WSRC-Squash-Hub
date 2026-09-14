@@ -1,0 +1,64 @@
+<!-- The shared modal as a keyboard and screen-reader user meets it: a real
+     dialog, focus moves in, Tab stays in, focus goes back on close, and a
+     toast is announced. Serve the repo root and open
+     /test/modal-a11y.browser.html - the title becomes PASS or FAIL. -->
+<!doctype html><html><head><meta charset="utf-8"><title>RUNNING</title><link rel="stylesheet" href="../renderer/styles.css"></head>
+<body>
+<button id="opener">Open</button>
+<div class="toast-container" id="toastContainer" role="status" aria-live="polite"></div>
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+    <div class="modal-header"><h2 class="modal-title" id="modalTitle"></h2><button class="modal-close" id="modalClose" aria-label="Close">&times;</button></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+<pre id="log" style="position:fixed;inset:0;background:#fff;z-index:999;font:12px monospace;padding:12px;white-space:pre-wrap;overflow:auto"></pre>
+<script type="module">
+const out=[]; let fails=0;
+const ok=(n,c,x='')=>{ if(!c) fails++; out.push((c?'  PASS  ':'  FAIL  ')+n+(x!==''?'  ['+x+']':'')); };
+const key=(k, extra={})=>document.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true,...extra}));
+try {
+  const { modal, toast } = await import('../renderer/utils.js');
+  const opener = document.getElementById('opener');
+  opener.focus();
+  ok('focus starts on the opener', document.activeElement === opener);
+
+  modal.open('A dialog', '<input id="f1"><button id="b1">One</button><button id="b2">Two</button>');
+  const dialog = document.getElementById('modal');
+  ok('the dialog is a dialog', dialog.getAttribute('role') === 'dialog' && dialog.getAttribute('aria-modal') === 'true');
+  ok('named by its title', dialog.getAttribute('aria-labelledby') === 'modalTitle' && document.getElementById('modalTitle').textContent === 'A dialog');
+  ok('focus moved into it', dialog.contains(document.activeElement) && document.activeElement === dialog, document.activeElement.id || document.activeElement.tagName);
+
+  document.getElementById('b2').focus();
+  let ev = key('Tab');
+  ok('Tab from the last control wraps to the first', document.activeElement.id === 'modalClose', document.activeElement.id);
+  document.getElementById('modalClose').focus();
+  key('Tab', { shiftKey: true });
+  ok('Shift+Tab from the first wraps to the last', document.activeElement.id === 'b2', document.activeElement.id);
+  document.getElementById('f1').focus();
+  ev = key('Tab');
+  ok('Tab in the middle is left to the browser', !ev.defaultPrevented && document.activeElement.id === 'f1');
+  opener.focus();
+  key('Tab');
+  ok('focus that escaped is pulled back in', dialog.contains(document.activeElement), document.activeElement.id);
+
+  key('Escape');
+  ok('Escape closes it', !document.getElementById('modalOverlay').classList.contains('open'));
+  ok('and focus returns to the opener', document.activeElement === opener, document.activeElement.id || document.activeElement.tagName);
+
+  // A page that focuses its own field after opening keeps that focus.
+  modal.open('Message', '<textarea id="msg"></textarea>');
+  document.getElementById('msg').focus();
+  ok('a page-chosen focus wins over the dialog\'s own', document.activeElement.id === 'msg');
+  modal.close();
+
+  toast('Saved');
+  toast('Nope', 'error');
+  const toasts = [...document.querySelectorAll('#toastContainer .toast')];
+  ok('a toast lands in the live region', document.getElementById('toastContainer').getAttribute('aria-live') === 'polite' && toasts.length === 2);
+  ok('as a status, and an error as an alert', toasts[0].getAttribute('role') === 'status' && toasts[1].getAttribute('role') === 'alert');
+} catch (e) { fails++; out.push('  FAIL  threw: ' + (e.stack || e)); }
+document.getElementById('log').textContent = out.join('\n');
+document.title = fails ? 'FAIL ' + fails : 'PASS';
+</script>
+</body></html>

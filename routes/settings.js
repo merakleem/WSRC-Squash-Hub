@@ -38,8 +38,7 @@ router.put('/settings', requireAdmin, wrap(async (req, res) => {
     updates[key] = String(n);
   }
   if ('club_timezone' in updates) {
-    try { new Intl.DateTimeFormat('en-CA', { timeZone: String(updates.club_timezone) }); }
-    catch (_) { return res.status(400).json({ error: 'That is not a valid time zone.' }); }
+    try { new Intl.DateTimeFormat('en-CA', { timeZone: String(updates.club_timezone) }); } catch (_) { return res.status(400).json({ error: 'That is not a valid time zone.' }); }
   }
   res.json(await settingsModel.setSettings(updates));
 }));

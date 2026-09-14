@@ -22,6 +22,68 @@ export function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** "Wed, Sep 30, 2026" - a match's own day, weekday visible. */
+export function formatShortDateWeekday(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ===== PLAY DAYS =====
+// A league plays on one or more weekdays; leagues.play_days lists them with
+// the start date's weekday first. A week's date is that first day, and each
+// match's scheduled_date says which of the week's days it is on.
+export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export const DAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** YYYY-MM-DD plus n days, in the browser's own zone. */
+export function addDaysIso(dateStr, days) {
+  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+export function dayOfWeek(dateStr) {
+  return new Date(String(dateStr).slice(0, 10) + 'T12:00:00').getDay();
+}
+
+/** The dates of a week's play days, in play order: [{ dow, date }]. One entry when the league plays one day. */
+export function playDatesFor(weekDate, playDays) {
+  const anchor = dayOfWeek(weekDate);
+  const days = Array.isArray(playDays) && playDays.length ? playDays : [anchor];
+  return days.map((dow) => ({ dow, date: addDaysIso(weekDate, (dow - anchor + 7) % 7) }));
+}
+
+function _joinDays(names) {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+}
+
+/** "Mon & Wed", "Mon, Wed & Fri", "Mon". */
+export function playDayNames(playDays) {
+  return _joinDays((playDays || []).map((d) => DAY_SHORT[d]));
+}
+
+/** "Mondays & Wednesdays". */
+export function playDayNamesLong(playDays) {
+  return _joinDays((playDays || []).map((d) => `${DAY_LONG[d]}s`));
+}
+
+/** "Mon, Sep 28 – Wed, Sep 30, 2026" for several days; formatDate() for one. */
+export function formatWeekRange(weekDate, dates) {
+  if (!dates || dates.length <= 1) return formatDate(weekDate);
+  const first = new Date(dates[0].date + 'T12:00:00');
+  const last = new Date(dates[dates.length - 1].date + 'T12:00:00');
+  const md = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return `${md(first)} – ${md(last)}, ${last.getFullYear()}`;
+}
+
+/** "Sep 28 – Sep 30" for several days; "Sep 28" for one. */
+export function formatWeekRangeShort(weekDate, dates) {
+  const md = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (!dates || dates.length <= 1) return md(String(weekDate).slice(0, 10));
+  return `${md(dates[0].date)} – ${md(dates[dates.length - 1].date)}`;
+}
+
 // ===== AVATARS =====
 
 // Single source of truth for initials; the ladder and profile previously
@@ -54,6 +116,22 @@ export function avatarColor(name) {
 }
 
 /**
+ * The inside of an avatar circle: the player's photo when they have one,
+ * their initials otherwise.
+ *
+ * For the surfaces that own their own circle - its element, its size, its
+ * colour - and so cannot use avatarHTML below, which brings a palette of its
+ * own. A photo always wins over initials, everywhere a player is drawn, so
+ * this is the one place that decides it.
+ */
+export function avatarInner(player) {
+  if (player?.photo_path) {
+    return `<img class="avatar-img" src="${esc(player.photo_path)}" alt="" loading="lazy">`;
+  }
+  return esc(playerInitials(player?.name));
+}
+
+/**
  * Avatar markup for a player: their photo when set, initials otherwise.
  * `className` carries the size modifier (e.g. 'ldr-avatar ldr-avatar-sm').
  * Initials avatars carry their colour as --avatar-bg so each surface decides
@@ -68,10 +146,13 @@ export function avatarHTML(player, className) {
 }
 
 // ===== TOAST =====
+// The container is an aria-live region (index.html), so each toast is read
+// out as it lands; an error is an alert, which is announced at once.
 export function toast(msg, type = 'default') {
   const container = document.getElementById('toastContainer');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
   el.textContent = msg;
   container.appendChild(el);
   requestAnimationFrame(() => el.classList.add('show'));
@@ -85,10 +166,20 @@ export function toast(msg, type = 'default') {
 // `sticky` opts a modal out of close-on-backdrop-click (the backdrop nudges
 // instead); `onRequestClose` intercepts every polite close (✕, Esc, backdrop)
 // so a modal can confirm before discarding work. modal.close() always closes.
+//
+// The dialog is a real one for the keyboard and a screen reader: role=dialog
+// and aria-modal (index.html), focus moves into it on open, Tab cycles inside
+// it while it is open, and whatever had focus before gets it back on close.
+// A page may still focus a specific field after opening; that wins.
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export const modal = {
   _sticky: false,
   _onRequestClose: null,
+  _opener: null,
   open(title, bodyHTML, { wide = false, medium = false, sticky = false, onRequestClose = null } = {}) {
+    const wasOpen = document.getElementById('modalOverlay').classList.contains('open');
+    if (!wasOpen) this._opener = document.activeElement;
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = bodyHTML;
     document.getElementById('modal').classList.toggle('modal-wide', wide);
@@ -96,12 +187,38 @@ export const modal = {
     document.getElementById('modalOverlay').classList.add('open');
     this._sticky = sticky;
     this._onRequestClose = onRequestClose;
+    // The dialog itself takes focus (it has tabindex=-1), so the first Tab
+    // lands on its first control and a reader announces the title.
+    const dialog = document.getElementById('modal');
+    if (!dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
   },
   close() {
     document.getElementById('modal').classList.remove('modal-wide');
     document.getElementById('modalOverlay').classList.remove('open');
     this._sticky = false;
     this._onRequestClose = null;
+    const opener = this._opener;
+    this._opener = null;
+    if (opener && opener.isConnected && typeof opener.focus === 'function' && opener !== document.body) {
+      opener.focus({ preventScroll: true });
+    }
+  },
+  isOpen() {
+    return document.getElementById('modalOverlay').classList.contains('open');
+  },
+  /** Keep Tab inside the dialog while it is open. */
+  _trapTab(e) {
+    const dialog = document.getElementById('modal');
+    const items = [...dialog.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement);
+    if (!items.length) { e.preventDefault(); dialog.focus(); return; }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const inside = dialog.contains(document.activeElement);
+    if (e.shiftKey) {
+      if (!inside || document.activeElement === first || document.activeElement === dialog) { e.preventDefault(); last.focus(); }
+    } else if (!inside || document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
   },
   requestClose() {
     if (this._onRequestClose) this._onRequestClose();
@@ -125,9 +242,9 @@ document.getElementById('modalOverlay').addEventListener('click', (e) => {
   modal.close();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('modalOverlay').classList.contains('open')) {
-    modal.requestClose();
-  }
+  if (!modal.isOpen()) return;
+  if (e.key === 'Escape') modal.requestClose();
+  else if (e.key === 'Tab') modal._trapTab(e);
 });
 
 

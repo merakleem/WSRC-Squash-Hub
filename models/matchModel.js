@@ -37,13 +37,40 @@ const EFF_JOIN = `
 const EFF_P1 = `COALESCE(s1.sub_player_id, m.player1_id)`;
 const EFF_P2 = `COALESCE(s2.sub_player_id, m.player2_id)`;
 
-// A match counts towards records and the ladder once it has a winner, has two
-// real players, and was not skipped.
+// Singles or doubles. Every singles reader - the ladder replay, records,
+// history, head to head, the feed - goes through COUNTS below, so this one
+// clause is what keeps a doubles result out of all of them.
+const SINGLES = `m.format = 'singles'`;
+const DOUBLES = `m.format = 'doubles'`;
+
+// A singles match counts towards records and the ladder once it has a winner,
+// has two real players, and was not skipped.
 const COUNTS = `
   m.winner_id IS NOT NULL
   AND m.player1_id IS NOT NULL AND m.player2_id IS NOT NULL
   AND (m.skipped = 0 OR m.skipped IS NULL)
+  AND ${SINGLES}
 `;
+
+// The doubles equivalent: four real players and a winner.
+const COUNTS_DOUBLES = `
+  m.winner_id IS NOT NULL
+  AND m.player1_id IS NOT NULL AND m.player2_id IS NOT NULL
+  AND m.player1_partner_id IS NOT NULL AND m.player2_partner_id IS NOT NULL
+  AND (m.skipped = 0 OR m.skipped IS NULL)
+  AND ${DOUBLES}
+`;
+
+// Substitutes for the partner slots, on top of EFF_JOIN's s1/s2. A sub is
+// keyed by the player they stand in for, so either partner can be replaced
+// for a night the same way a singles player can.
+const DBL_JOIN = `
+  ${EFF_JOIN}
+  LEFT JOIN match_subs s3 ON s3.match_id = m.id AND s3.original_player_id = m.player1_partner_id
+  LEFT JOIN match_subs s4 ON s4.match_id = m.id AND s4.original_player_id = m.player2_partner_id
+`;
+const EFF_P1B = `COALESCE(s3.sub_player_id, m.player1_partner_id)`;
+const EFF_P2B = `COALESCE(s4.sub_player_id, m.player2_partner_id)`;
 
 // Which side won: 1 or 2.
 //
@@ -139,6 +166,60 @@ function getParticipation() {
 }
 
 
+// ===== DOUBLES =====
+
+/**
+ * Every completed doubles match, oldest first, for the doubles rating replay.
+ * Substitutes are resolved on all four slots. Same ordering rule as singles.
+ */
+function getCompletedDoublesMatches(range = null) {
+  const rows = getDB().prepare(`
+    SELECT
+      m.id AS match_id,
+      ${SOURCE_OF_TYPE} AS source,
+      m.type, m.league_id, m.pair1_id, m.pair2_id,
+      ${EFF_P1}  AS s1a, ${EFF_P1B} AS s1b,
+      ${EFF_P2}  AS s2a, ${EFF_P2B} AS s2b,
+      ${WON_SIDE} AS won_side,
+      CASE WHEN ${WON_SIDE} = 1 THEN m.player1_score ELSE m.player2_score END AS winner_games,
+      CASE WHEN ${WON_SIDE} = 1 THEN m.player2_score ELSE m.player1_score END AS loser_games,
+      m.played_at AS sort_key
+    FROM matches m
+    ${DBL_JOIN}
+    WHERE ${COUNTS_DOUBLES}
+      ${range ? 'AND substr(m.played_at, 1, 10) BETWEEN @start AND @end' : ''}
+    ORDER BY m.id
+  `).all(range ? { start: range.start, end: range.end } : {});
+  return rows.sort((a, b) => (a.sort_key || '').localeCompare(b.sort_key || '') || 0);
+}
+
+const _DOUBLES_DAYS = `
+  SELECT ${EFF_P1}  AS player_id, m.played_at AS d FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+  UNION ALL SELECT ${EFF_P1B}, m.played_at FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+  UNION ALL SELECT ${EFF_P2},  m.played_at FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+  UNION ALL SELECT ${EFF_P2B}, m.played_at FROM matches m ${DBL_JOIN} WHERE ${COUNTS_DOUBLES}
+`;
+
+/** Each player's most recent doubles match day - who is on the doubles ladder. */
+function getLastDoublesMatchDates(asOf = null) {
+  const rows = getDB().prepare(`
+    SELECT player_id, MAX(d) AS last_date FROM (${_DOUBLES_DAYS})
+    WHERE player_id IS NOT NULL AND d IS NOT NULL
+      ${asOf ? 'AND substr(d, 1, 10) <= @asOf' : ''}
+    GROUP BY player_id
+  `).all(asOf ? { asOf } : {});
+  return Object.fromEntries(rows.map((r) => [r.player_id, String(r.last_date).slice(0, 10)]));
+}
+
+/** Each player's first doubles match day, for the join-date rule. */
+function getFirstDoublesMatchDates() {
+  const rows = getDB().prepare(`
+    SELECT player_id, MIN(d) AS first_date FROM (${_DOUBLES_DAYS})
+    WHERE player_id IS NOT NULL AND d IS NOT NULL
+    GROUP BY player_id
+  `).all();
+  return Object.fromEntries(rows.map((r) => [r.player_id, String(r.first_date).slice(0, 10)]));
+}
 
 // ladderModel already requires this module, so it is required back lazily -
 // at load time it would hand us a half-built one.
@@ -147,6 +228,33 @@ function ladderStatsFor(ids) {
   const { rows } = getLadderForSeason();
   const byId = Object.fromEntries(rows.map((r) => [r.id, { position: r.position, rating: r.rating ?? null }]));
   return Object.fromEntries(ids.filter(Boolean).map((id) => [id, byId[id] || null]));
+}
+
+function doublesLadderStatsFor(ids) {
+  const { getDoublesLadderForSeason } = require('./ladderModel');
+  const { rows } = getDoublesLadderForSeason();
+  const byId = Object.fromEntries(rows.map((r) => [r.id, { position: r.position, rating: r.rating ?? null }]));
+  return Object.fromEntries(ids.filter(Boolean).map((id) => [id, byId[id] || null]));
+}
+
+/**
+ * Head to head between two exact pairs: the same four players in the same
+ * partnerships, either side order. `winner_side` is 1 when side A won.
+ */
+function getDoublesHeadToHead(sideA, sideB, { limit = 5 } = {}) {
+  const same = (x, y) => x.length === 2 && y.length === 2 && x[0] !== x[1] && ((x[0] === y[0] && x[1] === y[1]) || (x[0] === y[1] && x[1] === y[0]));
+  const rows = getCompletedDoublesMatches()
+    .filter((m) => (same([m.s1a, m.s1b], sideA) && same([m.s2a, m.s2b], sideB)) || (same([m.s1a, m.s1b], sideB) && same([m.s2a, m.s2b], sideA)))
+    .sort((a, b) => (b.sort_key || '').localeCompare(a.sort_key || ''));
+  let aWins = 0, bWins = 0;
+  const meetings = rows.map((m) => {
+    const aIsSide1 = same([m.s1a, m.s1b], sideA);
+    const winnerSide = (m.won_side === 1) === aIsSide1 ? 1 : 2;
+    if (winnerSide === 1) aWins++; else bWins++;
+    const score = m.winner_games == null ? null : `${m.winner_games}\u2013${m.loser_games}`;
+    return { id: m.match_id, type: m.type, played_at: m.sort_key, winner_side: winnerSide, score };
+  });
+  return { aWins, bWins, total: rows.length, meetings: meetings.slice(0, limit) };
 }
 
 // The rating map is keyed on the outward source name, not the type.
@@ -181,8 +289,7 @@ function getHeadToHead(playerA, playerB, { limit = 5 } = {}) {
     // Games won by each side, oriented winner-first, which is how a squash
     // score is read aloud.
     let hi = r.player1_score, lo = r.player2_score;
-    if (hi == null || lo == null) { hi = null; lo = null; }
-    else if (r.won_side === 2) { [hi, lo] = [lo, hi]; }
+    if (hi == null || lo == null) { hi = null; lo = null; } else if (r.won_side === 2) { [hi, lo] = [lo, hi]; }
     return {
       id: r.id,
       type: r.type,
@@ -208,17 +315,23 @@ function getMatchCard(matchId, viewerId = null) {
     SELECT m.*,
            ${EFF_P1} AS eff_p1_id,
            ${EFF_P2} AS eff_p2_id,
+           ${EFF_P1B} AS eff_p1b_id,
+           ${EFF_P2B} AS eff_p2b_id,
            ${WON_SIDE} AS won_side,
            p1.name AS p1_name, p1.photo_path AS p1_photo,
            p2.name AS p2_name, p2.photo_path AS p2_photo,
+           p1b.name AS p1b_name, p1b.photo_path AS p1b_photo,
+           p2b.name AS p2b_name, p2b.photo_path AS p2b_photo,
            c.name  AS court_name,
            l.name  AS league_name,
            d.name  AS division_name,
            w.week_number,
            t.name  AS tournament_name
-    FROM matches m ${EFF_JOIN}
+    FROM matches m ${DBL_JOIN}
     LEFT JOIN players p1 ON p1.id = ${EFF_P1}
     LEFT JOIN players p2 ON p2.id = ${EFF_P2}
+    LEFT JOIN players p1b ON p1b.id = ${EFF_P1B}
+    LEFT JOIN players p2b ON p2b.id = ${EFF_P2B}
     LEFT JOIN courts c      ON c.id = m.court_id
     LEFT JOIN leagues l     ON l.id = m.league_id
     LEFT JOIN divisions d   ON d.id = m.division_id
@@ -262,7 +375,44 @@ function getMatchCard(matchId, viewerId = null) {
     }
   }
 
-  const h2h = (players[0].id && players[1].id)
+  // A doubles match: two sides of two, each player with their own doubles
+  // rank, rating and rating change, and a head to head between the exact
+  // pairs. `players` keeps side 1's and side 2's first player for readers
+  // that predate doubles; nothing in a doubles card should read it.
+  let doubles = {};
+  if (m.format === 'doubles') {
+    const sideIds = [[m.eff_p1_id, m.eff_p1b_id], [m.eff_p2_id, m.eff_p2b_id]];
+    const meta = {
+      [m.eff_p1_id]: { name: m.p1_name, photo_path: m.p1_photo },
+      [m.eff_p1b_id]: { name: m.p1b_name, photo_path: m.p1b_photo },
+      [m.eff_p2_id]: { name: m.p2_name, photo_path: m.p2_photo },
+      [m.eff_p2b_id]: { name: m.p2b_name, photo_path: m.p2b_photo },
+    };
+    const dl = doublesLadderStatsFor(sideIds.flat());
+    const deltas = isPlayed ? require('./ladderModel').getDoublesMatchDeltas(m.id) : {};
+    const sides = sideIds.map((ids, i) => ({
+      players: ids.map((id) => ({
+        id,
+        name: meta[id]?.name || null,
+        photo_path: meta[id]?.photo_path || null,
+        position: dl[id]?.position ?? null,
+        rating: dl[id]?.rating ?? null,
+        ...(deltas[id] === undefined ? {} : { rating_change: deltas[id] }),
+        is_viewer: viewer != null && id === viewer,
+      })),
+      games: scoreFor(i + 1),
+      won: isPlayed && m.won_side === i + 1,
+    }));
+    const allFour = sideIds.flat().every(Boolean);
+    doubles = {
+      format: 'doubles',
+      sides,
+      head_to_head: allFour ? getDoublesHeadToHead(sideIds[0], sideIds[1]) : { aWins: 0, bWins: 0, total: 0, meetings: [] },
+      can_submit_score: viewer != null && !isPlayed && m.type !== 'tournament' && !m.skipped && sideIds.flat().includes(viewer),
+    };
+  }
+
+  const h2h = m.format !== 'doubles' && players[0].id && players[1].id
     ? getHeadToHead(players[0].id, players[1].id)
     : { aWins: 0, bWins: 0, total: 0, meetings: [] };
 
@@ -270,6 +420,7 @@ function getMatchCard(matchId, viewerId = null) {
     id: m.id,
     type: m.type,
     status: m.status,
+    format: m.format || 'singles',
     players,
     score: isPlayed && m.player1_score != null
       ? `${Math.max(m.player1_score, m.player2_score)}\u2013${Math.min(m.player1_score, m.player2_score)}`
@@ -291,6 +442,7 @@ function getMatchCard(matchId, viewerId = null) {
     can_submit_score: viewer != null && !isPlayed && m.type !== 'tournament' && !m.skipped
       && players.some((p) => p.id === viewer),
     skipped: !!m.skipped,
+    ...doubles,
   };
 }
 
@@ -299,16 +451,21 @@ function getMatchCard(matchId, viewerId = null) {
  * that is not played, soonest first, with undated ones last.
  */
 function getReportableMatches(playerId) {
-  return getDB().prepare(`
-    SELECT m.id, m.type, m.status, m.scheduled_date, m.scheduled_time,
+  const id = Number(playerId);
+  const rows = getDB().prepare(`
+    SELECT m.id, m.type, m.status, m.format, m.scheduled_date, m.scheduled_time,
            c.name AS court_name,
            l.name AS league_name, d.name AS division_name, w.week_number,
-           CASE WHEN ${EFF_P1} = @id THEN ${EFF_P2} ELSE ${EFF_P1} END AS opponent_id,
-           CASE WHEN ${EFF_P1} = @id THEN p2.name ELSE p1.name END AS opponent_name,
-           CASE WHEN ${EFF_P1} = @id THEN p2.photo_path ELSE p1.photo_path END AS opponent_photo
-    FROM matches m ${EFF_JOIN}
+           ${EFF_P1} AS s1a, ${EFF_P1B} AS s1b, ${EFF_P2} AS s2a, ${EFF_P2B} AS s2b,
+           p1.name AS s1a_name, p1.photo_path AS s1a_photo,
+           p1b.name AS s1b_name, p1b.photo_path AS s1b_photo,
+           p2.name AS s2a_name, p2.photo_path AS s2a_photo,
+           p2b.name AS s2b_name, p2b.photo_path AS s2b_photo
+    FROM matches m ${DBL_JOIN}
     LEFT JOIN players p1 ON p1.id = ${EFF_P1}
     LEFT JOIN players p2 ON p2.id = ${EFF_P2}
+    LEFT JOIN players p1b ON p1b.id = ${EFF_P1B}
+    LEFT JOIN players p2b ON p2b.id = ${EFF_P2B}
     LEFT JOIN courts c    ON c.id = m.court_id
     LEFT JOIN leagues l   ON l.id = m.league_id
     LEFT JOIN divisions d ON d.id = m.division_id
@@ -316,14 +473,44 @@ function getReportableMatches(playerId) {
     WHERE m.status != 'played'
       AND m.type != 'tournament'
       AND (m.skipped = 0 OR m.skipped IS NULL)
-      AND (${EFF_P1} = @id OR ${EFF_P2} = @id)
+      AND @id IN (${EFF_P1}, ${EFF_P2}, ${EFF_P1B}, ${EFF_P2B})
     ORDER BY m.scheduled_date IS NULL, m.scheduled_date, m.scheduled_time
-  `).all({ id: Number(playerId) });
+  `).all({ id });
+
+  return rows.map((r) => {
+    const base = {
+      id: r.id, type: r.type, status: r.status, scheduled_date: r.scheduled_date, scheduled_time: r.scheduled_time,
+      court_name: r.court_name, league_name: r.league_name, division_name: r.division_name, week_number: r.week_number,
+    };
+    const person = (k) => ({ id: r[k], name: r[`${k}_name`], photo_path: r[`${k}_photo`] });
+    if (r.format !== 'doubles') {
+      const opp = r.s1a === id ? person('s2a') : person('s1a');
+      return { ...base, format: 'singles', opponent_id: opp.id, opponent_name: opp.name, opponent_photo: opp.photo_path };
+    }
+    // A doubles row names the partner and both opponents; opponent_name is
+    // the pair, for any reader that still expects one.
+    const onSide1 = r.s1a === id || r.s1b === id;
+    const mine = onSide1 ? ['s1a', 's1b'] : ['s2a', 's2b'];
+    const theirs = onSide1 ? ['s2a', 's2b'] : ['s1a', 's1b'];
+    const partner = person(mine.find((k) => r[k] !== id));
+    const opponents = theirs.map(person);
+    return {
+      ...base,
+      format: 'doubles',
+      partner,
+      opponents,
+      opponent_id: opponents[0].id,
+      opponent_name: opponents.map((o) => o.name).join(' & '),
+      opponent_photo: opponents[0].photo_path,
+    };
+  });
 }
 
 module.exports = {
   TYPES, STATUSES,
   SOURCE_OF_TYPE, EFF_JOIN, EFF_P1, EFF_P2, COUNTS, WON_SIDE,
+  SINGLES, DOUBLES, COUNTS_DOUBLES, DBL_JOIN, EFF_P1B, EFF_P2B,
   getCompletedMatches, getLastMatchDates, getParticipation,
-  getHeadToHead, getMatchCard, getReportableMatches,
+  getHeadToHead, getMatchCard, getReportableMatches, getDoublesHeadToHead,
+  getCompletedDoublesMatches, getLastDoublesMatchDates, getFirstDoublesMatchDates,
 };

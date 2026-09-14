@@ -55,7 +55,7 @@ router.get('/tournaments/:id/results', wrap(async (req, res) => {
   try {
     t = await tournamentModel.getTournament(req.params.id);
   } catch (e) {
-    console.error('[results] getTournament failed:', e);
+    req.log.error({ err: e, tournamentId: req.params.id }, 'getTournament failed');
     return res.status(500).json({ error: `getTournament failed: ${e.message}` });
   }
   if (!t) return res.status(404).json({ error: 'Tournament not found.' });
