@@ -32,6 +32,8 @@ const WIDTHS = {
   'profile-doubles': [1280, 390],
   'league-doubles': [1280, 390],
   'dashboard-doubles': [1280, 390],
+  'league-multiday': [1280, 390],
+  'league-wizard-days': [1280, 390],
 };
 
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };

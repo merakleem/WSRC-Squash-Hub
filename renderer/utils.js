@@ -22,6 +22,68 @@ export function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** "Wed, Sep 30, 2026" - a match's own day, weekday visible. */
+export function formatShortDateWeekday(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ===== PLAY DAYS =====
+// A league plays on one or more weekdays; leagues.play_days lists them with
+// the start date's weekday first. A week's date is that first day, and each
+// match's scheduled_date says which of the week's days it is on.
+export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export const DAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** YYYY-MM-DD plus n days, in the browser's own zone. */
+export function addDaysIso(dateStr, days) {
+  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+export function dayOfWeek(dateStr) {
+  return new Date(String(dateStr).slice(0, 10) + 'T12:00:00').getDay();
+}
+
+/** The dates of a week's play days, in play order: [{ dow, date }]. One entry when the league plays one day. */
+export function playDatesFor(weekDate, playDays) {
+  const anchor = dayOfWeek(weekDate);
+  const days = Array.isArray(playDays) && playDays.length ? playDays : [anchor];
+  return days.map((dow) => ({ dow, date: addDaysIso(weekDate, (dow - anchor + 7) % 7) }));
+}
+
+function _joinDays(names) {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+}
+
+/** "Mon & Wed", "Mon, Wed & Fri", "Mon". */
+export function playDayNames(playDays) {
+  return _joinDays((playDays || []).map((d) => DAY_SHORT[d]));
+}
+
+/** "Mondays & Wednesdays". */
+export function playDayNamesLong(playDays) {
+  return _joinDays((playDays || []).map((d) => `${DAY_LONG[d]}s`));
+}
+
+/** "Mon, Sep 28 – Wed, Sep 30, 2026" for several days; formatDate() for one. */
+export function formatWeekRange(weekDate, dates) {
+  if (!dates || dates.length <= 1) return formatDate(weekDate);
+  const first = new Date(dates[0].date + 'T12:00:00');
+  const last = new Date(dates[dates.length - 1].date + 'T12:00:00');
+  const md = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return `${md(first)} – ${md(last)}, ${last.getFullYear()}`;
+}
+
+/** "Sep 28 – Sep 30" for several days; "Sep 28" for one. */
+export function formatWeekRangeShort(weekDate, dates) {
+  const md = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (!dates || dates.length <= 1) return md(String(weekDate).slice(0, 10));
+  return `${md(dates[0].date)} – ${md(dates[dates.length - 1].date)}`;
+}
+
 // ===== AVATARS =====
 
 // Single source of truth for initials; the ladder and profile previously

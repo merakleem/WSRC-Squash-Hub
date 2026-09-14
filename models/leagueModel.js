@@ -1,22 +1,36 @@
 const { run, all, get, getDB } = require('../database/db');
 const crypto = require('crypto');
 
+/** leagues.play_days as an array of weekday numbers; [] when unset or unreadable. */
+function parsePlayDays(raw) {
+  try {
+    const arr = JSON.parse(raw || '[]');
+    return Array.isArray(arr) ? arr.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function _withPlayDays(row) {
+  return row ? { ...row, play_days: parsePlayDays(row.play_days) } : row;
+}
+
 function getAllLeagues() {
-  return all('SELECT * FROM leagues ORDER BY created_at DESC');
+  return all('SELECT * FROM leagues ORDER BY created_at DESC').map(_withPlayDays);
 }
 
 function getLeagueById(id) {
-  return get('SELECT * FROM leagues WHERE id = ?', [id]);
+  return _withPlayDays(get('SELECT * FROM leagues WHERE id = ?', [id]));
 }
 
-function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_type = 'traditional', numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false }) {
+function createLeagueRecord({ name, startDate, numTeams, numDivisions, setup_type = 'traditional', numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, playDays = [] }) {
   const publicToken = crypto.randomBytes(2).toString('hex');
   const result = run(
     `INSERT INTO leagues (name, start_date, num_teams, num_divisions, setup_type, num_rounds, blackout_dates,
-       match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       match_start_time, num_courts, match_duration, match_buffer, schedule_courts, public_token, play_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [name, startDate, numTeams, numDivisions, setup_type, numRounds, JSON.stringify(blackoutDates),
-      matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken],
+      matchStartTime, numCourts, matchDuration, matchBuffer, scheduleCourts ? 1 : 0, publicToken, JSON.stringify(playDays)],
   );
   return result.lastID;
 }
@@ -144,8 +158,10 @@ function getMatches(matchupId) {
             sp4.name         AS sub4_name,
             sp4.photo_path   AS sub4_photo,
             -- The column is scheduled_time now; match_time is what every view of a
-            -- league match already calls it.
-            m.scheduled_time AS match_time
+            -- league match already calls it. scheduled_date is the match's own
+            -- play day: a week can have several, so the week's date is not it.
+            m.scheduled_time AS match_time,
+            m.scheduled_date
      FROM matches m
      JOIN players p1   ON m.player1_id = p1.id
      JOIN players p2   ON m.player2_id = p2.id
@@ -219,14 +235,14 @@ function setSubForRemaining(leagueId, originalPlayerId, subPlayerId) {
 }
 
 function updateMatchTiming(matchId, matchTime, courtNumber, courtId = null) {
-  return run(
-    `UPDATE matches SET scheduled_time = ?, court_number = ?, court_id = ?,
+  // Scheduled means a time and a court, whichever way the court is named.
+  return getDB().prepare(
+    `UPDATE matches SET scheduled_time = @time, court_number = @courtNumber, court_id = @courtId,
        status = CASE WHEN status = 'played' THEN 'played'
-                     WHEN ? IS NOT NULL AND ? IS NOT NULL THEN 'scheduled'
+                     WHEN @time IS NOT NULL AND @court IS NOT NULL THEN 'scheduled'
                      ELSE 'unscheduled' END
-     WHERE id = ?`,
-    [matchTime || null, courtNumber || null, courtId || null, matchId],
-  );
+     WHERE id = @id`,
+  ).run({ time: matchTime || null, courtNumber: courtNumber || null, courtId: courtId || null, court: courtId || courtNumber || null, id: matchId });
 }
 
 function getLeagueCourts(leagueId) {
@@ -312,6 +328,7 @@ function _validationError(message) {
 }
 
 module.exports = {
+  parsePlayDays,
   getLeaguePairs,
   replacePairPlayer,
   getAllLeagues,

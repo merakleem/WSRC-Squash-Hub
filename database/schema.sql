@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS leagues (
     match_buffer INTEGER NOT NULL DEFAULT 15,
     schedule_courts INTEGER NOT NULL DEFAULT 0,
     setup_type TEXT NOT NULL DEFAULT 'traditional',
+    play_days TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

@@ -9,7 +9,15 @@ const { sendBatch, isConfigured: emailConfigured, appUrl, sendMany } = require('
 const { clubToday } = require('../lib/clock');
 const sanitizeHtml = require('sanitize-html');
 
+const { playDates } = require('../services/leagueService');
+
 const router = express.Router();
+
+function lastPlayDate(weekDate, playDays) {
+  const days = Array.isArray(playDays) && playDays.length ? playDays : [];
+  const dates = days.length ? playDates(weekDate, days) : [weekDate];
+  return dates.reduce((a, b) => (a > b ? a : b));
+}
 
 router.get('/leagues', wrap(async (req, res) => {
   const leagues = await leagueModel.getAllLeagues();
@@ -89,6 +97,9 @@ router.get('/leagues', wrap(async (req, res) => {
       total_weeks: weeks?.total_weeks || 0,
       weeks_started: weeks?.weeks_started || 0,
       last_week_date: weeks?.last_week_date || null,
+      // The last day actually played: the last week's first day plus the
+      // furthest play day. A player reads the range to know when it is over.
+      last_night_date: weeks?.last_week_date ? lastPlayDate(weeks.last_week_date, l.play_days) : null,
       my_division_level: myDivision[l.id] ?? null,
       pair_count: l.setup_type === 'doubles' ? (pairCount[l.id] || 0) : null,
       my_partner_name: myPartner[l.id] ?? null,

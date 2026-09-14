@@ -87,7 +87,8 @@ try {
   await render({ role: 'player', playerId: 3 });
   log.textContent += (mobile ? 'PHONE' : 'DESKTOP') + ' — PLAYER\n';
   ok('the hero wears a Doubles chip beside the status', $('.lg-hero-title .lg-dbl-chip')?.textContent === 'Doubles' && !!$('.lg-status'));
-  ok('the meta line counts divisions, pairs, players and weeks', txt($('.lg-hero-meta')) === '2 divisions · 5 pairs · 10 players · 2 weeks', txt($('.lg-hero-meta')));
+  const startDay = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(day(-1) + 'T12:00:00').getDay()];
+  ok('the meta line counts divisions, pairs, players, weeks and the play day', txt($('.lg-hero-meta')) === `2 divisions · 5 pairs · 10 players · 2 weeks · ${startDay}`, txt($('.lg-hero-meta')));
   ok('players get Standings and Schedule only', $$('.lg-tab').map((t) => txt(t)).join('|') === 'Standings|Schedule');
   ok('the division of my pair is selected', $('.std-tab.active')?.textContent === 'Division 1' && $('.std-panel.active')?.dataset.divId === '59');
   const std = $('.std-panel.active');

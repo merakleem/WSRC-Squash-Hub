@@ -1098,6 +1098,14 @@ export async function renderDashboard() {
     return new Date(parts[0], parts[1] - 1, parts[2])
       .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
+  // A scheduled match names its weekday: a league can play several days a
+  // week, and the day is what a player needs to know.
+  function fmtUpcomingDate(d) {
+    if (!d) return '';
+    const parts = d.slice(0, 10).split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2])
+      .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  }
 
   // Hero card (full-width, card-styled, left/right layout)
   const heroHTML = (() => {
@@ -1209,7 +1217,7 @@ export async function renderDashboard() {
         : `<div class="db-upcoming-rows">
             ${upcoming.slice(0, 5).map((m) => `
               <div class="db-upcoming-row">
-                <div class="db-upcoming-date">${fmtShortDate(m.week_date)}</div>
+                <div class="db-upcoming-date">${fmtUpcomingDate(m.week_date)}</div>
                 <div class="db-upcoming-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}${dblChip(m)}</div>
                 <div class="db-upcoming-time">${m.match_time ? esc(m.match_time) : '—'}</div>
               </div>`).join('')}

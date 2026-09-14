@@ -472,6 +472,13 @@ const MIGRATIONS = [
       h.createIndex(`CREATE INDEX idx_reservations_day ON reservations (date, court_id)`);
     },
   },
+  {
+    id: 28, name: 'leagues can play on several days a week',
+    // JSON array of weekday numbers (0 = Sunday), the start date's weekday
+    // first. Empty means that weekday alone, so every existing league reads
+    // exactly as before. Each match's own day is matches.scheduled_date.
+    up: (db, h) => { h.addColumn('leagues', 'play_days', `TEXT NOT NULL DEFAULT '[]'`); },
+  },
 ];
 
 /**

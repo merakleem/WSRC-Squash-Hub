@@ -12,13 +12,14 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
   const { matchTime, courtNumber, courtId } = req.body;
   const db = getDB();
 
+  // A conflict is another match of this league on the same day at the same
+  // court and time. The day, not the week: a week can have several play days,
+  // and Monday 7pm on court 1 does not stop Wednesday 7pm on court 1.
   const ctx = db.prepare(`
-    SELECT l.schedule_courts, l.num_courts, tm.week_id
+    SELECT l.schedule_courts, l.num_courts, l.id AS league_id, m.scheduled_date
     FROM matches m
-    JOIN team_matchups tm ON m.matchup_id = tm.id
-    JOIN weeks w ON tm.week_id = w.id
-    JOIN leagues l ON w.league_id = l.id
-    WHERE m.id = ?
+    JOIN leagues l ON l.id = m.league_id
+    WHERE m.id = ? AND m.type = 'league'
   `).get(matchId);
 
   if (!ctx) return res.status(404).json({ error: 'Match not found' });
@@ -29,29 +30,29 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
     if (courtId) {
       const conflict = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        WHERE m.week_id = ? AND m.court_id = ? AND m.scheduled_time = ? AND m.id != ?
-      `).get(ctx.week_id, courtId, matchTime, matchId);
+        WHERE m.league_id = ? AND m.scheduled_date IS ? AND m.court_id = ? AND m.scheduled_time = ? AND m.id != ?
+      `).get(ctx.league_id, ctx.scheduled_date, courtId, matchTime, matchId);
       if (conflict.cnt > 0) {
         const courtName = db.prepare('SELECT name FROM courts WHERE id = ?').get(courtId)?.name || `Court ${courtId}`;
-        return res.status(409).json({ error: `${courtName} is already booked at ${matchTime} this week.` });
+        return res.status(409).json({ error: `${courtName} is already booked at ${matchTime} that day.` });
       }
     } else if (ctx.schedule_courts && courtNumber) {
       const conflict = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        WHERE m.week_id = ? AND m.court_number = ? AND m.scheduled_time = ? AND m.id != ?
-      `).get(ctx.week_id, courtNumber, matchTime, matchId);
+        WHERE m.league_id = ? AND m.scheduled_date IS ? AND m.court_number = ? AND m.scheduled_time = ? AND m.id != ?
+      `).get(ctx.league_id, ctx.scheduled_date, courtNumber, matchTime, matchId);
       if (conflict.cnt > 0) {
-        return res.status(409).json({ error: `Court ${courtNumber} is already booked at ${matchTime} this week.` });
+        return res.status(409).json({ error: `Court ${courtNumber} is already booked at ${matchTime} that day.` });
       }
     }
 
     if (!courtId && ctx.num_courts > 0) {
       const atSameTime = db.prepare(`
         SELECT COUNT(*) AS cnt FROM matches m
-        WHERE m.week_id = ? AND m.scheduled_time = ? AND m.id != ?
-      `).get(ctx.week_id, matchTime, matchId);
+        WHERE m.league_id = ? AND m.scheduled_date IS ? AND m.scheduled_time = ? AND m.id != ?
+      `).get(ctx.league_id, ctx.scheduled_date, matchTime, matchId);
       if (atSameTime.cnt >= ctx.num_courts) {
-        warning = `All ${ctx.num_courts} court${ctx.num_courts !== 1 ? 's' : ''} are already booked at ${matchTime} this week.`;
+        warning = `All ${ctx.num_courts} court${ctx.num_courts !== 1 ? 's' : ''} are already booked at ${matchTime} that day.`;
       }
     }
   }

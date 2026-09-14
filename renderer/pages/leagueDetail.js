@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, formatDate, formatShortDate, toast, modal, avatarInner } from '../utils.js';
+import { esc, formatDate, formatShortDate, toast, modal, avatarInner, playDatesFor, playDayNames, formatWeekRange, formatWeekRangeShort, DAY_LONG, clubTodayStr } from '../utils.js';
 import { printBoxes, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague } from './leagues.js';
 
 let leagueEditMode = false;
@@ -175,18 +175,26 @@ export function renderLeagueDetail() {
   const leagueDone = league.status === 'completed';
   const currentWeekId = !leagueDone && currentIdx >= 0 ? weeks[currentIdx].id : null;
 
-  const endDate = weeks.length > 0 ? weeks[weeks.length - 1].date : null;
+  // The league's play days (start weekday first). One entry is today's
+  // one-day league; the last week's last play day is when it is over.
+  const playDays = Array.isArray(league.play_days) && league.play_days.length
+    ? league.play_days
+    : (weeks.length ? playDatesFor(weeks[0].date, []).map((d) => d.dow) : []);
+  const lastWeekDates = weeks.length ? playDatesFor(weeks[weeks.length - 1].date, playDays) : [];
+  const endDate = lastWeekDates.length ? lastWeekDates[lastWeekDates.length - 1].date : null;
   const dateRange = endDate
     ? `${formatShortDate(league.start_date)} – ${formatShortDate(endDate)}`
     : formatShortDate(league.start_date);
   const weekday = weeks.length
     ? new Date(String(weeks[0].date).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }) + 's'
     : null;
+  const weeksBit = weeks.length ? `${weeks.length} week${weeks.length === 1 ? '' : 's'}` : null;
+  const daysBit = playDays.length ? playDayNames(playDays) : null;
 
   const metaBits = (isDoubles
-    ? [`${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${pairs.length} pair${pairs.length === 1 ? '' : 's'}`, `${numPlayers} players`, weeks.length ? `${weeks.length} week${weeks.length === 1 ? '' : 's'}` : null]
+    ? [`${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${pairs.length} pair${pairs.length === 1 ? '' : 's'}`, `${numPlayers} players`, weeksBit, daysBit]
     : isModern
-    ? [`${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${numPlayers} players`, weekday]
+    ? [`${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${numPlayers} players`, weeksBit, daysBit]
     : [`${league.num_teams} teams`, `${league.num_divisions} division${league.num_divisions === 1 ? '' : 's'}`, `${numPlayers} players`, weekday]
   ).filter(Boolean).join(' · ');
 
@@ -288,6 +296,21 @@ export function renderLeagueDetail() {
     if (isModern || isDoubles) {
       content.querySelectorAll('#scheduleList .matchup-block[data-division-id]').forEach((block) => {
         block.hidden = block.dataset.divisionId !== divId;
+      });
+      // A multi-day week keeps every day's heading; the count, the empty
+      // row and the week's byes follow the division that is showing.
+      const divName = divisions.find((d) => String(d.id) === divId)?.name;
+      content.querySelectorAll('#scheduleList .lg-night').forEach((night) => {
+        const shown = night.querySelectorAll('.matchup-block:not([hidden]) .match-row').length;
+        night.querySelector('.lg-night-count').textContent = `${shown} match${shown === 1 ? '' : 'es'}`;
+        const empty = night.querySelector('.lg-night-empty');
+        empty.hidden = shown > 0;
+        empty.textContent = divName ? `No ${divName} matches this day` : 'No matches this day';
+      });
+      content.querySelectorAll('#scheduleList .lg-week-byes').forEach((line) => {
+        let any = false;
+        line.querySelectorAll('[data-division-id]').forEach((b) => { b.hidden = b.dataset.divisionId !== divId; any = any || !b.hidden; });
+        line.hidden = !any;
       });
     } else {
       content.querySelectorAll('#scheduleList .match-row').forEach((row) => {
@@ -686,9 +709,86 @@ function openReplacePairPlayerModal(leagueId, pairId, oldPlayerId, oldPlayerName
   });
 }
 
+// The play days of a league's week: several when the league plays more
+// than one day a week, in which case the week card groups by day.
+function _weekDays(week, league) {
+  const days = Array.isArray(league.play_days) ? league.play_days : [];
+  return days.length > 1 ? playDatesFor(week.date, days) : null;
+}
+
+function _weekHeaderHTML(week, isCurrent, summary, dates) {
+  const label = formatWeekRange(week.date, dates);
+  const dateHTML = dates
+    ? `<span class="lg-week-date lg-week-date--range"><span class="lg-wd-long">${label}</span><span class="lg-wd-short">${formatWeekRangeShort(week.date, dates)}</span></span>`
+    : `<span class="lg-week-date">${formatDate(week.date)}</span>`;
+  return `
+      <div class="week-header lg-week-header" role="button" tabindex="0" aria-expanded="${isCurrent ? 'true' : 'false'}" aria-label="Week ${week.week_number}, ${label}">
+        <div class="lg-week-lead">
+          <span class="lg-week-num">Week ${week.week_number}</span>
+          ${isCurrent ? '<span class="lg-thisweek">THIS WEEK</span>' : ''}
+        </div>
+        ${dateHTML}
+        <span class="lg-week-summary">${summary}</span>
+        <svg class="week-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </div>`;
+}
+
+// A multi-day week: one group per play day, each holding a division block
+// per division with a match that day, then one line of the week's byes. A
+// match belongs to the day its own scheduled_date names; one without a date
+// is shown on the week's first day rather than lost.
+function _weekDaysHTML(week, league, adminMode, dates, renderRow, byeName) {
+  const divisions = (league.divisions || []).slice().sort((a, b) => a.level - b.level);
+  const today = clubTodayStr();
+  const all = (week.matchups || []).flatMap((mu) => (mu.matches || []).map((m) => ({ m, mu })));
+  const known = new Set(dates.map((d) => d.date));
+  const daysHTML = dates.map((day, i) => {
+    const mine = all.filter(({ m }) => (m.scheduled_date === day.date) || (i === 0 && !known.has(m.scheduled_date)));
+    const groups = divisions.map((d) => {
+      const rows = mine.filter(({ mu }) => mu.division_id === d.id);
+      if (!rows.length) return '';
+      return `
+        <div class="matchup-block lg-group" data-division-id="${d.id}">
+          <div class="matchup-title lg-group-title">${esc(d.name)}</div>
+          <div class="lg-matches">${rows.map(({ m }) => renderRow(m, league, adminMode)).join('')}</div>
+        </div>`;
+    }).join('');
+    const md = new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return `
+      <div class="lg-night" data-date="${day.date}">
+        <div class="lg-night-head">
+          <span class="lg-night-day">${DAY_LONG[day.dow]}</span>
+          <span class="lg-night-date"><span class="lg-night-sep">· </span>${md}</span>
+          <span class="lg-night-count">${mine.length} match${mine.length === 1 ? '' : 'es'}</span>
+          ${day.date === today ? '<span class="lg-tonight">TODAY</span>' : ''}
+          <span class="lg-night-rule"></span>
+        </div>
+        ${groups}
+        <div class="lg-night-empty" hidden>No matches this day</div>
+      </div>`;
+  }).join('');
+  const byes = (week.byes || []).map((b) => {
+    const div = divisions.find((d) => d.id === b.division_id);
+    return `<span data-division-id="${b.division_id}">${esc(byeName(b))}${div ? ` (${esc(div.name)})` : ''}</span>`;
+  });
+  const byesHTML = byes.length ? `<div class="lg-week-byes">Byes · ${byes.join(', ')}</div>` : '';
+  return daysHTML + byesHTML;
+}
+
 function renderWeekCardDoubles(week, league, adminMode = true, isCurrent = false) {
   const summary = _weekSummary(_weekCounts(week));
   const byes = week.byes || [];
+  const dates = _weekDays(week, league);
+  if (dates) {
+    const pairName = (b) => (b.pair_player1_name && b.pair_player2_name ? `${b.pair_player1_name} & ${b.pair_player2_name}` : b.player_name);
+    return `
+    <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
+      ${_weekHeaderHTML(week, isCurrent, summary, dates)}
+      <div class="week-body lg-week-body">${_weekDaysHTML(week, league, adminMode, dates, renderMatchRowDoubles, pairName)}</div>
+    </div>`;
+  }
   const matchupsHTML = week.matchups.map((mu) => {
     const divByes = byes.filter((b) => b.division_id === mu.division_id);
     const byesHTML = divByes.length
@@ -1137,6 +1237,14 @@ function renderWeekCard(week, league, adminMode = true, isCurrent = false) {
 function renderWeekCardModern(week, league, adminMode = true, isCurrent = false) {
   const summary = _weekSummary(_weekCounts(week));
   const byes = week.byes || [];
+  const dates = _weekDays(week, league);
+  if (dates) {
+    return `
+    <div class="week-card lg-week${isCurrent ? ' lg-week-current' : ''}" data-week-id="${week.id}">
+      ${_weekHeaderHTML(week, isCurrent, summary, dates)}
+      <div class="week-body lg-week-body">${_weekDaysHTML(week, league, adminMode, dates, renderMatchRow, (b) => b.player_name)}</div>
+    </div>`;
+  }
   const matchupsHTML = week.matchups.map((mu) => {
     const divByes = byes.filter((b) => b.division_id === mu.division_id);
     const byesHTML = divByes.length

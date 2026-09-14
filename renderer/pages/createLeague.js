@@ -24,6 +24,9 @@ export function startCreateLeague() {
     pairs: [],
     // Shared
     numRounds: 1,
+    // Extra weekdays (0 = Sunday) the league plays on, beyond the start
+    // date's weekday, which is always a play day and always first.
+    playDays: [],
     blackoutDates: [],
     matchStartTime: '19:00',
     selectedCourtIds: [],
@@ -72,6 +75,60 @@ function _fmtLong(iso) {
 }
 
 const _isDoubles = () => state.wizard.setupType === 'doubles';
+
+// ===== PLAY DAYS =====
+// The start date's weekday is the anchor: always a play day, always first,
+// and the other days follow in the order they fall after it. A Teams league
+// plays the anchor day alone. Mirrors normalizePlayDays() on the server.
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const _anchorDay = () => new Date(state.wizard.startDate + 'T12:00:00').getDay();
+const _dayOrder = (d, anchor) => (d - anchor + 7) % 7;
+function _orderedPlayDays() {
+  const anchor = _anchorDay();
+  if (state.wizard.setupType === 'traditional') return [anchor];
+  return [...new Set([anchor, ...state.wizard.playDays])].sort((a, b) => _dayOrder(a, anchor) - _dayOrder(b, anchor));
+}
+// "Mon & Wed", "Mon, Wed & Fri", "Mon".
+function _playDayNames(days) {
+  const names = days.map((d) => DAY_SHORT[d]);
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+}
+// Matches a week: Teams floor(teams/2) × divisions; otherwise Σ floor(size/2).
+function _perWeek() {
+  const c = _calc();
+  if (!c.valid) return null;
+  return state.wizard.setupType === 'traditional'
+    ? Math.floor(c.teams / 2) * c.divisions
+    : _divSizes(c.n, c.divisions).reduce((a, sz) => a + Math.floor(sz / 2), 0);
+}
+// Even split of M matches over K days: the first M % K days take one more.
+function _daySizes(M, K) {
+  return Array.from({ length: K }, (_, i) => Math.floor(M / K) + (i < M % K ? 1 : 0));
+}
+// The fewest matches any week has: divisions of different sizes finish
+// their round robins in different weeks, so the last weeks can be smaller.
+// No league may have more play days than that, or a day would be empty.
+function _perWeekMin() {
+  const c = _calc();
+  if (!c.valid) return null;
+  if (state.wizard.setupType === 'traditional') return _perWeek();
+  const sizes = _divSizes(c.n, c.divisions);
+  const rounds = (n) => (n % 2 === 1 ? n : n - 1);
+  const total = Math.max(...sizes.map(rounds), 0);
+  let min = Infinity;
+  for (let w = 0; w < total; w++) min = Math.min(min, sizes.reduce((a, n) => a + (w < rounds(n) ? Math.floor(n / 2) : 0), 0));
+  return Number.isFinite(min) ? min : 0;
+}
+function _tooManyDays() {
+  const least = _perWeekMin();
+  return least != null && _orderedPlayDays().length > least;
+}
+// The dates of a week's play days, from its first day.
+function _playDatesOf(weekDate) {
+  const anchor = new Date(weekDate + 'T12:00:00').getDay();
+  return _orderedPlayDays().map((d) => addDaysPreview(weekDate, _dayOrder(d, anchor)));
+}
 const _surname = (name) => String(name || '').trim().split(/\s+/).pop() || '';
 const _pairLabel = (pr) => `${_surname(pr.a?.name)} & ${_surname(pr.b?.name)}`;
 
@@ -130,12 +187,20 @@ function _divSizes(n, numDivisions) {
     Math.floor(n / numDivisions) + (i < n % numDivisions ? 1 : 0));
 }
 
+// The first play day of the week a date falls in.
+function _weekAnchorOf(dateStr) {
+  const dow = new Date(dateStr + 'T12:00:00').getDay();
+  return addDaysPreview(dateStr, -_dayOrder(dow, _anchorDay()));
+}
+
 function _weekDates(count) {
   const skip = new Set(state.wizard.blackoutDates);
   const out = [];
   let cur = state.wizard.startDate;
   for (let i = 0; i < count; i++) {
-    while (skip.has(cur)) cur = addDaysPreview(cur, 7);
+    // A blackout on any of the week's play days skips the whole week; a
+    // blackout on a day the league does not play changes nothing.
+    while (_playDatesOf(cur).some((d) => skip.has(d))) cur = addDaysPreview(cur, 7);
     out.push(cur);
     cur = addDaysPreview(cur, 7);
   }
@@ -159,6 +224,7 @@ function _summaryHTML() {
     doubles ? cell('Players', `${c.players} · ${c.n} pairs`, { desk: true }) : cell('Players', String(c.n)),
     ...(doubles ? [cell('Pairs', String(c.n))] : []),
     cell(teams ? 'Teams × divs' : 'Divisions', c.valid ? (teams ? `${c.teams} × ${c.divisions}` : String(c.divisions)) : '—'),
+    cell('<span class="wz-sum-lbl-desk">Play days</span><span class="wz-sum-lbl-mob">Days</span>', _playDayNames(_orderedPlayDays())),
     cell('Weeks', c.weeks ? String(c.weeks) : '—'),
   ].join('');
 }
@@ -199,6 +265,12 @@ function _goToStep(target) {
       const c = _calc();
       if (!c.valid) {
         _pendingError = 'Fix the structure before continuing.';
+        w.step = 3;
+        renderCreateLeague();
+        return;
+      }
+      if (_tooManyDays()) {
+        _pendingError = 'Too many play days for this league.';
         w.step = 3;
         renderCreateLeague();
         return;
@@ -796,9 +868,9 @@ function _nightText(anyCourts) {
   const c = _calc();
   const numCourts = w.selectedCourtIds.length;
   if (c.valid && numCourts >= 1 && w.matchStartTime) {
-    const perWeek = w.setupType === 'traditional'
-      ? Math.floor(c.teams / 2) * c.divisions
-      : _divSizes(c.n, c.divisions).reduce((a, sz) => a + Math.floor(sz / 2), 0);
+    if (_tooManyDays()) return '';
+    // The busiest play day decides the last finish.
+    const perWeek = Math.max(..._daySizes(_perWeek(), _orderedPlayDays().length));
     const slots = Math.ceil(perWeek / numCourts);
     const totalMins = slots * (w.matchDuration + w.matchBuffer);
     const [sh, sm] = w.matchStartTime.split(':').map(Number);
@@ -824,10 +896,75 @@ function _nightHTML(anyCourts) {
     </div>` : '';
 }
 
+// The Play days field: seven chips in anchor order, the anchor always on,
+// and a readout of how the week's matches split across the chosen days. A
+// Teams league shows the one day it plays, read-only.
+function _playDaysHTML() {
+  const w = state.wizard;
+  const anchor = _anchorDay();
+  const days = _orderedPlayDays();
+  const perWeek = _perWeek();
+  const teams = w.setupType === 'traditional';
+  const chip = (d, { ring = true } = {}) => {
+    const on = days.includes(d);
+    const isAnchor = d === anchor && ring;
+    return `<button type="button" class="wz-daychip${on ? ' wz-daychip--on' : ''}${isAnchor ? ' wz-daychip--anchor' : ''}"
+      data-day="${d}" aria-pressed="${on}"${isAnchor ? ' aria-disabled="true"' : ''}>${on ? '<span class="wz-daychip-tick">&#10003;</span>' : ''}${DAY_SHORT[d]}</button>`;
+  };
+  const order = Array.from({ length: 7 }, (_, i) => (anchor + i) % 7);
+
+  if (teams) {
+    return `
+      <div class="wz-field wz-days" id="wzPlayDays">
+        <div class="wz-colhead-row">
+          <span class="wz-label">Play day</span>
+          <span class="wz-hint">1 day a week &middot; from the start date</span>
+        </div>
+        <div class="wz-daychips wz-days-readonly">${chip(anchor, { ring: false })}</div>
+        <div class="wz-split">
+          <span class="wz-split-text">Teams leagues play one day a week.${perWeek != null ? ` All ${perWeek} match${perWeek === 1 ? '' : 'es'} play on ${DAY_LONG[anchor]}.` : ''} Change the start date on step 1 to move the day.</span>
+        </div>
+      </div>`;
+  }
+
+  let readout;
+  if (_tooManyDays()) {
+    const least = _perWeekMin();
+    const over = days.length - least;
+    readout = `
+      <div class="wz-days-warn" role="alert">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#a8710f" stroke-width="2.2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+        <span>You've picked ${days.length} days but this league only has ${least} match${least === 1 ? '' : 'es'} ${least === perWeek ? 'a week' : 'in its shortest weeks'}. Remove ${over === 1 ? 'a day' : `${over} days`}.</span>
+      </div>`;
+  } else if (perWeek == null) {
+    readout = `<div class="wz-split"><span class="wz-split-text">Set a valid structure to see how matches split across days.</span></div>`;
+  } else {
+    const sizes = _daySizes(perWeek, days.length);
+    const text = days.length === 1
+      ? `All ${perWeek} match${perWeek === 1 ? '' : 'es'} a week play on ${DAY_LONG[anchor]}. Add more days to spread them out.`
+      : `${perWeek} match${perWeek === 1 ? '' : 'es'} a week split across ${days.length} days. Everyone still plays once a week; ${DAY_LONG[anchor]} is the start date, so each week begins there.`;
+    readout = `
+      <div class="wz-split">
+        <span class="wz-split-text">${text}</span>
+        <div class="wz-splitchips">${days.map((d, i) => `<span class="wz-splitchip">${DAY_LONG[d]} &middot; ${sizes[i]} match${sizes[i] === 1 ? '' : 'es'}</span>`).join('')}</div>
+      </div>`;
+  }
+  return `
+    <div class="wz-field wz-days" id="wzPlayDays">
+      <div class="wz-colhead-row">
+        <span class="wz-label">Play days</span>
+        <span class="wz-hint">${days.length} day${days.length === 1 ? '' : 's'} a week &middot; week starts ${DAY_SHORT[anchor]}</span>
+      </div>
+      <div class="wz-daychips">${order.map(chip).join('')}</div>
+      ${readout}
+    </div>`;
+}
+
 function _step3RightHTML(allCourts) {
   const w = state.wizard;
   return `
     <div class="wz-col">
+      ${_playDaysHTML()}
       <div class="wz-grid2">
         <div class="wz-field">
           <span class="wz-label">Match start</span>
@@ -917,6 +1054,13 @@ function _wireStep3({ configs, allCourts }) {
         : [...w.selectedCourtIds, id];
       return renderCreateLeague();
     }
+    const dayChip = e.target.closest('[data-day]');
+    if (dayChip && w.setupType !== 'traditional') {
+      const d = Number(dayChip.dataset.day);
+      if (d === _anchorDay()) return; // the start date's day cannot be turned off
+      w.playDays = w.playDays.includes(d) ? w.playDays.filter((x) => x !== d) : [...w.playDays, d];
+      return renderCreateLeague();
+    }
   });
 
   document.getElementById('wStartTime').addEventListener('input', (e) => {
@@ -933,7 +1077,9 @@ function _wireStep3({ configs, allCourts }) {
   });
 
   document.getElementById('wBack').addEventListener('click', () => _goToStep(2));
-  document.getElementById('wNext').addEventListener('click', () => _goToStep(4));
+  const next = document.getElementById('wNext');
+  next.classList.toggle('wz-next--dim', _tooManyDays());
+  next.addEventListener('click', () => _goToStep(4));
   _flushError();
 }
 
@@ -1057,7 +1203,9 @@ function renderStep4() {
       <div class="wz-head">
         <div>
           <div class="wz-title">Blackout dates</div>
-          <div class="wz-sub">The league runs ${weeks} week${weeks !== 1 ? 's' : ''} from ${_fmtShort(w.startDate)}. Skipped weeks push every later date back.</div>
+          <div class="wz-sub">${_orderedPlayDays().length > 1
+            ? `The league runs ${weeks} week${weeks !== 1 ? 's' : ''} from ${_fmtShort(w.startDate)}, ${_playDayNames(_orderedPlayDays())}. A blackout on any play day skips that whole week and pushes every later date back.`
+            : `The league runs ${weeks} week${weeks !== 1 ? 's' : ''} from ${_fmtShort(w.startDate)}. Skipped weeks push every later date back.`}</div>
         </div>
       </div>
       <div class="wz-body">
@@ -1075,7 +1223,7 @@ function renderStep4() {
             : w.blackoutDates.map((d, i) => `
                 <div class="wz-borow">
                   <span class="wz-bodate">${_fmtLong(d)}</span>
-                  <span class="wz-bonote">Schedule shifts a week later</span>
+                  <span class="wz-bonote">${_orderedPlayDays().length > 1 ? `Whole week of ${_fmtShort(_weekAnchorOf(d))} skipped &mdash; schedule shifts a week later` : 'Schedule shifts a week later'}</span>
                   <button class="btn btn-outline btn-sm" data-action="remove-blackout" data-idx="${i}">Remove</button>
                 </div>`).join('')}
         </div>
@@ -1087,6 +1235,7 @@ function renderStep4() {
               <span class="wz-wkchip">
                 <span class="wz-wkchip-n">WK ${i + 1}</span>
                 <span class="wz-wkchip-d">${_fmtShort(d)}</span>
+                ${_orderedPlayDays().length > 1 ? `<span class="wz-wkchip-days">${_playDatesOf(d).map((pd) => `${DAY_SHORT[new Date(pd + 'T12:00:00').getDay()]} ${Number(pd.slice(8, 10))}`).join(' &middot; ')}</span>` : ''}
               </span>`).join('')}
           </div>
         </div>
@@ -1148,25 +1297,7 @@ function renderStep5Doubles() {
   const weekDates = _weekDates(totalWeeks);
   const previewCount = Math.min(3, totalWeeks);
 
-  const weeksHTML = Array.from({ length: previewCount }, (_, w) => {
-    const groups = divRounds.slice(0, 2).map((rounds, dIdx) => {
-      if (w >= rounds.length) return '';
-      const round = rounds[w];
-      const lines = [
-        ...round.matches.map(([p1, p2]) => `<span class="wz-fixline">${esc(p1.name)} &nbsp;vs&nbsp; ${esc(p2.name)}</span>`),
-        ...round.byes.map((p) => `<span class="wz-fixline wz-fixline--bye">${esc(p.name)} &mdash; bye</span>`),
-      ].join('');
-      return `<div class="wz-fixgroup"><span class="wz-fixlabel">Division ${dIdx + 1}</span>${lines}</div>`;
-    }).join('');
-    return `
-      <div class="wz-week">
-        <div class="wz-week-top">
-          <span class="wz-week-title">Week ${w + 1}</span>
-          <span class="wz-week-date">${_fmtShort(weekDates[w])}</span>
-        </div>
-        ${groups}
-      </div>`;
-  }).join('');
+  const weeksHTML = _previewWeeksHTML(divRounds, weekDates, previewCount, { vs: ' &nbsp;vs&nbsp; ' });
 
   const rostersHTML = divPairs.map((div, i) => `
     <div class="wz-rosterrow">
@@ -1179,7 +1310,7 @@ function renderStep5Doubles() {
 
   document.getElementById('wizardCard').innerHTML = _step5ShellHTML({
     meta: `Starts ${_fmtLong(startDate)} &middot; ${modernNumDivisions} division${modernNumDivisions !== 1 ? 's' : ''}${_blackoutMetaNote()}`,
-    stats: [[seeded.length * 2, 'Players'], [seeded.length, 'Pairs'], [totalWeeks, 'Weeks'], [selectedCourtIds.length, 'Courts']],
+    stats: [[seeded.length * 2, 'Players'], [seeded.length, 'Pairs'], [totalWeeks, 'Weeks'], _daysTile(), [selectedCourtIds.length, 'Courts']],
     rosterLabel: 'Division rosters',
     editId: 'btnEditDivisions',
     editLabel: 'Edit divisions',
@@ -1229,6 +1360,64 @@ function previewModernRoundRobin(players) {
   return rounds;
 }
 
+// Step 5 week cards for the No-teams and Doubles previews. One play day keeps
+// the division groups the preview has always shown; several group the week
+// by day (the same even split the server makes, over matches in division
+// order), then division within the day, then a Byes group.
+function _previewWeeksHTML(divRounds, weekDates, previewCount, { vs }) {
+  const days = _orderedPlayDays();
+  return Array.from({ length: previewCount }, (_, w) => {
+    if (days.length <= 1) {
+      const groups = divRounds.slice(0, 2).map((rounds, dIdx) => {
+        if (w >= rounds.length) return '';
+        const round = rounds[w];
+        const lines = [
+          ...round.matches.map(([p1, p2]) => `<span class="wz-fixline">${esc(p1.name)}${vs}${esc(p2.name)}</span>`),
+          ...round.byes.map((p) => `<span class="wz-fixline wz-fixline--bye">${esc(p.name)}${vs === ' vs ' ? ' &middot; bye' : ' &mdash; bye'}</span>`),
+        ].join('');
+        return `<div class="wz-fixgroup"><span class="wz-fixlabel">Division ${dIdx + 1}</span>${lines}</div>`;
+      }).join('');
+      return `
+      <div class="wz-week">
+        <div class="wz-week-top">
+          <span class="wz-week-title">Week ${w + 1}</span>
+          <span class="wz-week-date">${_fmtShort(weekDates[w])}</span>
+        </div>
+        ${groups}
+      </div>`;
+    }
+    const all = [];
+    const byes = [];
+    divRounds.forEach((rounds, dIdx) => {
+      if (w >= rounds.length) return;
+      all.push(...rounds[w].matches.map(([p1, p2]) => ({ div: dIdx + 1, p1, p2 })));
+      byes.push(...rounds[w].byes.map((p) => ({ div: dIdx + 1, p })));
+    });
+    const dates = _playDatesOf(weekDates[w]);
+    const sizes = _daySizes(all.length, dates.length);
+    let at = 0;
+    const groups = dates.map((date, i) => {
+      const chunk = all.slice(at, at + sizes[i]);
+      at += sizes[i];
+      const dow = new Date(date + 'T12:00:00').getDay();
+      const lines = chunk.length
+        ? chunk.map((m) => `<span class="wz-fixline"><span class="wz-fixdiv">Div ${m.div}</span> &middot; ${esc(m.p1.name)}${vs}${esc(m.p2.name)}</span>`).join('')
+        : '<span class="wz-fixline wz-fixline--bye">No matches</span>';
+      return `<div class="wz-fixgroup"><span class="wz-fixlabel">${DAY_LONG[dow]} &middot; ${_fmtShort(date)} &middot; ${chunk.length} match${chunk.length === 1 ? '' : 'es'}</span>${lines}</div>`;
+    }).join('');
+    const byesHTML = byes.length
+      ? `<div class="wz-fixgroup"><span class="wz-fixlabel">Byes</span><span class="wz-fixline wz-fixline--bye">${byes.map((b) => esc(b.p.name)).join(', ')}</span></div>` : '';
+    return `
+      <div class="wz-week">
+        <div class="wz-week-top">
+          <span class="wz-week-title">Week ${w + 1}</span>
+          <span class="wz-week-date">${_fmtShort(dates[0])} &ndash; ${_fmtShort(dates[dates.length - 1])}</span>
+        </div>
+        ${groups}${byesHTML}
+      </div>`;
+  }).join('');
+}
+
 function _step5ShellHTML({ meta, stats, rosterLabel, editId, editLabel, rostersHTML, previewNote, weeksHTML }) {
   return `
     <div class="wz-step5">
@@ -1275,6 +1464,11 @@ function _step5ShellHTML({ meta, stats, rosterLabel, editId, editLabel, rostersH
     </div>`;
 }
 
+function _daysTile() {
+  const n = _orderedPlayDays().length;
+  return [n, n === 1 ? 'Day / wk' : 'Days / wk'];
+}
+
 function _blackoutMetaNote() {
   const n = state.wizard.blackoutDates.length;
   return n > 0 ? ` &middot; ${n} blackout date${n !== 1 ? 's' : ''}` : '';
@@ -1302,25 +1496,7 @@ function renderStep5Modern() {
   const weekDates = _weekDates(totalWeeks);
   const previewCount = Math.min(3, totalWeeks);
 
-  const weeksHTML = Array.from({ length: previewCount }, (_, w) => {
-    const groups = divRounds.slice(0, 2).map((rounds, dIdx) => {
-      if (w >= rounds.length) return '';
-      const round = rounds[w];
-      const lines = [
-        ...round.matches.map(([p1, p2]) => `<span class="wz-fixline">${esc(p1.name)} vs ${esc(p2.name)}</span>`),
-        ...round.byes.map((p) => `<span class="wz-fixline wz-fixline--bye">${esc(p.name)} &middot; bye</span>`),
-      ].join('');
-      return `<div class="wz-fixgroup"><span class="wz-fixlabel">Division ${dIdx + 1}</span>${lines}</div>`;
-    }).join('');
-    return `
-      <div class="wz-week">
-        <div class="wz-week-top">
-          <span class="wz-week-title">Week ${w + 1}</span>
-          <span class="wz-week-date">${_fmtShort(weekDates[w])}</span>
-        </div>
-        ${groups}
-      </div>`;
-  }).join('');
+  const weeksHTML = _previewWeeksHTML(divRounds, weekDates, previewCount, { vs: ' vs ' });
 
   const rostersHTML = divPlayers.map((div, i) => `
     <div class="wz-rosterrow">
@@ -1333,7 +1509,7 @@ function renderStep5Modern() {
 
   document.getElementById('wizardCard').innerHTML = _step5ShellHTML({
     meta: `Starts ${_fmtLong(startDate)} &middot; ${modernNumDivisions} division${modernNumDivisions !== 1 ? 's' : ''}${_blackoutMetaNote()}`,
-    stats: [[rankedPlayers.length, 'Players'], [totalWeeks, 'Weeks'], [selectedCourtIds.length, 'Courts']],
+    stats: [[rankedPlayers.length, 'Players'], [totalWeeks, 'Weeks'], _daysTile(), [selectedCourtIds.length, 'Courts']],
     rosterLabel: 'Division rosters',
     editId: 'btnEditDivisions',
     editLabel: 'Edit divisions',
@@ -1636,12 +1812,13 @@ async function submitCreateLeague() {
 
   const { leagueName, startDate, setupType, numRounds, blackoutDates,
     matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
+  const playDays = _orderedPlayDays();
 
   let payload;
   if (setupType === 'doubles') {
     payload = {
       name: leagueName, startDate, setup_type: 'doubles',
-      numRounds, blackoutDates, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
+      numRounds, blackoutDates, playDays, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPairs, dIdx) =>
         divPairs.map((pr, pIdx) => ({ playerIds: [pr.a.id, pr.b.id], rank: dIdx * 1000 + pIdx + 1 })),
       ),
@@ -1649,7 +1826,7 @@ async function submitCreateLeague() {
   } else if (setupType === 'modern') {
     payload = {
       name: leagueName, startDate, setup_type: 'modern',
-      numRounds, blackoutDates, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
+      numRounds, blackoutDates, playDays, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPlayers, dIdx) =>
         divPlayers.map((p, pIdx) => ({ playerId: p.id, rank: dIdx * 1000 + pIdx + 1 })),
       ),
@@ -1658,7 +1835,7 @@ async function submitCreateLeague() {
     const { rankedPlayers, numTeams, numDivisions, teamNames } = state.wizard;
     payload = {
       name: leagueName, startDate, setup_type: 'traditional',
-      numTeams, numDivisions, numRounds, blackoutDates, teamNames,
+      numTeams, numDivisions, numRounds, blackoutDates, playDays, teamNames,
       matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
     };

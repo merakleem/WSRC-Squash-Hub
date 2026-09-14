@@ -1,6 +1,77 @@
 const { run, get } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
-const { generateRoundRobin, generateModernRoundRobin, addDays } = require('../utils/helpers');
+const { generateRoundRobin, generateModernRoundRobin, addDays, dayOfWeek } = require('../utils/helpers');
+
+// ===== PLAY DAYS =====
+// A league plays on one or more days of the week. The start date's weekday is
+// the anchor: always a play day, always first, and weeks.date is that day.
+// The other days follow in the order they fall after it, so a Wednesday start
+// with Mon/Wed/Fri chosen plays Wed, Fri, then Mon. Every match of a week
+// lands on one of the week's days (matches.scheduled_date); the week never
+// spans more than seven days. One play day is exactly today's schedule.
+
+/**
+ * The ordered play days for a league, anchor first, validated. Teams leagues
+ * always play the anchor day alone. Throws a 400-shaped error on bad input.
+ */
+function normalizePlayDays(startDate, playDays, setupType) {
+  const anchor = dayOfWeek(startDate);
+  if (setupType === 'traditional') return [anchor];
+  const raw = Array.isArray(playDays) ? playDays : [];
+  for (const d of raw) {
+    if (!Number.isInteger(d) || d < 0 || d > 6) throw _validationError('Play days must be weekdays (0 = Sunday to 6 = Saturday).');
+  }
+  const unique = [...new Set([anchor, ...raw.map(Number)])];
+  return unique.sort((a, b) => ((a - anchor + 7) % 7) - ((b - anchor + 7) % 7));
+}
+
+/** The dates of a week's play days, in play order, from its anchor date. */
+function playDates(weekDate, days) {
+  const anchor = dayOfWeek(weekDate);
+  return days.map((d) => addDays(weekDate, (d - anchor + 7) % 7));
+}
+
+/**
+ * Split a week's matches evenly across its play days: floor(M/K) each, the
+ * first M%K days taking one more. Returns [{ date, matches }] in play order.
+ * Called after the shuffle and the division sort, so a division's matches
+ * stay together on a day where the arithmetic allows.
+ */
+function splitAcrossDays(weekMatches, weekDate, days) {
+  const dates = playDates(weekDate, days);
+  const K = dates.length;
+  const M = weekMatches.length;
+  let at = 0;
+  return dates.map((date, i) => {
+    const size = Math.floor(M / K) + (i < M % K ? 1 : 0);
+    const matches = weekMatches.slice(at, at + size);
+    at += size;
+    return { date, matches };
+  });
+}
+
+/**
+ * The fewest matches any week of the season has. Divisions of different
+ * sizes finish their round robins in different weeks, so the last weeks can
+ * be smaller than the first; a league may not have more play days than
+ * that, or a day would have nothing on it.
+ */
+function minWeeklyMatches(unitCounts) {
+  const rounds = (n) => (n % 2 === 1 ? n : n - 1);
+  const totalWeeks = Math.max(...unitCounts.map(rounds), 0);
+  let min = Infinity;
+  for (let w = 0; w < totalWeeks; w++) {
+    min = Math.min(min, unitCounts.reduce((a, n) => a + (w < rounds(n) ? Math.floor(n / 2) : 0), 0));
+  }
+  return Number.isFinite(min) ? min : 0;
+}
+
+/** Skip forward a week at a time while any play day of the week is blacked out. */
+function nextClearWeek(currentDate, days, blackoutSet) {
+  let date = currentDate;
+  while (playDates(date, days).some((d) => blackoutSet.has(d))) date = addDays(date, 7);
+  return date;
+}
 
 /**
  * Create a full league: teams, divisions, player assignments, and schedule.
@@ -21,8 +92,11 @@ function addMinutes(timeStr, minutes) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-function createModernLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [] }) {
+function createModernLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [], playDays = [] }) {
   const numDivisions = divisions.length;
+  const days = normalizePlayDays(startDate, playDays, 'modern');
+  // A day with nothing to play on it is a mistake the wizard refuses too.
+  if (days.length > minWeeklyMatches(divisions.map((div) => div.length))) throw _validationError('Too many play days for this league.');
   const useNewCourts = courtIds.length > 0;
   const effectiveCourts = useNewCourts ? courtIds.length : numCourts;
   const leagueId = leagueModel.createLeagueRecord({
@@ -31,6 +105,7 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
     numCourts: effectiveCourts,
     matchDuration, matchBuffer,
     scheduleCourts: useNewCourts ? true : scheduleCourts,
+    playDays: days,
   });
 
   // Create divisions
@@ -65,7 +140,7 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
   let currentDate = startDate;
 
   for (let w = 0; w < totalWeeks; w++) {
-    while (blackoutSet.has(currentDate)) currentDate = addDays(currentDate, 7);
+    currentDate = nextClearWeek(currentDate, days, blackoutSet);
     const weekDate = currentDate;
     currentDate = addDays(currentDate, 7);
 
@@ -99,29 +174,33 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
       [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
     }
     weekMatches.sort((a, b) => a.level - b.level);
-    for (let i = 0; i < weekMatches.length; i++) {
-      const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
-      // Creating a league is creating scheduled matches. Each row carries its
-      // own league, week, date, court and time, so every later view finds it
-      // by filtering matches rather than walking back up through the matchup.
-      run(
-          `INSERT INTO matches
-             (type, status, league_id, week_id, matchup_id, division_id,
-              player1_id, player2_id, scheduled_date, scheduled_time, court_id, court_number)
-           VALUES ('league', 'scheduled', @leagueId, @weekId, @matchupId, @divisionId,
-                   @p1Id, @p2Id, @date, @time, @courtId, @courtNumber)`,
-          {
-            leagueId, weekId,
-            matchupId:  weekMatches[i].matchupId,
-            divisionId: weekMatches[i].divId,
-            p1Id:       weekMatches[i].p1Id,
-            p2Id:       weekMatches[i].p2Id,
-            date: weekDate,
-            time,
-            courtId:     useNewCourts ? courtIds[i % effectiveCourts] : null,
-            courtNumber: useNewCourts ? null : (i % effectiveCourts) + 1,
-          },
-      );
+    // Each play day starts again from matchStartTime on court 1: times and
+    // courts stagger within a day, never across days.
+    for (const day of splitAcrossDays(weekMatches, weekDate, days)) {
+      day.matches.forEach((match, i) => {
+        const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
+        // Creating a league is creating scheduled matches. Each row carries its
+        // own league, week, date, court and time, so every later view finds it
+        // by filtering matches rather than walking back up through the matchup.
+        run(
+            `INSERT INTO matches
+               (type, status, league_id, week_id, matchup_id, division_id,
+                player1_id, player2_id, scheduled_date, scheduled_time, court_id, court_number)
+             VALUES ('league', 'scheduled', @leagueId, @weekId, @matchupId, @divisionId,
+                     @p1Id, @p2Id, @date, @time, @courtId, @courtNumber)`,
+            {
+              leagueId, weekId,
+              matchupId:  match.matchupId,
+              divisionId: match.divId,
+              p1Id:       match.p1Id,
+              p2Id:       match.p2Id,
+              date: day.date,
+              time,
+              courtId:     useNewCourts ? courtIds[i % effectiveCourts] : null,
+              courtNumber: useNewCourts ? null : (i % effectiveCourts) + 1,
+            },
+        );
+      });
     }
   }
 
@@ -135,7 +214,7 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
  * every membership query works unchanged. Mirrors createModernLeague rather
  * than generalising it, so the singles paths stay byte-identical.
  */
-function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [] }) {
+function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [], playDays = [] }) {
   if (!Array.isArray(divisions) || divisions.length === 0) throw _validationError('Add at least one division.');
   const seen = new Set();
   divisions.forEach((div, i) => {
@@ -153,6 +232,8 @@ function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blacko
   });
 
   const numDivisions = divisions.length;
+  const days = normalizePlayDays(startDate, playDays, 'doubles');
+  if (days.length > minWeeklyMatches(divisions.map((div) => div.length))) throw _validationError('Too many play days for this league.');
   const useNewCourts = courtIds.length > 0;
   const effectiveCourts = useNewCourts ? courtIds.length : numCourts;
   const leagueId = leagueModel.createLeagueRecord({
@@ -161,6 +242,7 @@ function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blacko
     numCourts: effectiveCourts,
     matchDuration, matchBuffer,
     scheduleCourts: useNewCourts ? true : scheduleCourts,
+    playDays: days,
   });
 
   const divisionIds = [];
@@ -198,7 +280,7 @@ function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blacko
   let currentDate = startDate;
 
   for (let w = 0; w < totalWeeks; w++) {
-    while (blackoutSet.has(currentDate)) currentDate = addDays(currentDate, 7);
+    currentDate = nextClearWeek(currentDate, days, blackoutSet);
     const weekDate = currentDate;
     currentDate = addDays(currentDate, 7);
 
@@ -224,26 +306,28 @@ function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blacko
       [weekMatches[i], weekMatches[j]] = [weekMatches[j], weekMatches[i]];
     }
     weekMatches.sort((a, b) => a.level - b.level);
-    for (let i = 0; i < weekMatches.length; i++) {
-      const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
-      const A = pairById[weekMatches[i].pairA], B = pairById[weekMatches[i].pairB];
-      run(
-        `INSERT INTO matches
-           (type, status, format, league_id, week_id, matchup_id, division_id,
-            player1_id, player1_partner_id, player2_id, player2_partner_id, pair1_id, pair2_id,
-            scheduled_date, scheduled_time, court_id, court_number)
-         VALUES ('league', 'scheduled', 'doubles', @leagueId, @weekId, @matchupId, @divisionId,
-                 @p1, @p1b, @p2, @p2b, @pair1, @pair2, @date, @time, @courtId, @courtNumber)`,
-        {
-          leagueId, weekId,
-          matchupId: weekMatches[i].matchupId,
-          divisionId: weekMatches[i].divId,
-          p1: A.a, p1b: A.b, p2: B.a, p2b: B.b, pair1: A.id, pair2: B.id,
-          date: weekDate, time,
-          courtId: useNewCourts ? courtIds[i % effectiveCourts] : null,
-          courtNumber: useNewCourts ? null : (i % effectiveCourts) + 1,
-        },
-      );
+    for (const day of splitAcrossDays(weekMatches, weekDate, days)) {
+      day.matches.forEach((match, i) => {
+        const time = addMinutes(matchStartTime, Math.floor(i / effectiveCourts) * slotMinutes);
+        const A = pairById[match.pairA], B = pairById[match.pairB];
+        run(
+          `INSERT INTO matches
+             (type, status, format, league_id, week_id, matchup_id, division_id,
+              player1_id, player1_partner_id, player2_id, player2_partner_id, pair1_id, pair2_id,
+              scheduled_date, scheduled_time, court_id, court_number)
+           VALUES ('league', 'scheduled', 'doubles', @leagueId, @weekId, @matchupId, @divisionId,
+                   @p1, @p1b, @p2, @p2b, @pair1, @pair2, @date, @time, @courtId, @courtNumber)`,
+          {
+            leagueId, weekId,
+            matchupId: match.matchupId,
+            divisionId: match.divId,
+            p1: A.a, p1b: A.b, p2: B.a, p2b: B.b, pair1: A.id, pair2: B.id,
+            date: day.date, time,
+            courtId: useNewCourts ? courtIds[i % effectiveCourts] : null,
+            courtNumber: useNewCourts ? null : (i % effectiveCourts) + 1,
+          },
+        );
+      });
     }
   }
 
@@ -273,10 +357,14 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
 
   const useNewCourts = courtIds.length > 0;
   const effectiveCourts = useNewCourts ? courtIds.length : numCourts;
+  // Teams leagues play one day a week: a team fixture is the whole set of
+  // division matches, and the teams gather for it. Whatever the wizard sent,
+  // only the start date's weekday is kept.
   const leagueId = leagueModel.createLeagueRecord({
     name, startDate, numTeams, numDivisions, numRounds, blackoutDates, matchStartTime,
     numCourts: effectiveCourts, matchDuration, matchBuffer,
     scheduleCourts: useNewCourts ? true : scheduleCourts,
+    playDays: normalizePlayDays(startDate, [], 'traditional'),
   });
 
   // --- Teams ---
@@ -447,4 +535,4 @@ function getFullLeague(leagueId) {
   return { ...league, teams, divisions, players, pairs, weeks: weeksWithData, courts };
 }
 
-module.exports = { createLeague, getFullLeague };
+module.exports = { createLeague, getFullLeague, normalizePlayDays, playDates, splitAcrossDays, minWeeklyMatches };

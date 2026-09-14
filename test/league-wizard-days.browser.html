@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div id="pageTitle"></div><div id="topbarActions"></div>
+<main class="content" id="mainContent"></main>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// The wizard's Play days field (design_handoff_league_wizard_multiday plus
+// the wizard additions in design_handoff_league_multinight): chips in
+// start-day order, the split readout, the too-many-days warning, blackouts
+// by play day on step 4, the day-grouped preview on step 5, the payload,
+// and the read-only field a Teams league gets.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $  = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').replace('\u2713', '').trim() : '');
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const settle = () => new Promise((r) => setTimeout(r, 25));
+const NAMES = ['James Whitfield','Sofia Duarte','Marcus Lang','Priya Raman','Tom Beckett','Elena Sorokin',
+  'Dev Patel','Ruth Okonjo','Callum Reid','Yuki Tanaka','Nadia Haddad','Owen Price'];
+const PLAYERS = NAMES.map((name, i) => ({ id: i + 1, name }));
+const COURTS = [1, 2].map((i) => ({ id: i, name: `Court ${i}` }));
+const calls = [];
+window.api = {
+  getLadder: async () => PLAYERS.map((p) => ({ id: p.id, name: p.name })),
+  getPlayers: async () => PLAYERS,
+  getCourts: async () => COURTS,
+  getValidConfigs: async (n) => { const out = []; for (let t = 2; t <= n; t++) if (n % t === 0) out.push({ teams: t, divisions: n / t }); return out; },
+  createLeague: async (payload) => { calls.push(['createLeague', payload]); return 42; },
+  getLeague: async (id) => ({ id, name: 'made' }),
+};
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'admin' };
+const mod = await import('../renderer/pages/createLeague.js');
+window.navigate = (page) => { if (page === 'createLeague') mod.renderCreateLeague(); };
+const mobile = window.innerWidth <= 480;
+
+try {
+  log.textContent += (mobile ? 'PHONE' : 'DESKTOP') + ' — STEP 3, NO TEAMS\n';
+  mod.startCreateLeague();
+  await settle();
+  type($('#wName'), 'Two-day League');
+  type($('#wDate'), '2026-09-14');                    // a Monday
+  click($$('.wz-format')[1]); await settle();          // No teams
+  click($('#wNext')); await settle();
+  for (let i = 0; i < 6; i++) click($('#availableList .wz-prow'));
+  ok('six players picked', state.wizard.rankedPlayers.length === 6);
+  click($('#wNext')); await settle();
+  ok('on step 3', state.wizard.step === 3);
+
+  const chips = () => $$('#wzPlayDays .wz-daychip');
+  ok('seven day chips, the start weekday first', chips().map(txt).join() === 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', chips().map(txt).join());
+  ok('the start day is on, ringed, and cannot be turned off', chips()[0].classList.contains('wz-daychip--on') && chips()[0].classList.contains('wz-daychip--anchor') && chips()[0].getAttribute('aria-disabled') === 'true' && chips()[0].querySelector('.wz-daychip-tick'));
+  ok('the field sits above Match start', $('#wzPlayDays').nextElementSibling?.querySelector('#wStartTime') != null);
+  ok('the count line reads one day', txt($('#wzPlayDays .wz-hint')) === '1 day a week · week starts Mon', txt($('#wzPlayDays .wz-hint')));
+  ok('and the readout says every match is on Monday', txt($('.wz-split-text')) === 'All 2 matches a week play on Monday. Add more days to spread them out.', txt($('.wz-split-text')));
+  ok('the strip has a Play days cell reading Mon', $$('.wz-sum-cell').some((c) => /Play days|Days/.test(c.textContent) && /\bMon\b/.test(txt(c.querySelector('.wz-sum-val')))));
+  click(chips()[0]); await settle();
+  ok('clicking the start day does nothing', chips()[0].classList.contains('wz-daychip--on') && state.wizard.playDays.length === 0);
+
+  click(chips()[2]); await settle();                   // Wed
+  ok('Wednesday turns on', chips()[2].classList.contains('wz-daychip--on') && !chips()[2].classList.contains('wz-daychip--anchor'));
+  ok('the count line follows', txt($('#wzPlayDays .wz-hint')) === '2 days a week · week starts Mon');
+  ok('the readout explains the split', txt($('.wz-split-text')) === '2 matches a week split across 2 days. Everyone still plays once a week; Monday is the start date, so each week begins there.', txt($('.wz-split-text')));
+  ok('with a chip per day', $$('.wz-splitchip').map(txt).join('|') === 'Monday · 1 match|Wednesday · 1 match', $$('.wz-splitchip').map(txt).join('|'));
+  ok('the strip reads Mon & Wed', $$('.wz-sum-val').some((v) => txt(v) === 'Mon & Wed'));
+  if (mobile) {
+    ok('phone chips are 44px tall', Math.round(chips()[0].getBoundingClientRect().height) === 44, String(chips()[0].getBoundingClientRect().height));
+  } else {
+    ok('chips are 38px tall', Math.round(chips()[0].getBoundingClientRect().height) === 38, String(chips()[0].getBoundingClientRect().height));
+  }
+
+  log.textContent += '\nTOO MANY DAYS\n';
+  click(chips()[4]); await settle();                   // Fri: three days, two matches
+  ok('a third day is one too many', $('.wz-days-warn') && txt($('.wz-days-warn')) === "You've picked 3 days but this league only has 2 matches a week. Remove a day.", txt($('.wz-days-warn')));
+  ok('the split readout is gone', !$('.wz-split'));
+  ok('Next is dimmed', $('#wNext').classList.contains('wz-next--dim'));
+  click($('#wNext')); await settle();
+  ok('and refuses, naming why', state.wizard.step === 3 && $('#wError')?.textContent === 'Too many play days for this league.', $('#wError')?.textContent);
+  click($$('#wzPlayDays .wz-daychip')[4]); await settle();
+  ok('turning the day off clears the warning and the error at once', !$('.wz-days-warn') && !$('#wNext').classList.contains('wz-next--dim') && !$('#wError')?.textContent);
+
+  log.textContent += '\nSTEP 4 — BLACKOUTS BY PLAY DAY\n';
+  click($('#wNext')); await settle();
+  ok('on step 4', state.wizard.step === 4);
+  ok('the subtitle names the days and the rule', /from Sep 14, Mon & Wed\. A blackout on any play day skips that whole week/.test(txt($('.wz-sub'))), txt($('.wz-sub')));
+  ok('three weeks', $$('.wz-wkchip').length === 3);
+  ok('each week chip lists its play days', $$('.wz-wkchip-days').map(txt).join('|') === 'Mon 14 · Wed 16|Mon 21 · Wed 23|Mon 28 · Wed 30', $$('.wz-wkchip-days').map(txt).join('|'));
+  type($('#wBlackoutDate'), '2026-09-15'); click($('#wAddBlackout')); await settle();   // a Tuesday
+  ok('a blackout on a day the league does not play skips nothing', $$('.wz-wkchip-d').map(txt).join() === 'Sep 14,Sep 21,Sep 28', $$('.wz-wkchip-d').map(txt).join());
+  click($('[data-action="remove-blackout"]')); await settle();
+  type($('#wBlackoutDate'), '2026-09-16'); click($('#wAddBlackout')); await settle();   // the Wednesday
+  ok('a blackout on the Wednesday skips the whole week, Monday too', $$('.wz-wkchip-d').map(txt).join() === 'Sep 21,Sep 28,Oct 5', $$('.wz-wkchip-d').map(txt).join());
+  ok('the row says which week', txt($('.wz-bonote')) === 'Whole week of Sep 14 skipped — schedule shifts a week later', txt($('.wz-bonote')));
+  click($('[data-action="remove-blackout"]')); await settle();
+
+  log.textContent += '\nSTEP 5 — PREVIEW BY DAY\n';
+  click($('#wNext')); await settle();
+  ok('on step 5', state.wizard.step === 5);
+  ok('the hero has a Days / wk tile', $$('.wz-tile-label').map(txt).join('/') === 'Players/Weeks/Days / wk/Courts' && $$('.wz-tile-val').map(txt).join('/') === '6/3/2/0', $$('.wz-tile-label').map(txt).join('/') + ' ' + $$('.wz-tile-val').map(txt).join('/'));
+  const week1 = $('.wz-week');
+  ok('a week shows its date range', txt(week1.querySelector('.wz-week-date')) === 'Sep 14 – Sep 16', txt(week1.querySelector('.wz-week-date')));
+  ok('grouped by day, each label naming the day, date and count', [...week1.querySelectorAll('.wz-fixlabel')].map(txt).join('|') === 'Monday · Sep 14 · 1 match|Wednesday · Sep 16 · 1 match|Byes', [...week1.querySelectorAll('.wz-fixlabel')].map(txt).join('|'));
+  ok('lines carry their division', /^Div 1 · .+ vs .+$/.test(txt(week1.querySelector('.wz-fixline'))), txt(week1.querySelector('.wz-fixline')));
+  ok('byes are listed once for the week', /Byes/.test(week1.textContent) && week1.querySelectorAll('.wz-fixline--bye').length === 1);
+  click($('#wCreate')); await settle();
+  const made = calls.find((c) => c[0] === 'createLeague')?.[1];
+  ok('the payload carries the play days, start day first', made && JSON.stringify(made.playDays) === '[1,3]', JSON.stringify(made?.playDays));
+
+  log.textContent += '\nTEAMS: ONE DAY, READ-ONLY\n';
+  click($$('.wz-step')[0]); await settle();
+  click($$('.wz-format')[0]); await settle();          // Teams
+  click($('#wNext')); await settle();
+  click($('#wNext')); await settle();
+  ok('on step 3 as Teams', state.wizard.step === 3 && state.wizard.setupType === 'traditional');
+  ok('one chip, on, with no ring', $$('#wzPlayDays .wz-daychip').length === 1 && $('#wzPlayDays .wz-daychip').classList.contains('wz-daychip--on') && !$('#wzPlayDays .wz-daychip').classList.contains('wz-daychip--anchor') && txt($('#wzPlayDays .wz-daychip')) === 'Mon');
+  ok('labelled Play day', txt($('#wzPlayDays .wz-label')) === 'Play day' && txt($('#wzPlayDays .wz-hint')) === '1 day a week · from the start date', txt($('#wzPlayDays .wz-hint')));
+  ok('with the Teams explanation', txt($('.wz-split-text')) === 'Teams leagues play one day a week. All 2 matches play on Monday. Change the start date on step 1 to move the day.', txt($('.wz-split-text')));
+  ok('the earlier Wednesday is not sent for a Teams league', JSON.stringify(state.wizard.playDays) === '[3]' && (() => { click($('#wNext')); return true; })());
+  await settle();
+  click($('#wNext')); await settle();
+  click($('#wCreate')); await settle();
+  const teams = calls.filter((c) => c[0] === 'createLeague').pop()?.[1];
+  ok('a Teams payload carries only the start weekday', teams && teams.setup_type === 'traditional' && JSON.stringify(teams.playDays) === '[1]', JSON.stringify(teams?.playDays));
+} catch (e) { failed++; log.textContent += 'FAIL threw: ' + (e.stack || e) + '\n'; }
+
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

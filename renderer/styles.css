@@ -1964,6 +1964,71 @@ tbody td {
 .wz-night svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
 .wz-night span { font-size: 12.5px; color: #5c4708; line-height: 1.5; }
 
+/* --- Step 3: play days (design_handoff_league_wizard_multiday) --- */
+.wz-days { gap: 10px; }
+.wz-daychips { display: flex; gap: 8px; flex-wrap: wrap; }
+.wz-daychip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 13px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  background: #fff;
+  color: #6b7e93;
+  border: 1px solid #dce3ed;
+}
+.wz-daychip--on { background: #1e2758; color: #fff; border-color: #1e2758; }
+.wz-daychip--anchor { cursor: default; box-shadow: 0 0 0 3px rgba(30, 39, 88, .14); }
+.wz-daychip-tick { font-size: 11px; font-weight: 700; }
+.wz-split {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f7f9fc;
+  border: 1px solid #e7ebf2;
+}
+.wz-split-text { font-size: 12.5px; color: #6b7e93; line-height: 1.5; }
+.wz-splitchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.wz-splitchip {
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid #dce3ed;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1c2b3a;
+}
+.wz-days-warn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fdf4e3;
+  border: 1px solid #eddcae;
+}
+.wz-days-warn svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.wz-days-warn span { font-size: 12.5px; color: #5c4708; line-height: 1.5; }
+.wz-next--dim { opacity: .45; }
+.wz-sum-lbl-mob { display: none; }
+/* Step 4: each week chip lists its play days under the date. */
+.wz-wkchip-days { font-size: 11px; color: #6b7e93; margin-top: 2px; }
+/* Phone: taller chips to tap, and the readout drops its box to the split chips. */
+@media (max-width: 480px) {
+  .wz-daychip { height: 44px; min-width: 44px; font-size: 13.5px; }
+  .wz-split { padding: 0; border: none; background: transparent; }
+  .wz-split-text { display: none; }
+  .wz-days-readonly + .wz-split .wz-split-text { display: block; font-size: 12.5px; }
+}
+/* Step 5: a division tag at the front of a fixture line. */
+.wz-fixdiv { font-weight: 600; color: #6b7e93; }
+
 /* --- Step 4: blackout dates --- */
 .wz-addrow { display: flex; align-items: flex-end; gap: 10px; }
 .wz-addrow-date { width: 240px; }
@@ -2109,6 +2174,8 @@ tbody td {
   .wz-sum-cell--desk { display: none; }
   .wz-sum-label { font-size: 9.5px; letter-spacing: .07em; }
   .wz-sum-val { font-size: 13.5px; }
+  .wz-sum-lbl-desk { display: none; }
+  .wz-sum-lbl-mob { display: inline; }
 
   .wz-card { border-radius: 12px; }
   .wz-head { padding: 14px; }
@@ -7263,6 +7330,39 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .lg-matches { display: flex; flex-direction: column; gap: 8px; }
 
+/* ── Multi-day weeks (design_handoff_league_multinight) ──
+   A league that plays several days a week groups each week by day, then by
+   division inside the day. One-day leagues never render these. */
+.lg-week-date--range { min-width: 230px; }
+.lg-wd-short { display: none; }
+.lg-page .lg-night { padding: 14px 22px 6px; border-top: 1px solid #f0f3f7; }
+.lg-page .lg-night:first-child { border-top: none; }
+.lg-night-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.lg-night-day { font-family: 'Barlow', sans-serif; font-size: 14px; font-weight: 700; color: #1c2b3a; }
+.lg-night-date { font-size: 13px; color: #6b7e93; }
+.lg-night-count { font-size: 12px; color: #93a2b5; }
+.lg-tonight {
+  padding: 2px 9px;
+  border-radius: 20px;
+  background: #eaefff;
+  color: #3550c8;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.lg-night-rule { flex: 1; height: 1px; background: #e7ebf2; margin-left: 4px; }
+.lg-page .lg-night .matchup-block.lg-group { padding: 8px 0 10px; border-top: none; }
+.lg-night-empty {
+  margin: 8px 0 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px dashed #dce3ed;
+  font-size: 13px;
+  color: #93a2b5;
+}
+.lg-week-byes { padding: 4px 22px 16px; font-size: 12.5px; color: #6b7e93; }
+
 /* ── Match rows ── */
 .lg-page .schedule-list .match-row.lg-match,
 .lg-page .schedule-list.is-admin .match-row.lg-match {
@@ -7617,6 +7717,18 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .lg-week-num { font-size: 16px; }
   .lg-week-date { grid-area: date; min-width: 0; font-size: 12px; }
   .lg-week-summary { grid-area: summary; min-width: 0; font-size: 12px; flex: none; }
+  /* Multi-day weeks: the short range on the phone, days stacked 16px apart. */
+  .lg-wd-long { display: none; }
+  .lg-wd-short { display: inline; }
+  .lg-page .week-body.lg-week-body:has(.lg-night) { padding: 12px 16px 14px; }
+  .lg-page .lg-night { padding: 0; border-top: none; }
+  .lg-page .lg-night + .lg-night { margin-top: 16px; }
+  .lg-night-day { font-size: 13px; }
+  .lg-night-date, .lg-night-count { font-size: 12px; color: #6b7e93; }
+  .lg-night-sep { display: none; }
+  .lg-night-count::before { content: '· '; }
+  .lg-page .lg-night .matchup-block.lg-group { padding: 6px 0 8px; }
+  .lg-week-byes { padding: 8px 0 0; font-size: 12px; }
   /* The two spans read as one sentence on this line, so the separator belongs
      between them rather than as gap. */
   .lg-week-summary::before { content: '· '; }

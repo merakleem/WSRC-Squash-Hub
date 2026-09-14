@@ -4,7 +4,7 @@
 // which keeps the admin entry points this page reuses.
 
 import { state, isAdmin } from '../state.js';
-import { esc, formatShortDate, toast, avatarHTML } from '../utils.js';
+import { esc, formatShortDate, toast, avatarHTML, formatShortDateWeekday } from '../utils.js';
 import { openEditPlayerModal, confirmDeletePlayer, openMessagePlayerModal, showAuthLinkModal } from './players.js';
 import { openPhotoModal } from './playerPhoto.js';
 import { openPickupGameModal } from './ladderMatch.js';
@@ -491,7 +491,7 @@ export function renderPlayerProfile() {
         return `
           <div class="pp-row pp-row-lg${i === 0 ? ' pp-row-next' : ''}${isDbl ? ' pp-row-dbl' : ''}" data-match="${m.id}">
             <div class="pp-date-block">
-              <span class="pp-date-main">${formatShortDate(m.week_date)}</span>
+              <span class="pp-date-main">${formatShortDateWeekday(m.week_date)}</span>
               ${timing ? `<span class="pp-date-sub">${esc(timing)}</span>` : ''}
             </div>
             <div class="pp-row-main">

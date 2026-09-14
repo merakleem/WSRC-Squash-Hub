@@ -61,10 +61,21 @@ function getValidConfigurations(numPlayers) {
 /**
  * Add `days` days to a YYYY-MM-DD date string and return a new YYYY-MM-DD string.
  */
+// YYYY-MM-DD in the process's own zone. toISOString() is UTC, and from any
+// zone past UTC+12 it names the day before a local noon.
+function localISODate(d) {
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
 function addDays(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return localISODate(d);
+}
+
+/** Day of week (0 = Sunday) of a YYYY-MM-DD string. */
+function dayOfWeek(dateStr) {
+  return new Date(dateStr + 'T12:00:00').getDay();
 }
 
 /**
@@ -107,4 +118,4 @@ function generateModernRoundRobin(playerIds) {
   return rounds;
 }
 
-module.exports = { generateRoundRobin, generateModernRoundRobin, getValidConfigurations, addDays, formatDate };
+module.exports = { generateRoundRobin, generateModernRoundRobin, getValidConfigurations, addDays, dayOfWeek, localISODate, formatDate };

@@ -226,7 +226,7 @@ const _DBL_SELECT = `
          ${matchModel.EFF_P1} AS s1a, ${matchModel.EFF_P1B} AS s1b,
          ${matchModel.EFF_P2} AS s2a, ${matchModel.EFF_P2B} AS s2b,
          m.scheduled_date, m.scheduled_time, m.court_id, c.name AS court_name,
-         w.date AS week_date, w.week_number,
+         COALESCE(m.scheduled_date, w.date) AS week_date, w.week_number,
          l.id AS league_id, l.name AS league_name, d.name AS division_name
   FROM matches m ${matchModel.DBL_JOIN}
   LEFT JOIN courts c    ON c.id = m.court_id
@@ -290,7 +290,7 @@ function getPlayerDoublesUpcoming(id) {
     WHERE ${matchModel.DOUBLES} AND m.type = 'league'
       AND m.player1_score IS NULL AND (m.skipped = 0 OR m.skipped IS NULL)
       AND @id IN (${matchModel.EFF_P1}, ${matchModel.EFF_P1B}, ${matchModel.EFF_P2}, ${matchModel.EFF_P2B})
-    ORDER BY w.date ASC, m.scheduled_time ASC
+    ORDER BY week_date ASC, m.scheduled_time ASC
   `).all({ id: numId });
   const names = _namesFor(rows);
   return rows.map((r) => {
@@ -316,7 +316,9 @@ function getPlayerUpcomingMatches(id) {
   return getDB().prepare(`
     SELECT
       m.id,
-      w.date        AS week_date,
+      -- The match's own day. A week can have several play days, so the week's
+      -- date (its first day) is only a fallback for a row with no date.
+      COALESCE(m.scheduled_date, w.date) AS week_date,
       w.week_number,
       l.id          AS league_id,
       l.name        AS league_name,
@@ -348,7 +350,9 @@ function getPlayerUpcomingMatches(id) {
 
     SELECT
       m.id,
-      w.date        AS week_date,
+      -- The match's own day. A week can have several play days, so the week's
+      -- date (its first day) is only a fallback for a row with no date.
+      COALESCE(m.scheduled_date, w.date) AS week_date,
       w.week_number,
       l.id          AS league_id,
       l.name        AS league_name,

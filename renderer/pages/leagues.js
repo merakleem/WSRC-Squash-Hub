@@ -1,5 +1,5 @@
 import { state, isAdmin } from '../state.js';
-import { esc, formatShortDate, toast, modal } from '../utils.js';
+import { esc, formatShortDate, toast, modal, playDayNamesLong, playDatesFor, formatWeekRange, DAY_LONG } from '../utils.js';
 import { startCreateLeague } from './createLeague.js';
 
 // ===== LEAGUES PAGE =====
@@ -145,7 +145,11 @@ function leagueCardHTML(league) {
     ? `${league.num_divisions} division${league.num_divisions !== 1 ? 's' : ''} &middot; ${playerCount} players`
     : `${league.num_teams} teams &middot; ${league.num_divisions} divisions &middot; ${league.num_teams * league.num_divisions} players`;
 
-  const weekday = _weekdayName(league.start_date);
+  // "Mondays & Wednesdays" from the league's play days; the start date's
+  // weekday for a league from before play days existed.
+  const weekday = Array.isArray(league.play_days) && league.play_days.length
+    ? playDayNamesLong(league.play_days)
+    : _weekdayName(league.start_date);
   const dateLine = `${done ? 'Ran from' : 'Started'} ${formatShortDate(league.start_date)}${weekday ? ` &middot; ${weekday}` : ''}`;
 
   const totalWeeks = Number(league.total_weeks) || 0;
@@ -169,7 +173,7 @@ function leagueCardHTML(league) {
         <div class="lgl-progress-head">
           <span class="lgl-week${done ? ' lgl-week--done' : ''}">${done ? 'Finished' : `Week ${current + 1} of ${totalWeeks}`}</span>
           <span class="lgl-progress-right">
-            <span class="lgl-range">${_monthDay(league.start_date)} &ndash; ${_monthDay(league.last_week_date)}</span>
+            <span class="lgl-range">${_monthDay(league.start_date)} &ndash; ${_monthDay(league.last_night_date || league.last_week_date)}</span>
             <span class="lgl-foot-m">${_footNoteHTML(league, mine, totalWeeks)}</span>
           </span>
         </div>
@@ -724,7 +728,54 @@ export function printSchedule(league) {
     return new Date(y, m - 1, day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
 
-  const weeksHTML = weeks.map((week) => {
+  // A league that plays several days a week prints one week per page, one
+  // column per day, divisions inside the day, the week's byes at the foot.
+  const playDays = Array.isArray(league.play_days) ? league.play_days : [];
+  const multiDay = playDays.length > 1;
+  const byeLabel = (b) => (b.pair_player2_name ? `${b.pair_player1_name} & ${b.pair_player2_name}` : b.player_name);
+  const matchLine = (m) => {
+    const dbl = m.format === 'doubles';
+    const p1 = dbl ? `${m.sub1_name || m.player1_name} & ${m.sub3_name || m.player1_partner_name}` : (m.sub1_name || m.player1_name);
+    const p2 = dbl ? `${m.sub2_name || m.player2_name} & ${m.sub4_name || m.player2_partner_name}` : (m.sub2_name || m.player2_name);
+    const score = (m.player1_score != null && m.player2_score != null)
+      ? `<span class="sched-score">${m.player1_score}–${m.player2_score}</span>` : '';
+    const courtLabel = m.court_name || (league.schedule_courts && m.court_number ? `Ct ${m.court_number}` : null);
+    const meta = [courtLabel, m.match_time].filter(Boolean).join(' · ');
+    return `<div class="sched-match"><span class="sched-court">${esc(meta)}</span>${esc(p1)} <span class="sched-vs">vs</span> ${esc(p2)}${score}</div>`;
+  };
+  const weeksByDayHTML = weeks.map((week, wi) => {
+    const dates = playDatesFor(week.date, playDays);
+    const known = new Set(dates.map((d) => d.date));
+    const all = (week.matchups || []).flatMap((mu) => (mu.matches || []).filter((m) => !m.skipped).map((m) => ({ m, mu })));
+    const daysHTML = dates.map((day, i) => {
+      const mine = all.filter(({ m }) => m.scheduled_date === day.date || (i === 0 && !known.has(m.scheduled_date)));
+      const divsHTML = divisions.map((div) => {
+        const rows = mine.filter(({ mu }) => mu.division_id === div.id);
+        if (!rows.length) return '';
+        return `<div class="sched-div"><div class="sched-div-name">${esc(div.name)}</div>${rows.map(({ m }) => matchLine(m)).join('')}</div>`;
+      }).join('');
+      const md = new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return `<div class="sched-night">
+        <div class="sched-night-head"><span class="sched-night-day">${DAY_LONG[day.dow]}</span><span class="sched-night-date">${md}</span><span class="sched-night-count">${mine.length} match${mine.length === 1 ? '' : 'es'}</span></div>
+        ${divsHTML || '<div class="sched-bye">No matches</div>'}
+      </div>`;
+    }).join('');
+    const byes = (week.byes || []).map((b) => {
+      const div = divisions.find((d) => d.id === b.division_id);
+      return `${esc(byeLabel(b))}${div ? ` (${esc(div.name)})` : ''}`;
+    });
+    return `<div class="sched-week sched-week--nights"${wi === weeks.length - 1 ? ' style="break-after:auto"' : ''}>
+      <div class="sched-week-header">
+        <span class="sched-week-num">Week ${week.week_number}</span>
+        <span class="sched-week-date">${formatWeekRange(week.date, dates)}</span>
+        <span class="sched-page-no">Page ${wi + 1} of ${weeks.length}</span>
+      </div>
+      <div class="sched-nights" style="grid-template-columns:repeat(${dates.length}, minmax(0, 1fr))">${daysHTML}</div>
+      ${byes.length ? `<div class="sched-bye">Bye: ${byes.join(', ')}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const weeksHTML = multiDay ? weeksByDayHTML : weeks.map((week) => {
     // Build a map of division_id -> { matches, byes }
     const divData = {};
     divisions.forEach((d) => { divData[d.id] = { name: d.name, matches: [], byes: [] }; });
@@ -817,6 +868,17 @@ export function printSchedule(league) {
     .sched-meta { font-size: 8pt; color: #777; }
     .sched-bye { font-size: 8.5pt; color: #777; font-style: italic; padding: 4px 0 1px; }
 
+    /* Several play days: one week per page, a column per day. */
+    .schedule--nights { columns: auto; }
+    .sched-week--nights { break-after: page; }
+    .sched-page-no { margin-left: auto; font-size: 9.5pt; color: #777; }
+    .sched-nights { display: grid; gap: 6mm; padding-left: 0; }
+    .sched-night-head { display: flex; align-items: baseline; gap: 5px; border-bottom: 1px solid #000; padding-bottom: 3px; margin-bottom: 4px; }
+    .sched-night-day { font-size: 11pt; font-weight: 800; }
+    .sched-night-date { font-size: 9.5pt; color: #555; }
+    .sched-night-count { margin-left: auto; font-size: 9pt; color: #777; }
+    .sched-court { font-size: 8pt; color: #777; min-width: 70px; }
+
     @page { size: A4 portrait; margin: 14mm 12mm; }
     @media print {
       body { background: #fff; }
@@ -828,9 +890,9 @@ export function printSchedule(league) {
 <body>
   <div class="page-header">
     <div class="page-title">${esc(league.name)}</div>
-    <div class="page-sub">Schedule</div>
+    <div class="page-sub">Schedule${multiDay ? ` &middot; ${esc(playDayNamesLong(playDays))}` : ''}</div>
   </div>
-  <div class="schedule">${weeksHTML}</div>
+  <div class="schedule${multiDay ? ' schedule--nights' : ''}">${weeksHTML}</div>
 </body>
 </html>`;
 
