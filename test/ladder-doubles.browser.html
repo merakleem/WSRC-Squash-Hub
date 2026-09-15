@@ -71,8 +71,14 @@ try {
   ok('my row is marked and the self bar offers a jump', !!$('.ldr-all-me') && /Hannah Reid/.test($('.ldr-all-me').textContent) && !!$('#ldrJumpMe'));
   ok('W/L are the season doubles record', $('.ldr-all-me .ldr-col-won').textContent === '4' && $('.ldr-all-me .ldr-col-lost').textContent === '2');
   ok('movement badge shows places moved', $$('.ldr-all-row')[0].querySelector('.ldr-change-up')?.textContent.trim() === '2');
+  // A circle, not a default browser button: the rule is shared, so deleting a
+  // page's CSS has taken it out from under this page before.
+  const bub = $('#btnLadderInfo').getBoundingClientRect();
+  ok('the info bubble is a 15px circle', Math.round(bub.width) === 15 && Math.round(bub.height) === 15
+    && getComputedStyle($('#btnLadderInfo')).borderRadius === '50%', `${Math.round(bub.width)}x${Math.round(bub.height)}`);
   click($('#btnLadderInfo')); await settle();
   ok('the info bubble explains the doubles ladder', $('#modalTitle').textContent === 'How the Doubles Ladder Works' && /all four players/.test($('#modalBody').textContent));
+  ok('and its sections are spaced, not run together', getComputedStyle($('.info-modal-section')).marginBottom === '18px', getComputedStyle($('.info-modal-section')).marginBottom);
   click($('#modalClose')); await settle();
 
   log.textContent += '\nENTER A DOUBLES MATCH\n';

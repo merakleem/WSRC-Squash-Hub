@@ -628,6 +628,30 @@ h1, h2, h3, h4, h5, h6,
   color: var(--text-muted);
 }
 
+/* Info bubble: the small circled "i" beside a page title that opens an
+   explainer modal. Shared - the ladder uses it. */
+.info-bubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1.5px solid #9aabbf;
+  color: #9aabbf;
+  font-size: 9px;
+  font-style: italic;
+  font-weight: 700;
+  font-family: Georgia, serif;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: border-color 0.15s, color 0.15s;
+}
+.info-bubble:hover { border-color: var(--primary); color: var(--primary); }
+
 /* ===== TABLES ===== */
 .table-card {
   background: var(--surface);
@@ -1042,6 +1066,12 @@ tbody td {
 }
 .modal.modal-wide { width: 920px; }
 .modal.modal-medium { width: 580px; }
+
+/* One headed paragraph inside an explainer modal - what .info-bubble opens. */
+.info-modal-section { margin-bottom: 18px; }
+.info-modal-section:last-child { margin-bottom: 0; }
+.info-modal-section h4 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+.info-modal-section p { font-size: 13px; color: var(--text-muted); line-height: 1.55; margin: 0; }
 
 /* ===== BOOKING MODAL COMPONENTS ===== */
 .bk-toggle-group {
