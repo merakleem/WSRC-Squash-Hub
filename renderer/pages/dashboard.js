@@ -1308,17 +1308,13 @@ async function renderMemberDashboard(user, content) {
   const now = new Date();
   const longDate = `${WD_LONG[now.getDay()]} ${now.getDate()} ${now.toLocaleDateString('en-US', { month: 'long' })}`;
 
-  // The page owns its own header on a phone, so the shared topbar stands down.
+  // The app's own header and hamburger stay exactly as they are on every other
+  // page; this page only owns what is inside .content.
   document.getElementById('pageTitle').textContent = 'Dashboard';
   document.querySelector('.content').classList.add('content--member-dash');
 
   content.innerHTML = `
     <div class="dh-page">
-      <header class="dh-header">
-        ${_dhAv({ name: playerData.name, photo_path: playerData.photo_path }, 'dh-me')}
-        <img class="dh-logo" src="/assets/logo-blue.png" alt="WSRC">
-        <span class="dh-header-spacer"></span>
-      </header>
       <div class="dh-greet">
         <h2 class="dh-greet-line">${esc(greeting)}</h2>
         <span class="dh-greet-date">${esc(longDate)}</span>

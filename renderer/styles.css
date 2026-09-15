@@ -4798,9 +4798,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 
 /* ===== MEMBER DASHBOARD ===== */
 /* Mobile first: 390px is the layout, and a wide screen is the same single
-   column at full width with two of the blocks sitting side by side. The page
-   owns its own header on a phone - avatar, crest, and the app's hamburger in
-   its usual corner - so the shared topbar stands down here. */
+   column at full width with two of the blocks sitting side by side. The app's
+   header, hamburger and sidebar are untouched: this page owns only what is
+   inside .content. */
 
 .content--member-dash {
   padding: 0 !important;
@@ -4810,40 +4810,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 6px 16px 28px;
+  padding: 14px 16px 28px;
   padding-bottom: calc(28px + env(safe-area-inset-bottom));
   max-width: 100%;
 }
-
-.dh-header {
-  display: none;
-  height: 56px;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0 -16px;
-  padding: 0 16px;
-  flex-shrink: 0;
-}
-.dh-me {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--primary);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  font-family: 'Barlow', sans-serif;
-  font-weight: 700;
-  font-size: 13px;
-  flex-shrink: 0;
-}
-.dh-me .avatar-img { width: 100%; height: 100%; object-fit: cover; }
-.dh-logo { height: 24px; object-fit: contain; }
-/* Balances the avatar so the crest sits centred; the hamburger itself is the
-   app's own fixed button, which already lives in this corner. */
-.dh-header-spacer { width: 34px; flex-shrink: 0; }
 
 .dh-greet {
   display: flex;
@@ -5320,14 +5290,6 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 
 /* ── Phone chrome ── */
-/* The greeting is this page's title, so the app's title bar would only repeat
-   it. The hamburger is fixed and stays in its usual corner. */
-.main-wrapper:has(.content--member-dash) .topbar { display: none; }
-
-@media (max-width: 768px) {
-  .dh-header { display: flex; }
-}
-
 /* ── Wide ── */
 @media (min-width: 1024px) {
   .dh-page { gap: 18px; padding: 36px 40px 56px; }

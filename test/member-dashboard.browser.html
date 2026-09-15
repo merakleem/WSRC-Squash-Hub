@@ -142,6 +142,10 @@ try {
   ok('the countdown is running', /\d+d \d+h/.test(txt($('.dh-cd-val'))) && txt($('.dh-cd-cap')) === 'TIME UNTIL MATCH', txt($('.dh-countdown')));
   ok('with Match details and a Message button', $$('.dh-btn').map(txt).join('|') === 'Match details|Message Daniel', $$('.dh-btn').map(txt).join('|'));
   ok('Report a score is offered', !!$('.dh-report'));
+  // The app's own header and hamburger belong to every page, this one included:
+  // hiding the bar left the fixed hamburger floating over the hero on a phone.
+  ok('the shared topbar is left alone', getComputedStyle($('.topbar')).display !== 'none');
+  ok('and the page adds no header of its own', !$('.dh-page header'));
   ok('and the court card names the suggested slot', /Court 2 · \w+ 18:00/.test(txt($('.dh-court'))), txt($('.dh-court')));
   ok('the court label never changes', /BOOK A COURT/i.test(txt($('.dh-court-label'))), txt($('.dh-court-label')));
 
