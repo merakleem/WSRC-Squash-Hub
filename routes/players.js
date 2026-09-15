@@ -2,16 +2,25 @@ const express = require('express');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
-const { sendEmail, isConfigured: emailConfigured, appUrl } = require('../lib/email');
+const { sendEmail, isConfigured: emailConfigured, appUrl, inviteEmail } = require('../lib/email');
 const playerService = require('../services/playerService');
 const playerModel = require('../models/playerModel');
 const seasonModel = require('../models/seasonModel');
 const ladderModel = require('../models/ladderModel');
 const { savePlayerPhoto, deletePlayerPhoto } = require('../lib/photos');
 const tournamentModel = require('../models/tournamentModel');
+const leagueModel = require('../models/leagueModel');
+const { clubToday } = require('../lib/clock');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
 
 const router = express.Router();
+
+/** `n` days before an ISO date, as an ISO date. */
+function _daysBefore(iso, n) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
 
 // What a non-admin may see of another player. Contact details, account
 // status and the account flags — who is a member (or tester) is the club's
@@ -126,6 +135,10 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   const seasons = seasonModel.getAllSeasons();
   const ladderStats = ladderModel.getPlayerLadderStats(id);
 
+  // Bye weeks, from a week back so the one running now is always included.
+  // The dashboard needs them to tell "no match this week" from "no league".
+  const byes = leagueModel.getPlayerByeWeeks(id, _daysBefore(clubToday(), 7));
+
   // Division comes from the most recent league the player was entered in; the
   // profile header shows it as part of their identity.
   const division = db.prepare(`
@@ -141,7 +154,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   res.json({
     ...playerData,
     wins: rec.wins || 0, losses: rec.losses || 0,
-    history, upcoming, accountStatus, tournamentResults, seasons,
+    history, upcoming, accountStatus, tournamentResults, seasons, byes,
     ladder: ladderStats,
     division_name: division?.name || null,
   });
@@ -234,11 +247,7 @@ router.post('/players/send-invite', requireAdmin, emailLimiter, wrap(async (req,
 
     const result = await sendEmail({
       to: player.email,
-      subject: 'Activate your Play WSRC account',
-      html: `<p>Hi ${player.name},</p>
-<p>You've been invited to create an account on Play WSRC.</p>
-<p><a href="${appUrl(req)}/invite/${token}">Click here to activate your account</a></p>
-<p>This link expires in 72 hours.</p>`,
+      ...inviteEmail(player.name, `${appUrl(req)}/invite/${token}`),
     });
     if (result.ok) sent++; else failed++;
   }
@@ -269,11 +278,7 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
   if (emailConfigured() && player.email) {
     const result = await sendEmail({
       to: player.email,
-      subject: 'Activate your Play WSRC account',
-      html: `<p>Hi ${player.name},</p>
-<p>You've been invited to create an account on Play WSRC.</p>
-<p><a href="${inviteUrl}">Click here to activate your account</a></p>
-<p>This link expires in 72 hours.</p>`,
+      ...inviteEmail(player.name, inviteUrl),
     });
     if (!result.ok) return res.status(502).json({ error: result.error, inviteUrl });
     return res.json({ ok: true, emailSent: true, inviteUrl });

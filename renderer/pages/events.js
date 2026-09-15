@@ -140,6 +140,16 @@ async function _load(selectFirst = false) {
   if (selectFirst || (ev.selectedId != null && !ev.events.some((e) => e.id === ev.selectedId))) {
     ev.selectedId = ev.events[0]?.id ?? null;
   }
+  // Arriving from a link that names an event - the dashboard's schedule block -
+  // opens that one, on a phone as its detail view rather than the list.
+  const asked = state.currentEventId;
+  if (asked != null) {
+    state.currentEventId = null;
+    if (ev.events.some((e) => e.id === asked)) {
+      ev.selectedId = asked;
+      ev.view = 'detail';
+    }
+  }
   if (ev.selectedId != null) await _loadDetail();
   else ev.detail = null;
   if (_instance !== my) return;

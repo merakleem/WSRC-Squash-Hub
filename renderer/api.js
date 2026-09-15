@@ -116,6 +116,7 @@ if (typeof window !== 'undefined' && !window.api) {
     createReservation:  (d)       => _apiFetch('POST',   '/api/reservations', d),
     releaseReservation: (id)      => _apiFetch('DELETE', `/api/reservations/${id}`),
     getMyBookings:      ()        => _apiFetch('GET',    '/api/my-bookings'),
+    getSuggestedSlot:   ()        => _apiFetch('GET',    '/api/bookings/suggest-slot'),
     confirmBooking:     (d)       => _apiFetch('POST',   '/api/player-bookings', d),
     updateMyBooking:    (id, d)   => _apiFetch('PUT',    `/api/player-bookings/${id}`, d),
     cancelMyBooking:    (id)      => _apiFetch('DELETE', `/api/player-bookings/${id}`),

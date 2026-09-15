@@ -5,7 +5,7 @@ const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
-const { sendBatch, isConfigured: emailConfigured, appUrl, sendMany } = require('../lib/email');
+const { sendBatch, isConfigured: emailConfigured, appUrl, sendMany, inviteEmail } = require('../lib/email');
 const { clubToday } = require('../lib/clock');
 const sanitizeHtml = require('sanitize-html');
 
@@ -235,11 +235,7 @@ router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (
     `).run(p.player_id, token, expires);
     return {
       to: [p.player_email],
-      subject: 'Activate your Play WSRC account',
-      html: `<p>Hi ${p.player_name},</p>
-<p>You've been invited to create an account on Play WSRC.</p>
-<p><a href="${baseUrl}/invite/${token}">Click here to activate your account</a></p>
-<p>This link expires in 72 hours.</p>`,
+      ...inviteEmail(p.player_name, `${baseUrl}/invite/${token}`),
     };
   });
 

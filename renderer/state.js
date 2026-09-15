@@ -9,6 +9,9 @@ export const state = {
   currentPlayer: null,    // { id, name, email, phone, wins, losses, history: [...] }
   currentUser: null,      // { role: 'admin'|'player', playerId: number|null }
   currentTournamentId: null,
+  currentEventId: null,      // events page opens on this event, then clears it
+  bookingPrefill: null,      // { courtId, date, startTime } the booking page opens on
+  reportMatchId: null,       // report-a-score opens this match, then clears it
   scheduleDate: null,     // YYYY-MM-DD, null = today
   scheduleBookingTypeId: null, // active type pill (null = Standard / no type)
   scheduleZoom: 1.0,          // zoom ratio; range 0.5–2.0

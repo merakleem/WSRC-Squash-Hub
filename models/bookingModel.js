@@ -377,7 +377,8 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
 
   const rows = db.prepare(`
     SELECT b.id, b.court_id, b.group_id, b.date, b.start_time, b.duration_minutes, b.name, b.info,
-           b.booked_by, b.booking_type_id, bt.name AS type_name, bk.name AS booker_name,
+           b.booked_by, b.booking_type_id, bt.name AS type_name, bt.color AS type_color,
+           bk.name AS booker_name,
            c.name AS court_name, c.sort_order
     FROM bookings b
     JOIN booking_players bp ON bp.booking_id = b.id
@@ -442,7 +443,11 @@ function getUpcomingBookingsForPlayer(playerId, nowDate, nowTime) {
     durationMinutes: b.duration_minutes,
     bookingTypeId: b.booking_type_id || null,
     typeName: b.type_name || null,
+    typeColor: b.type_color || null,
     bookedBy: b.booked_by || null,
+    // Who made it, by name. The dashboard says "Anna Lindqvist booked · with
+    // you" for a court someone else put you on; null means the club did.
+    bookerName: b.booker_name || null,
     title: _bookingTitle(b),
     info: b.info || '',
     players: playersByBookingId.get(b.id) || [],

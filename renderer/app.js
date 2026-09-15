@@ -29,8 +29,12 @@ function navigate(page, params = {}, { pushHistory = true } = {}) {
   if (params.league) state.currentLeague = params.league;
   if (params.player) state.currentPlayer = params.player;
   if (params.tournamentId != null) state.currentTournamentId = params.tournamentId;
-  // Which match the Report Score page should open on arrival, if any.
+  // Which match the Report Score page should open on arrival, which event the
+  // Events page should select, and which slot the booking page should offer.
+  // Each is consumed and cleared by the page that receives it.
   state.reportMatchId = params.matchId ?? null;
+  state.currentEventId = params.eventId ?? null;
+  state.bookingPrefill = params.booking ?? null;
 
   // Sidebar active state
   const isOwnProfile = page === 'playerProfile' && state.currentPlayer?.id === state.currentUser?.playerId;
@@ -97,7 +101,7 @@ document.querySelectorAll('.nav-item').forEach((el) => {
 
 function renderPage() {
   const contentEl = document.querySelector('.content');
-  contentEl.classList.remove('content--flush', 'content--dashboard', 'content--schedule', 'content--court-booking', 'ca-page');
+  contentEl.classList.remove('content--flush', 'content--dashboard', 'content--member-dash', 'content--schedule', 'content--court-booking', 'ca-page');
   _setConflictCursor(false); // clear any stuck drag cursor from the schedule page
   switch (state.page) {
     case 'dashboard':        renderDashboard(); break;

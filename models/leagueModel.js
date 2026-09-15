@@ -113,6 +113,29 @@ function getWeekByes(weekId) {
   );
 }
 
+/**
+ * The bye weeks one player has, from `fromDate` onwards.
+ *
+ * A singles bye names the player; a doubles bye names the pair, and `player_id`
+ * only carries the pair's first player - so the second partner is found through
+ * `league_pairs` rather than by that column. The week's own `date` is its first
+ * play day, which is what the caller compares against today.
+ */
+function getPlayerByeWeeks(playerId, fromDate) {
+  return all(
+    `SELECT w.id AS week_id, w.date AS week_date, w.week_number,
+            l.id AS league_id, l.name AS league_name, l.play_days
+     FROM week_byes wb
+     JOIN weeks w    ON w.id = wb.week_id
+     JOIN leagues l  ON l.id = w.league_id
+     LEFT JOIN league_pairs lp ON lp.id = wb.pair_id
+     WHERE w.date >= ?
+       AND (wb.player_id = ? OR lp.player1_id = ? OR lp.player2_id = ?)
+     ORDER BY w.date ASC`,
+    [fromDate, playerId, playerId, playerId],
+  ).map(_withPlayDays);
+}
+
 /** The pairs of a doubles league, seeded order within each division. */
 function getLeaguePairs(leagueId) {
   return all(
@@ -347,6 +370,7 @@ module.exports = {
   unskipMatch,
   setSubForRemaining,
   getWeekByes,
+  getPlayerByeWeeks,
   replacePlayerInLeague,
   updateMatchTiming,
   getLeagueCourts,

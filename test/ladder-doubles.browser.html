@@ -71,8 +71,17 @@ try {
   ok('my row is marked and the self bar offers a jump', !!$('.ldr-all-me') && /Hannah Reid/.test($('.ldr-all-me').textContent) && !!$('#ldrJumpMe'));
   ok('W/L are the season doubles record', $('.ldr-all-me .ldr-col-won').textContent === '4' && $('.ldr-all-me .ldr-col-lost').textContent === '2');
   ok('movement badge shows places moved', $$('.ldr-all-row')[0].querySelector('.ldr-change-up')?.textContent.trim() === '2');
+  // A circle, not a default browser button: the rule is shared, so deleting a
+  // page's CSS has taken it out from under this page before.
+  const bub = $('#btnLadderInfo').getBoundingClientRect();
+  ok('the info bubble is a 15px circle', Math.round(bub.width) === 15 && Math.round(bub.height) === 15
+    && getComputedStyle($('#btnLadderInfo')).borderRadius === '50%', `${Math.round(bub.width)}x${Math.round(bub.height)}`);
   click($('#btnLadderInfo')); await settle();
-  ok('the info bubble explains the doubles ladder', $('#modalTitle').textContent === 'How the Doubles Ladder Works' && /all four players/.test($('#modalBody').textContent));
+  ok('the info bubble explains the doubles ladder', $('#modalTitle').textContent === 'How the Doubles Ladder Works'
+    && /separate from your singles one/.test($('#modalBody').textContent), $('#modalBody').textContent.slice(0, 90));
+  ok('in two sections, without the partner-maths one', $$('.info-modal-section').length === 2
+    && !/Everyone on court moves/.test($('#modalBody').textContent), String($$('.info-modal-section').length));
+  ok('and its sections are spaced, not run together', getComputedStyle($('.info-modal-section')).marginBottom === '18px', getComputedStyle($('.info-modal-section')).marginBottom);
   click($('#modalClose')); await settle();
 
   log.textContent += '\nENTER A DOUBLES MATCH\n';
@@ -118,6 +127,18 @@ try {
   await players.openPickupGameModal(); await settle(150);
   ok('the singles modal keeps its title and gains the Singles chip', /Enter a match/.test($('#modalTitle').textContent) && $('#modalTitle .em-mode-chip')?.textContent === 'Singles' && !!$('#puP1Search'));
   click($('#emCancel')); await settle();
+
+  log.textContent += '\nAN EMPTY LADDER STILL EXPLAINS ITSELF\n';
+  // The page returns early when nobody is on the ladder, which used to leave
+  // the info bubble unwired - exactly when someone wants to know how to get on.
+  state.currentUser = { role: 'user', playerId: 7, name: 'Hannah Reid' };
+  const EMPTY = { season: SEASON, system: 'elo', frozen: false, rows: [] };
+  window.api.getDoublesLadderForSeason = async () => EMPTY;
+  await renderLadder(); await settle(150);
+  ok('the doubles ladder is empty', !!$('.empty-state') && !$$('.ldr-all-row').length);
+  click($('#btnLadderInfo')); await settle(120);
+  ok('the info bubble still opens', $('#modalTitle').textContent === 'How the Doubles Ladder Works', $('#modalTitle').textContent);
+  click($('#modalClose')); await settle();
 } catch (e) {
   failed++;
   log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';

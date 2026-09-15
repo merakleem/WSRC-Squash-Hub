@@ -117,6 +117,53 @@ function _smoothScrollTo(el, reduceMotion) {
   requestAnimationFrame(step);
 }
 
+/**
+ * The circled "i" beside the title. Wired wherever the page returns, including
+ * the empty state - a ladder with nobody on it is exactly when someone wants
+ * to know how to get on it.
+ */
+function _wireInfoBubble(doubles, isElo) {
+  document.getElementById('btnLadderInfo')?.addEventListener('click', () => {
+    if (doubles) {
+      modal.open('How the Doubles Ladder Works', `
+      <div class="info-modal-section">
+        <h4>Play a doubles match to get ranked</h4>
+        <p>Record your first doubles match to join the doubles ladder. Everyone starts on the same rating, and your doubles rating is separate from your singles one.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>Who you beat matters</h4>
+        <p>Each pair counts as the average of its two ratings. Beating a pair rated well above yours is worth a lot; beating one well below is worth little, and losing to them costs you.</p>
+      </div>`);
+      return;
+    }
+    modal.open('How the Ladder Works', isElo ? `
+      <div class="info-modal-section">
+        <h4>Play a match to get ranked</h4>
+        <p>Record your first match to join the ladder. Starting positions are carried over from last season's results. New members' starting positions are based on their Club Locker rating.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>Who you beat matters</h4>
+        <p>Beating someone rated well above you is worth a lot. Beating someone well below you is worth very little, and losing to them costs you a lot. Evenly matched games move both players by a moderate amount either way.</p>
+      </div>` : `
+      <div class="info-modal-section">
+        <h4>Starting positions</h4>
+        <p>The ladder is everyone who has played; play a match and you're on it. New arrivals slot in below every member rated at least as highly as they are, and members without a rating start at the bottom.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>Moving up</h4>
+        <p>Beat a player ranked above you and you jump straight to their position. They drop one spot, and everyone between you shifts down to fill the gap. Win an upset and you climb immediately.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>No change</h4>
+        <p>Beating someone already ranked below you doesn't move anyone. Positions only shift when a lower-ranked player wins.</p>
+      </div>
+      <div class="info-modal-section">
+        <h4>What counts</h4>
+        <p>All recorded matches count. League matches and ladder matches reported through Quick Actions.</p>
+      </div>`);
+  });
+}
+
 export async function renderLadder() {
   const doubles = _ladderMode === 'doubles';
   document.getElementById('pageTitle').innerHTML = `Ladder <button class="info-bubble" id="btnLadderInfo" style="vertical-align:middle">i</button>${_modeTabsHTML()}`;
@@ -169,6 +216,7 @@ export async function renderLadder() {
     document.getElementById('ldrEmptyReport')?.addEventListener('click', () => window.openPickupGameModal({ mode: _ladderMode }));
     _wireFab();
     _attachLadderSeasonTabs();
+    _wireInfoBubble(doubles, isElo);
     return;
   }
 
@@ -401,48 +449,5 @@ export async function renderLadder() {
 
   watchOwnRow();
   _attachLadderSeasonTabs();
-
-  document.getElementById('btnLadderInfo')?.addEventListener('click', () => {
-    if (doubles) {
-      modal.open('How the Doubles Ladder Works', `
-      <div class="info-modal-section">
-        <h4>Play a doubles match to get ranked</h4>
-        <p>Record your first doubles match to join the doubles ladder. Everyone starts on the same rating, and your doubles rating is separate from your singles one.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Who you beat matters</h4>
-        <p>Each pair counts as the average of its two ratings. Beating a pair rated well above yours is worth a lot; beating one well below is worth little, and losing to them costs you.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Everyone on court moves</h4>
-        <p>A 2v2 result moves all four players. Partners can move by different amounts: the lower-rated partner gains more from a win and loses less from a defeat.</p>
-      </div>`);
-      return;
-    }
-    modal.open('How the Ladder Works', isElo ? `
-      <div class="info-modal-section">
-        <h4>Play a match to get ranked</h4>
-        <p>Record your first match to join the ladder. Starting positions are carried over from last season's results. New members' starting positions are based on their Club Locker rating.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Who you beat matters</h4>
-        <p>Beating someone rated well above you is worth a lot. Beating someone well below you is worth very little, and losing to them costs you a lot. Evenly matched games move both players by a moderate amount either way.</p>
-      </div>` : `
-      <div class="info-modal-section">
-        <h4>Starting positions</h4>
-        <p>The ladder is everyone who has played; play a match and you're on it. New arrivals slot in below every member rated at least as highly as they are, and members without a rating start at the bottom.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>Moving up</h4>
-        <p>Beat a player ranked above you and you jump straight to their position. They drop one spot, and everyone between you shifts down to fill the gap. Win an upset and you climb immediately.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>No change</h4>
-        <p>Beating someone already ranked below you doesn't move anyone. Positions only shift when a lower-ranked player wins.</p>
-      </div>
-      <div class="info-modal-section">
-        <h4>What counts</h4>
-        <p>All recorded matches count. League matches and ladder matches reported through Quick Actions.</p>
-      </div>`);
-  });
+  _wireInfoBubble(doubles, isElo);
 }
