@@ -31,6 +31,7 @@ async function boot(role) {
   if (f.contentDocument?.title !== 'ready') throw new Error(`${role} frame never booted`);
   const d = f.contentDocument;
   return {
+    frame: f,
     win: f.contentWindow,
     doc: d,
     $: (s) => d.querySelector(s),
@@ -143,6 +144,27 @@ ok('every nav link still carries .nav-item for the active state',
   admin.$$('.sidebar a[data-page]').every((el) => el.classList.contains('nav-item')));
 ok('the old standalone Logout nav link is gone', !admin.$('.nav-item-logout'));
 ok('and the My Profile nav item with it', !admin.$('#navMyProfile'));
+
+log.textContent += '\nVIEWING AS A MEMBER, ON A PHONE\n';
+// The bar is fixed, so it sits outside the flow that body's padding moves: the
+// hamburger and the drawer are positioned the same way and have to clear it by
+// hand, or the one control that opens the nav is inside the bar and untappable.
+member.frame.style.width = '390px';
+await settle(120);
+member.doc.body.classList.add('is-viewing-as');
+member.$('#viewAsBar').hidden = false;
+await settle(120);
+const shown = (sel) => member.win.getComputedStyle(member.$(sel)).display !== 'none';
+const box = (sel) => member.$(sel).getBoundingClientRect();
+ok('the hamburger is the way into the nav at this width', shown('.hamburger-btn'));
+ok('and it clears the bar rather than sitting inside it',
+  box('.hamburger-btn').top >= box('.viewas-bar').bottom,
+  `bar ends ${box('.viewas-bar').bottom}, button starts ${box('.hamburger-btn').top}`);
+member.$('#hamburgerBtn').click(); await settle(120);
+ok('the drawer it opens clears the bar too',
+  box('.sidebar').top >= box('.viewas-bar').bottom,
+  `drawer starts ${box('.sidebar').top}`);
+ok('so Return to admin is never covered', box('.viewas-btn').bottom <= box('.sidebar').top);
 
 document.title = failed ? `FAIL ${failed}` : 'PASS';
 log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';

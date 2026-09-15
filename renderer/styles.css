@@ -8591,10 +8591,17 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
    left a strip of page showing under the app. */
 body.is-viewing-as { box-sizing: border-box; padding-top: 38px; }
 body.is-viewing-as .app-container { height: 100%; }
+/* Anything fixed to the top of the viewport sits outside the flow that padding
+   moved, so it has to be told about the bar by hand. On a phone that is the
+   hamburger, which otherwise sat inside the bar and could not be tapped. */
+body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 2); }
 
 @media (max-width: 768px) {
   .viewas-bar { font-size: 12px; gap: 10px; }
   .viewas-btn { padding: 5px 10px; font-size: 12px; }
+  /* The drawer is fixed here too, and starts below the bar for the same reason.
+     On a wider screen the sidebar is in the flow and needs no offset. */
+  body.is-viewing-as .sidebar { top: 38px; }
 }
 
 /* ===== ADMIN SCHEDULE — chrome and grid, matched to the player page =====
