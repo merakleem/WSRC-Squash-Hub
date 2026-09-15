@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
-const { sendEmail, isConfigured: emailConfigured, appUrl } = require('../lib/email');
+const { sendEmail, isConfigured: emailConfigured, appUrl, inviteEmail } = require('../lib/email');
 const playerService = require('../services/playerService');
 const playerModel = require('../models/playerModel');
 const seasonModel = require('../models/seasonModel');
@@ -247,11 +247,7 @@ router.post('/players/send-invite', requireAdmin, emailLimiter, wrap(async (req,
 
     const result = await sendEmail({
       to: player.email,
-      subject: 'Activate your Play WSRC account',
-      html: `<p>Hi ${player.name},</p>
-<p>You've been invited to create an account on Play WSRC.</p>
-<p><a href="${appUrl(req)}/invite/${token}">Click here to activate your account</a></p>
-<p>This link expires in 72 hours.</p>`,
+      ...inviteEmail(player.name, `${appUrl(req)}/invite/${token}`),
     });
     if (result.ok) sent++; else failed++;
   }
@@ -282,11 +278,7 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
   if (emailConfigured() && player.email) {
     const result = await sendEmail({
       to: player.email,
-      subject: 'Activate your Play WSRC account',
-      html: `<p>Hi ${player.name},</p>
-<p>You've been invited to create an account on Play WSRC.</p>
-<p><a href="${inviteUrl}">Click here to activate your account</a></p>
-<p>This link expires in 72 hours.</p>`,
+      ...inviteEmail(player.name, inviteUrl),
     });
     if (!result.ok) return res.status(502).json({ error: result.error, inviteUrl });
     return res.json({ ok: true, emailSent: true, inviteUrl });

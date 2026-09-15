@@ -21,6 +21,7 @@ suite('the member dashboard\'s server side', async ({ ok, t }) => {
     run("INSERT INTO courts (name, sort_order, active) VALUES ('Court 1', 1, 1)");
     run("INSERT INTO courts (name, sort_order, active) VALUES ('Court 2', 2, 1)");
     run("INSERT INTO courts (name, sort_order, active) VALUES ('Court 3', 3, 1)");
+    run("INSERT INTO courts (name, sort_order, active) VALUES ('Court 4', 4, 1)");
     run("INSERT INTO booking_types (name, color) VALUES ('Private lesson', '#e8a33d')");
     const hash = bcrypt.hashSync('pw123', 4);
     run("INSERT INTO players (name, email, is_member) VALUES ('Member Mona', 'mona@x.invalid', 1)");
@@ -28,6 +29,7 @@ suite('the member dashboard\'s server side', async ({ ok, t }) => {
     run("INSERT INTO players (name, email, is_member) VALUES ('Anna Lindqvist', 'anna@x.invalid', 1)");
     run('INSERT INTO user_accounts (player_id, password_hash) VALUES (1, ?)', [hash]);
     run('INSERT INTO user_accounts (player_id, password_hash) VALUES (2, ?)', [hash]);
+    run('INSERT INTO user_accounts (player_id, password_hash) VALUES (3, ?)', [hash]);
   });
   const a = client(app), m = client(app), p = client(app);
   await a.login('', ADMIN_PW);
@@ -39,35 +41,54 @@ suite('the member dashboard\'s server side', async ({ ok, t }) => {
   let slot = await m.get('/api/bookings/suggest-slot');
   ok('with nothing booked, the offer is the lowest court', slot && slot.courtName === 'Court 1' && slot.mode === 'open', JSON.stringify(slot));
   ok('and it is today or tomorrow', [iso(0), iso(1)].includes(slot.date), slot.date);
-  const soonest = slot.date + ' ' + slot.startTime;
+  const soonest = `${slot.date} ${slot.startTime}`;
+  const [soonHour] = slot.startTime.split(':').map(Number);
+  const at = (courtId, date, hour, hours = 1) => a.send('POST', '/api/bookings', {
+    courtId, date, startTime: `${String(hour).padStart(2, '0')}:00`, durationMinutes: 60 * hours, name: 'Club',
+  });
+  const fill = async (courtId, date) => { for (let h = 6; h < 23; h++) await at(courtId, date, h); };
 
-  // A court free earlier beats a lower-numbered one free later: the time is
-  // what a member is choosing between, and the court only breaks a tie.
-  const fill = async (courtId, date, fromHour = 6) => {
-    for (let h = fromHour; h < 23; h++) {
-      await a.send('POST', '/api/bookings', { courtId, date, startTime: `${String(h).padStart(2, '0')}:00`, durationMinutes: 60, name: 'Club' });
-    }
-  };
+  // The time is what a member is choosing between; the court only breaks a tie.
   await fill(1, iso(0));
   await fill(1, iso(1));
   slot = await m.get('/api/bookings/suggest-slot');
-  ok('a full court 1 hands the same start to court 2', slot.courtName === 'Court 2' && slot.date + ' ' + slot.startTime === soonest, JSON.stringify(slot));
-  // Court 2 busy for the next hour, court 3 free throughout: court 3 is sooner.
-  const [sh] = slot.startTime.split(':').map(Number);
-  await a.send('POST', '/api/bookings', { courtId: 2, date: slot.date, startTime: `${String(sh).padStart(2, '0')}:00`, durationMinutes: 60, name: 'Club' });
+  ok('a full court 1 hands the same start to court 2', slot.courtName === 'Court 2' && `${slot.date} ${slot.startTime}` === soonest, JSON.stringify(slot));
+  await at(2, slot.date, soonHour);
   slot = await m.get('/api/bookings/suggest-slot');
-  ok('a court free sooner wins over a lower-numbered one free later', slot.courtName === 'Court 3' && slot.date + ' ' + slot.startTime === soonest, JSON.stringify(slot));
+  ok('a court free sooner wins over a lower-numbered one free later', slot.courtName === 'Court 3' && `${slot.date} ${slot.startTime}` === soonest, JSON.stringify(slot));
 
-  // Three past bookings on the same court, weekday and hour is a rhythm.
+  console.log('\nAND IT LEARNS WHICH COURT THEY LIKE');
+  // Court 3 is the one they book; with courts 2 and 3 both free at the soonest
+  // start it should be named, even though court 2 is the lower number.
+  const db = require('../database/db');
+  db.run('DELETE FROM bookings WHERE court_id = 2 AND date = ? AND start_time = ?', [slot.date, `${String(soonHour).padStart(2, '0')}:00`]);
+  slot = await m.get('/api/bookings/suggest-slot');
+  ok('without a history, the lower-numbered of the two wins', slot.courtName === 'Court 2' && slot.mode === 'open', JSON.stringify(slot));
   for (const n of [-7, -14, -21]) {
-    const r = await a.send('POST', '/api/bookings', { courtId: 3, date: iso(n), startTime: '19:00', durationMinutes: 45, name: 'Mona', playerIds: [1] });
-    ok(`a past booking ${n} days ago is recorded`, r.status === 200, r.text.slice(0, 120));
+    await a.send('POST', '/api/bookings', { courtId: 3, date: iso(n), startTime: '19:00', durationMinutes: 45, name: 'Mona', playerIds: [1] });
   }
   slot = await m.get('/api/bookings/suggest-slot');
-  ok('a usual court, weekday and hour is offered back', slot.mode === 'usual' && slot.courtName === 'Court 3' && slot.startTime === '19:00', JSON.stringify(slot));
-  ok('on the next occurrence of that weekday', new Date(`${slot.date}T00:00:00Z`).getUTCDay() === new Date(`${iso(-7)}T00:00:00Z`).getUTCDay(), slot.date);
-  ok('for the length they usually book', slot.durationMinutes === 45, String(slot.durationMinutes));
-  ok("the other member's history is not theirs", (await a.send('POST', '/api/players/membership', { ids: [3], is_member: true })).status === 200);
+  ok('their usual court takes it instead', slot.courtName === 'Court 3' && slot.mode === 'usual', JSON.stringify(slot));
+  ok('at the same soonest start, not a later one of its own', `${slot.date} ${slot.startTime}` === soonest, JSON.stringify(slot));
+  // Only the court is learned, not the hour or the weekday: those bookings were
+  // at 19:00 on a day three weeks ago, and the offer ignores both.
+  ok('the hour and weekday they used to book are nothing to do with it',
+    [iso(0), iso(1)].includes(slot.date) && slot.startTime !== '19:00', `${slot.date} ${slot.startTime}`);
+  // Taken at that moment, it falls back to the lowest free court rather than
+  // waiting for their own to come free.
+  await at(3, slot.date, soonHour);
+  slot = await m.get('/api/bookings/suggest-slot');
+  ok('when their court is taken, the lowest free one wins', slot.courtName === 'Court 2' && slot.mode === 'open' && `${slot.date} ${slot.startTime}` === soonest, JSON.stringify(slot));
+  // Anna books court 4; the two members are offered different courts at the
+  // same moment, each their own.
+  const anna = client(app);
+  await anna.login('anna@x.invalid', 'pw123');
+  for (const n of [-3, -10]) {
+    await a.send('POST', '/api/bookings', { courtId: 4, date: iso(n), startTime: '08:00', durationMinutes: 45, name: 'Anna', playerIds: [3] });
+  }
+  const hers = await anna.get('/api/bookings/suggest-slot');
+  ok('each member is offered their own court, not the other\'s', hers.courtName === 'Court 4' && slot.courtName === 'Court 2', `${hers.courtName} vs ${slot.courtName}`);
+  ok('at the same soonest start', `${hers.date} ${hers.startTime}` === soonest, JSON.stringify(hers));
 
   console.log('\nBOOKINGS NAME WHO BOOKED THEM');
   await a.send('POST', '/api/bookings', {

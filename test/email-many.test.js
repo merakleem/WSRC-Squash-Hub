@@ -15,7 +15,7 @@ global.fetch = async (url, opts) => {
   return okResponse;
 };
 
-const { sendMany } = require('../lib/email');
+const { sendMany, inviteEmail } = require('../lib/email');
 const file = { filename: 'rules.pdf', content: 'JVBERi0=' };
 
 suite('sending many emails', async ({ ok }) => {
@@ -61,4 +61,16 @@ suite('sending many emails', async ({ ok }) => {
   r = await sendMany([{ to: ['a@x.invalid'], subject: 's', html: 'x', attachments: [file] }], { gapMs: 10 });
   ok('a rate limit that never lifts is reported, not looped forever', r.failed === 1 && /Too many/.test(r.errors[0]), JSON.stringify(r));
 
+  // The invite is the club's first word to someone who has never seen the app,
+  // and three places send it. One body, so they cannot drift apart.
+  console.log('\nTHE INVITE');
+  const inv = inviteEmail('Mona Member', 'https://playwsrc.ca/invite/abc');
+  ok('greets them by name', /<p>Hi Mona Member,<\/p>/.test(inv.html), inv.html);
+  ok('says what Play WSRC is before asking them to join',
+    inv.html.indexOf('member portal') > inv.html.indexOf("You've been invited")
+    && inv.html.indexOf('member portal') < inv.html.indexOf('activate your account'), inv.html);
+  ok('naming what they can do here', /book courts/.test(inv.html) && /club events/.test(inv.html), inv.html);
+  ok('carries the link it was given', inv.html.includes('href="https://playwsrc.ca/invite/abc"'));
+  ok('and still says when it expires', /expires in 72 hours/.test(inv.html));
+  ok('under the subject the three senders share', inv.subject === 'Activate your Play WSRC account', inv.subject);
 });
