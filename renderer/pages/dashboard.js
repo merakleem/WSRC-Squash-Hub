@@ -19,10 +19,22 @@ function timeAgo(utcStr) {
 
 const _roundLabels = { group: 'Group Stage', quarterfinal: 'Quarterfinals', semifinal: 'Semifinals', final: 'Final' };
 
+// A side of a result, shortened. A doubles side is two people, and the feed
+// carries their names already joined - abbreviating that string as if it were
+// one name turned "Anna Lindqvist & Jess Wu" into "A. Wu", so each name is
+// shortened on its own and the pair is rejoined.
+function _activitySide(m, one) {
+  const team = one ? m.team1 : m.team2;
+  if (Array.isArray(team) && team.length) return team.map((p) => abbrevName(p.name)).join(' & ');
+  return String(one ? m.p1_name : m.p2_name || '').split(' & ').map(abbrevName).join(' & ');
+}
+
 function _activityDetails(m, adminMode) {
-  const p1Won = m.winner_id === m.player1_id;
-  const winnerName  = abbrevName(p1Won ? m.p1_name : m.p2_name);
-  const loserName   = abbrevName(p1Won ? m.p2_name : m.p1_name);
+  // won_side, when the feed sends it, already accounts for a substitute having
+  // played; winner_id is the row as it was written.
+  const p1Won = m.won_side != null ? m.won_side === 1 : m.winner_id === m.player1_id;
+  const winnerName  = _activitySide(m, p1Won);
+  const loserName   = _activitySide(m, !p1Won);
   const winnerPos   = p1Won ? m.p1_pos : m.p2_pos;
   const loserPos    = p1Won ? m.p2_pos : m.p1_pos;
   const winnerScore = p1Won ? m.player1_score : m.player2_score;

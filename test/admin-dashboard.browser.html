@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <header class="topbar"><div class="topbar-left"><h1 id="pageTitle"></h1></div><div id="topbarActions"></div></header>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// The admin dashboard's Club Activity column. It has its own renderer, separate
+// from the Club Activity page, and a doubles result has to read as four people
+// rather than as one invented name.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const settle = (ms = 120) => new Promise((r) => setTimeout(r, ms));
+const stamp = (n) => new Date(Date.now() - n * 36e5).toISOString().slice(0, 19).replace('T', ' ');
+
+const SINGLES = {
+  id: 1, source: 'pickup', format: 'singles', confirmed_at: stamp(2),
+  player1_id: 5, player2_id: 6, eff_p1_id: 5, eff_p2_id: 6, won_side: 1, winner_id: 5,
+  p1_name: 'Tom Reyes', p2_name: 'Sam Chen', player1_score: 3, player2_score: 1,
+  p1_pos: 5, p2_pos: 7, places_moved: 2, passed: [{ id: 6, name: 'Sam Chen' }],
+  submitted_by_name: 'Tom Reyes',
+};
+// The feed sends a doubles side as one joined string plus the team arrays.
+const DOUBLES = {
+  id: 2, source: 'league', format: 'doubles', confirmed_at: stamp(20),
+  team1: [{ id: 1, name: 'Anna Lindqvist' }, { id: 2, name: 'Jess Wu' }],
+  team2: [{ id: 3, name: 'Marcus Kane' }, { id: 4, name: 'Ravi Patel' }],
+  player1_id: 1, player2_id: 3, eff_p1_id: 1, eff_p2_id: 3,
+  won_side: 1, winner_id: 1,
+  p1_name: 'Anna Lindqvist & Jess Wu', p2_name: 'Marcus Kane & Ravi Patel',
+  player1_score: 3, player2_score: 2,
+  p1_pos: null, p2_pos: null, places_moved: 0, passed: [],
+  league_name: 'Autumn Doubles', submitted_by_name: 'Anna Lindqvist',
+};
+// A substitute played for the player the row was written against, so won_side
+// is the only honest read of who won.
+const SUBBED = {
+  id: 3, source: 'league', format: 'singles', confirmed_at: stamp(30),
+  player1_id: 8, player2_id: 9, eff_p1_id: 10, eff_p2_id: 9, won_side: 2, winner_id: 8,
+  p1_name: 'Stand In', p2_name: 'Leo Brandt', player1_score: 1, player2_score: 3,
+  p1_pos: null, p2_pos: null, places_moved: 0, passed: [], league_name: 'Box League',
+  submitted_by_name: 'Leo Brandt',
+};
+
+window.api = {
+  getSchedule: async () => ({ courts: [{ id: 1, name: 'Court 1', active: 1 }], slots: [] }),
+  getActivity: async () => [SINGLES, DOUBLES, SUBBED],
+  getVerifiedPlayerCount: async () => ({ count: 3 }),
+};
+window.navigate = () => {};
+window.openPlayerProfile = () => {};
+
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'admin', playerId: null };
+state.players = [{ id: 1, name: 'Anna Lindqvist' }];
+const { renderDashboard } = await import('../renderer/pages/dashboard.js');
+
+try {
+  await renderDashboard(); await settle(200);
+
+  const rows = $$('.dp-activity-item');
+  ok('every result is listed', rows.length === 3, String(rows.length));
+
+  ok('a singles result names both players, shortened, with the places they held',
+    /\(#5\) T\. Reyes beat \(#7\) S\. Chen 3–1/.test(txt(rows[0])), txt(rows[0]));
+  ok('and how far the winner moved', /T\. Reyes moves up 2 places/.test(txt(rows[0])), txt(rows[0]));
+
+  // The bug: abbrevName over a joined pair kept the first initial and the last
+  // word, so two people became "A. Wu".
+  ok('a doubles result names all four, as two pairs',
+    /A\. Lindqvist & J\. Wu beat M\. Kane & R\. Patel/.test(txt(rows[1])), txt(rows[1]));
+  ok('never collapsing a pair into one name', !/A\. Wu/.test(txt(rows[1])), txt(rows[1]));
+  ok('with the score', /3–2/.test(txt(rows[1])), txt(rows[1]));
+  ok('and no ladder movement, a pair having no place to move', !/moves up/.test(txt(rows[1])), txt(rows[1]));
+
+  ok('a match a substitute won is read from the side that won, not the row',
+    /L\. Brandt beat S\. In 3–1/.test(txt(rows[2])), txt(rows[2]));
+
+  ok('an admin is told who submitted each one', $$('.dp-activity-by').length === 3
+    && /Submitted by/.test(txt($('.dp-activity-by'))), txt($('.dp-activity-by')));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED` : '\nALL PASSED';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>
