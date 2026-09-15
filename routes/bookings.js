@@ -3,6 +3,7 @@ const { getDB } = require('../database/db');
 const { clubNow } = require('../lib/clock');
 const bookingModel = require('../models/bookingModel');
 const { hasBookingConflict, createReservation, getReservation, deleteReservation } = require('../lib/reservations');
+const { suggestSlot } = require('../lib/courtSuggestion');
 const { wrap, requireAdmin, requireAuth, requireMember } = require('../middleware');
 
 const router = express.Router();
@@ -77,6 +78,15 @@ router.get('/my-bookings', requireAuth, requireMember, wrap(async (req, res) => 
   // something a booking list should depend on.
   const { date, time } = clubNow();
   res.json(bookingModel.getUpcomingBookingsForPlayer(req.session.playerId, date, time));
+}));
+
+// The one slot the dashboard offers a member: their usual court and hour when
+// the booking history shows one, otherwise the next open court. Members only,
+// like every other booking route - the card does not exist for anyone else.
+router.get('/bookings/suggest-slot', requireAuth, requireMember, wrap(async (req, res) => {
+  const { date, time } = clubNow();
+  const [h, m] = time.split(':').map(Number);
+  res.json(suggestSlot(req.session.playerId, date, h * 60 + m));
 }));
 
 // Only the person who booked a court may change or cancel it. Being on the

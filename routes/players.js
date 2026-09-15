@@ -9,9 +9,18 @@ const seasonModel = require('../models/seasonModel');
 const ladderModel = require('../models/ladderModel');
 const { savePlayerPhoto, deletePlayerPhoto } = require('../lib/photos');
 const tournamentModel = require('../models/tournamentModel');
+const leagueModel = require('../models/leagueModel');
+const { clubToday } = require('../lib/clock');
 const { buildTournamentTiers } = require('../utils/tournamentHelpers');
 
 const router = express.Router();
+
+/** `n` days before an ISO date, as an ISO date. */
+function _daysBefore(iso, n) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
 
 // What a non-admin may see of another player. Contact details, account
 // status and the account flags — who is a member (or tester) is the club's
@@ -126,6 +135,10 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   const seasons = seasonModel.getAllSeasons();
   const ladderStats = ladderModel.getPlayerLadderStats(id);
 
+  // Bye weeks, from a week back so the one running now is always included.
+  // The dashboard needs them to tell "no match this week" from "no league".
+  const byes = leagueModel.getPlayerByeWeeks(id, _daysBefore(clubToday(), 7));
+
   // Division comes from the most recent league the player was entered in; the
   // profile header shows it as part of their identity.
   const division = db.prepare(`
@@ -141,7 +154,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
   res.json({
     ...playerData,
     wins: rec.wins || 0, losses: rec.losses || 0,
-    history, upcoming, accountStatus, tournamentResults, seasons,
+    history, upcoming, accountStatus, tournamentResults, seasons, byes,
     ladder: ladderStats,
     division_name: division?.name || null,
   });

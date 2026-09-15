@@ -1,5 +1,6 @@
-import { state, isAdmin } from '../state.js';
+import { state, isAdmin, isMember } from '../state.js';
 import { esc, toast, modal, formatShortDate, abbrevName, avatarInner, clubNow, clubTodayStr } from '../utils.js';
+import { openMessagePlayerModal } from './players.js';
 
 // ===== DASHBOARD HELPERS =====
 function timeAgo(utcStr) {
@@ -945,13 +946,13 @@ function _courtStatus(court, slots, nowMins) {
 export async function renderDashboard() {
   document.getElementById('pageTitle').textContent = 'Dashboard';
   document.getElementById('topbarActions').innerHTML = '';
-  document.querySelector('.content').classList.add('content--dashboard');
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div class="dashboard-loading">Loading…</div>`;
 
   const user = state.currentUser;
 
   if (!user || user.role === 'admin') {
+    document.querySelector('.content').classList.add('content--dashboard');
     const todayStr = _localDateStr();
     const [scheduleData, activity, verifiedData] = await Promise.all([
       window.api.getSchedule(todayStr),
@@ -1030,266 +1031,628 @@ export async function renderDashboard() {
     return;
   }
 
-  // Player dashboard — fetch data in parallel
+
+  // ===== MEMBER DASHBOARD =====
+  // One column, mobile first. A greeting, one card that answers "what's next
+  // for you", the two things a member does here (report a score, book a
+  // court), their numbers, what is coming up, and what the club has been
+  // doing. Every block reads an endpoint that already existed.
+  await renderMemberDashboard(user, content);
+}
+
+// ===== MEMBER DASHBOARD =====
+
+const MO_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WD_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WD_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const _dhDate = (iso) => new Date(String(iso).slice(0, 10) + 'T12:00:00');
+const _dhFirst = (name) => String(name || '').trim().split(/\s+/)[0] || '';
+/** 'Thu 10 Sep' */
+const _dhShort = (iso) => { const d = _dhDate(iso); return `${WD_SHORT[d.getDay()]} ${d.getDate()} ${MO_SHORT[d.getMonth()]}`; };
+/** 'Wednesday' */
+const _dhWeekday = (iso) => WD_LONG[_dhDate(iso).getDay()];
+const _dhShiftDay = (iso, n) => {
+  const d = new Date(String(iso).slice(0, 10) + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+// The club writes times in 24h everywhere it stores them, and the schedule,
+// the booking grid and the league pages all show them that way; the dashboard
+// does not become the one surface that reads them back differently.
+const _dhTime = (t) => String(t || '').slice(0, 5);
+const _dhList = (names) => {
+  const list = names.filter(Boolean);
+  if (list.length <= 1) return list.join('');
+  return `${list.slice(0, -1).join(', ')} & ${list[list.length - 1]}`;
+};
+
+// ── The one card at the top ───────────────────────────────────────────────────
+
+/**
+ * Which of the six hero states to show, and what it needs. The first match
+ * wins, so exactly one card is ever built.
+ *
+ * The order differs from a plain "score, then next match, then bye" in one
+ * place: a bye in the week running now outranks a fixture in a later one,
+ * because "no match this week" is the answer to what the member is asking.
+ * A fixture *this* week always wins, whatever other leagues say.
+ */
+export function heroState({ reportable = [], upcoming = [], byes = [], ladder = null, ladderSize = 0, gap = '', feed = [], played = false, today }) {
+  // Only a match that has already happened can be waiting on a score; the
+  // reportable list is every unplayed match of theirs, future ones included.
+  // A match with no date cannot be in the future either, so it counts, last.
+  const owed = reportable
+    .filter((m) => !m.scheduled_date || m.scheduled_date < today)
+    .sort((a, b) => String(a.scheduled_date || '9999').localeCompare(String(b.scheduled_date || '9999')));
+  if (owed.length) return { kind: 'report', match: owed[0] };
+
+  const next = upcoming.find((m) => m.week_date && m.week_date >= today) || null;
+  const weekEnd = _dhShiftDay(today, 6);
+  const byeNow = byes.find((b) => b.week_date <= today && _dhShiftDay(b.week_date, 6) >= today) || null;
+  const fixtureThisWeek = next && next.week_date <= weekEnd;
+  if (byeNow && !fixtureThisWeek) return { kind: 'bye', bye: byeNow, next };
+  if (next) return { kind: 'next', match: next };
+
+  if (ladder?.position) return { kind: 'ladder', rank: ladder.position, total: ladderSize, gap };
+  // Nobody has beaten them yet and nobody has: the club is the invitation.
+  if (!played) return { kind: 'newcomer', total: ladderSize };
+  // Everything else - excluded from the ladder, a season that has frozen -
+  // gets the club rather than a blank.
+  return feed.length ? { kind: 'club', result: feed[0] } : { kind: 'newcomer', total: ladderSize };
+}
+
+/**
+ * The line under "Keep climbing": how far the next place is.
+ *
+ * A rated season can say it in points. A positional season has no rating to
+ * subtract, so it says the thing that is true there instead - one win is a
+ * place.
+ */
+export function ladderGapCopy(rows, rank, system) {
+  if (!rank) return '';
+  if (system !== 'elo') return 'One win moves you up.';
+  const me = rows[rank - 1];
+  const above = rows[rank - 2];
+  const below = rows[rank];
+  if (!me || me.rating == null) return 'One win moves you up.';
+  if (rank === 1) {
+    if (!below || below.rating == null) return 'Top of the club.';
+    return `${me.rating - below.rating} points ahead of #2.`;
+  }
+  if (!above || above.rating == null) return 'One win moves you up.';
+  const diff = above.rating - me.rating;
+  if (diff <= 0) return `Level on points with #${rank - 1}.`;
+  return `${diff} points away from #${rank - 1}.`;
+}
+
+// ── On the schedule ───────────────────────────────────────────────────────────
+
+/**
+ * The next six things with the member's name on them, in time order: their
+ * court bookings, their fixtures, and the events they can still join.
+ *
+ * Bookings are only ever fetched for members, and the server already hides
+ * members-only events from everyone else, so a row never has to mention
+ * membership - it is simply not there.
+ */
+export function scheduleRows({ bookings = [], upcoming = [], events = [], today, meId, limit = 6 }) {
+  const rows = [];
+
+  for (const b of bookings) {
+    const others = (b.players || []).filter((p) => p.id !== meId).map((p) => p.name);
+    const mine = b.bookedBy === meId;
+    const byClub = b.bookedBy == null;
+    const sub = mine
+      ? (others.length ? `with ${_dhList(others)}` : 'Solo booking')
+      : byClub
+        ? `Booked by the club${others.length ? ` · with ${_dhList(others)}` : ''}`
+        : `${b.bookerName || 'Another member'} booked · with you`;
+    rows.push({
+      kind: 'booking', id: b.id, date: b.date, time: b.startTime,
+      title: `${b.courtName} · ${_dhTime(b.startTime)} · ${b.durationMinutes} min`,
+      sub,
+      tag: b.typeName ? { name: b.typeName, color: b.typeColor || '#6b7e93' } : null,
+      action: mine ? 'Manage' : 'Details',
+      courtId: b.courtId,
+    });
+  }
+
+  for (const m of upcoming) {
+    if (!m.week_date || m.week_date < today) continue;
+    rows.push({
+      kind: 'match', id: m.id, date: m.week_date, time: m.match_time || '',
+      title: `Your match · ${m.opponent_name || 'TBD'}${m.match_time ? ` · ${_dhTime(m.match_time)}` : ''}`,
+      sub: [m.league_name, m.division_name].filter(Boolean).join(' '),
+      action: 'Details',
+    });
+  }
+
+  for (const e of events) {
+    if (e.event_date < today) continue;
+    const going = !!e.my_signup;
+    const others = Math.max(0, (e.members_count || 0) - 1);
+    rows.push({
+      kind: 'event', id: e.id, date: e.event_date, time: e.start_time || '',
+      title: `${e.name}${e.start_time ? ` · ${_dhTime(e.start_time)}` : ''}`,
+      sub: going
+        ? (others ? `You and ${others} other${others === 1 ? '' : 's'} are going` : "You're going")
+        : e.full ? 'Event is full'
+          : e.spots_left == null ? 'Open to everyone'
+            : `${e.spots_left} spot${e.spots_left === 1 ? '' : 's'} open`,
+      going,
+      joinable: !going && !e.full,
+    });
+  }
+
+  return rows
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.time).localeCompare(String(b.time)))
+    .slice(0, limit);
+}
+
+// ── Around the club ───────────────────────────────────────────────────────────
+
+/**
+ * The club feed: results, each preceded by the ladder move it caused.
+ *
+ * The move is the newer fact, so it sits above its own match. Only rises are
+ * shown - nobody is listed moving down. A rating season has no places to move,
+ * so those rows simply do not arise.
+ */
+export function feedRows(activity, meId, limit = 7) {
+  const out = [];
+  for (const m of activity) {
+    const shaped = _caShape(m);
+    if (shaped.moved > 0) {
+      out.push({ kind: 'move', id: `mv_${shaped.id}`, at: m.confirmed_at, winner: shaped.winners[0], moved: shaped.moved, passed: m.passed || [], meId });
+    }
+    out.push({ kind: 'result', id: shaped.id, at: m.confirmed_at, m: shaped, meId });
+    if (out.length >= limit) break;
+  }
+  return out.slice(0, limit);
+}
+
+/** The member's current run of wins or losses, newest match first. */
+export function streakOf(history) {
+  const played = history.filter((m) => m.result === 'W' || m.result === 'L');
+  if (!played.length) return null;
+  const result = played[0].result;
+  let n = 0;
+  while (n < played.length && played[n].result === result) n++;
+  return { result, n, last: played[0].week_date };
+}
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+
+const DH_ICON = {
+  pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 3v3M16 3v3"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+};
+
+// The hero and the feed own their circles, and colour them by role rather than
+// by name: on the hero the person you are playing, in the feed the winner navy
+// and the loser pale, so a result reads before a single word of it does.
+const _dhAv = (p, cls) => `<span class="${cls}${p?.photo_path ? ' has-photo' : ''}">${avatarInner(p)}</span>`;
+
+// ── Render ────────────────────────────────────────────────────────────────────
+
+async function renderMemberDashboard(user, content) {
   const playerId = user.playerId;
-  const [playerData, ladder, activity, doubles] = await Promise.all([
+  const today = clubTodayStr();
+  const nowMin = clubNow().minutes;
+  const member = isMember();
+
+  const [playerData, ladderData, activity, doubles, reportable, bookings, events, slot] = await Promise.all([
     fetch(`/api/players/${playerId}/history`).then((r) => r.json()),
-    window.api.getLadder(),
-    window.api.getActivity(),
+    window.api.getLadderForSeason().catch(() => null),
+    window.api.getActivity().catch(() => []),
     Promise.resolve().then(() => (window.api.getPlayerDoubles ? window.api.getPlayerDoubles(playerId) : null)).catch(() => null),
+    window.api.getReportable().catch(() => []),
+    member ? window.api.getMyBookings().catch(() => []) : Promise.resolve([]),
+    window.api.getEvents('upcoming').catch(() => []),
+    member ? window.api.getSuggestedSlot().catch(() => null) : Promise.resolve(null),
   ]);
 
-  // Doubles fixtures and results sit beside the singles ones here, tagged, so
-  // the next match is the next match whatever the format. The rank ring and
-  // the season record stay singles, as the profile header does.
+  // Doubles fixtures and results sit beside the singles ones, as they do on the
+  // profile: the next match is the next match whatever the format. The ladder
+  // ring and the singles record stay singles.
   const pairName = (list) => (list || []).map((o) => o.name).join(' & ');
   const dblUpcoming = (doubles?.upcoming || []).map((m) => ({
     id: m.id, week_date: m.week_date, match_time: m.match_time, court_name: m.court_name,
     league_name: m.league_name, division_name: m.division_name, week_number: m.week_number,
     opponent_id: null, opponent_name: pairName(m.opponents), partner_name: m.partner?.name || '', format: 'doubles',
   }));
-  const dblHistory = (doubles?.history || []).map((m) => ({
-    id: m.id, week_date: m.played_at, result: m.result, opponent_id: null, opponent_name: pairName(m.opponents),
-    partner_name: m.partner?.name || '', format: 'doubles', my_score: m.my_score, their_score: m.their_score,
-  }));
   const upcoming = [...(playerData.upcoming || []), ...dblUpcoming]
-    .sort((a, b) => (a.week_date || '').localeCompare(b.week_date || ''));
-  const history = [...(playerData.history || []), ...dblHistory]
-    .sort((a, b) => (b.week_date || '').localeCompare(a.week_date || ''))
-    .slice(0, 8);
-  const dblChip = (m) => (m?.format === 'doubles' ? '<span class="db-dbl-chip">Doubles</span>' : '');
-  const ladderVisible = ladder.filter((p) => !p.exclude_from_ladder);
-  const ladderPos = ladderVisible.findIndex((p) => p.id === playerId);
-  const rank = ladderPos >= 0 ? ladderPos + 1 : null;
-  const totalPlayers = ladderVisible.length;
-  const todayStr = _localDateStr();
-  const nextMatch = upcoming.find((m) => m.week_date >= todayStr) || null;
-  // Season-scoped, because the rank beside these figures is the current season's
-  // and the profile reports the same season by default. A career total here made
-  // one card contradict the other two surfaces.
-  const currentSeason = (playerData.seasons || []).find((s) => s.is_current) || null;
-  const seasonHistory = currentSeason
-    ? (playerData.history || []).filter((m) => m.season_key === currentSeason.key)
-    : (playerData.history || []);
-  const wins = seasonHistory.filter((m) => m.result === 'W').length;
-  const losses = seasonHistory.filter((m) => m.result === 'L').length;
-  const total = wins + losses;
-  const winPct = total > 0 ? Math.round((wins / total) * 100) : 0;
-  const firstName = (playerData.name || '').split(' ')[0];
+    .sort((a, b) => (a.week_date || '').localeCompare(b.week_date || '') || String(a.match_time || '').localeCompare(String(b.match_time || '')));
 
-  const greeting = 'Welcome back';
-  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const rows = ladderData?.rows || [];
+  const system = ladderData?.system || 'leapfrog';
+  const ladder = playerData.ladder || null;
+  const rank = ladder?.position ?? null;
+  const ladderSize = rows.length || ladder?.ladder_size || 0;
+  const gap = ladderGapCopy(rows, rank, system);
 
-  // Update topbar with greeting + date
-  document.getElementById('pageTitle').innerHTML =
-    `<div class="dp-topbar-greeting">${esc(greeting)}, ${esc(firstName)}.</div>` +
-    `<div class="dp-topbar-date">${esc(dateStr)}</div>`;
+  const season = (playerData.seasons || []).find((s) => s.is_current) || null;
+  const inSeason = (key) => !season || key === season.key;
+  const singles = (playerData.history || []).filter((m) => inSeason(m.season_key));
+  const dbl = (doubles?.history || []).filter((m) => inSeason(m.season_key));
+  const sW = singles.filter((m) => m.result === 'W').length;
+  const sL = singles.filter((m) => m.result === 'L').length;
+  const dW = dbl.filter((m) => m.result === 'W').length;
+  const dL = dbl.filter((m) => m.result === 'L').length;
+  // The two records are the season's, as the profile and the ladder report
+  // them. A streak is not a total but a run of form, so it reads the whole
+  // history - a season boundary does not end a run of wins.
+  const streak = streakOf([
+    ...(playerData.history || []).map((m) => ({ result: m.result, week_date: m.week_date })),
+    ...(doubles?.history || []).map((m) => ({ result: m.result, week_date: String(m.played_at || '').slice(0, 10) })),
+  ].sort((a, b) => String(b.week_date).localeCompare(String(a.week_date))));
 
-  function fmtMatchDate(d) {
-    if (!d) return '';
-    const parts = d.split('-').map(Number);
-    return new Date(parts[0], parts[1] - 1, parts[2])
-      .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  }
+  const played = !!(playerData.history || []).length || !!(doubles?.history || []).length;
+  const feed = feedRows(activity, playerId);
+  const hero = heroState({
+    reportable, upcoming, byes: playerData.byes || [], ladder, ladderSize, gap,
+    feed: feed.filter((r) => r.kind === 'result'), played, today,
+  });
 
-  function fmtShortDate(d) {
-    if (!d) return '';
-    const parts = d.slice(0, 10).split('-').map(Number);
-    return new Date(parts[0], parts[1] - 1, parts[2])
-      .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  }
-  // A scheduled match names its weekday: a league can play several days a
-  // week, and the day is what a player needs to know.
-  function fmtUpcomingDate(d) {
-    if (!d) return '';
-    const parts = d.slice(0, 10).split('-').map(Number);
-    return new Date(parts[0], parts[1] - 1, parts[2])
-      .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  }
+  const sched = scheduleRows({ bookings, upcoming, events, today, meId: playerId });
+  const firstName = _dhFirst(playerData.name || user.name);
+  const fresh = playerData.created_at
+    && (Date.now() - new Date(String(playerData.created_at).replace(' ', 'T') + 'Z').getTime()) < 7 * 864e5;
+  const hourNow = Math.floor(nowMin / 60);
+  const greeting = fresh ? `Welcome, ${firstName}`
+    : `Good ${hourNow < 12 ? 'morning' : hourNow < 17 ? 'afternoon' : 'evening'}, ${firstName}`;
+  // "Tuesday 15 September" - the club writes dates day-first, as the league
+  // pages and the print schedules do.
+  const now = new Date();
+  const longDate = `${WD_LONG[now.getDay()]} ${now.getDate()} ${now.toLocaleDateString('en-US', { month: 'long' })}`;
 
-  // Hero card (full-width, card-styled, left/right layout)
-  const heroHTML = (() => {
-    const leagueLabel = ['NEXT MATCH', nextMatch?.league_name || null].filter(Boolean).join(' · ');
-    const pills = nextMatch ? [
-      `<span class="dh-pill">${fmtMatchDate(nextMatch.week_date)}</span>`,
-      nextMatch.match_time ? `<span class="dh-pill">${esc(nextMatch.match_time)}</span>` : '',
-      isAdmin() && (nextMatch.court_name || (nextMatch.schedule_courts && nextMatch.court_number)) ? `<span class="dh-pill">${nextMatch.court_name || `Court ${nextMatch.court_number}`}</span>` : '',
-      nextMatch.division_name ? `<span class="dh-pill">${esc(nextMatch.division_name)}</span>` : '',
-      nextMatch.partner_name ? `<span class="dh-pill">with ${esc(nextMatch.partner_name)}</span>` : '',
-    ].filter(Boolean).join('') : '';
-    const countdownInnerHTML = (() => {
-      if (!nextMatch?.week_date) return '';
-      const base = new Date(nextMatch.week_date + 'T' + (nextMatch.match_time || '12:00') + ':00');
-      const diff = base - new Date();
-      if (diff <= 0) return '<span class="dh-time-now">Today</span>';
-      const days = Math.floor(diff / 86400000);
-      const hrs  = Math.floor((diff % 86400000) / 3600000);
-      const mins = Math.floor((diff % 3600000) / 60000);
-      if (days > 0) return `<span class="dh-tn">${days}</span><span class="dh-tu">d</span>&nbsp;<span class="dh-tn">${hrs}</span><span class="dh-tu">h</span>`;
-      return `<span class="dh-tn">${hrs}</span><span class="dh-tu">h</span>&nbsp;<span class="dh-tn">${mins}</span><span class="dh-tu">m</span>`;
-    })();
-    return `
-      <div class="dh-hero">
-        <div class="dh-hero-bg" style="background-image:url('/assets/WSRC-EXTERIOR-ANGLE.jpg')"></div>
-        <div class="dh-hero-overlay">
-          ${nextMatch ? `
-            <div class="dh-hero-left">
-              <div class="dh-match-label">${esc(leagueLabel)}</div>
-              <div class="dh-matchup" data-match="${nextMatch.id}">${esc(playerData.name)} <span class="dh-vs">vs</span> ${nextMatch.opponent_id ? `<span class="nav-player-link" data-player-id="${nextMatch.opponent_id}">${esc(nextMatch.opponent_name)}</span>` : esc(nextMatch.opponent_name)}${dblChip(nextMatch)}</div>
-              <div class="dh-pills">${pills}</div>
-            </div>
-            ${countdownInnerHTML ? `
-              <div class="dh-hero-right">
-                <div class="dh-time-box">
-                  <div class="dh-time-label">TIME UNTIL MATCH</div>
-                  <div class="dh-time-val">${countdownInnerHTML}</div>
-                </div>
-              </div>
-            ` : ''}
-          ` : `
-            <div class="dh-hero-left">
-              <div class="dh-match-label">NO UPCOMING MATCHES</div>
-              <div class="dh-matchup-empty">Check back when the next season is scheduled.</div>
-            </div>
-          `}
-        </div>
-      </div>`;
-  })();
-
-  // Combined Ranking + Club Ladder bento card
-  const circ = 2 * Math.PI * 44;
-  const ringProgress = (rank !== null && totalPlayers > 1) ? (totalPlayers - rank) / (totalPlayers - 1) : 0;
-  const dashOffset = circ * (1 - ringProgress);
-  const ladderNearby = (() => {
-    if (ladderPos < 0) return [];
-    const start = Math.max(0, ladderPos - 2);
-    const end = Math.min(ladderVisible.length, ladderPos + 3);
-    return ladderVisible.slice(start, end);
-  })();
-  const rankLadderBento = `
-    <div class="db-card db-rank-ladder-card">
-      <div class="db-card-title">Ranking</div>
-      ${rank !== null ? `
-        <div class="db-rank-ring-wrap">
-          <svg class="db-rank-svg" viewBox="0 0 100 100">
-            <circle class="db-ring-track" cx="50" cy="50" r="44" fill="none" stroke-width="8"/>
-            <circle class="db-ring-fill" cx="50" cy="50" r="44" fill="none" stroke-width="8"
-              stroke-dasharray="${circ.toFixed(2)}"
-              stroke-dashoffset="${dashOffset.toFixed(2)}"
-              transform="rotate(-90 50 50)"/>
-          </svg>
-          <div class="db-rank-inner">
-            <div class="db-rank-num">#${rank}</div>
-            <div class="db-rank-of">of ${totalPlayers}</div>
-          </div>
-        </div>
-        <div class="db-card-subtitle">${currentSeason ? esc(currentSeason.name) : 'All time'}</div>
-        <div class="db-rank-stats">
-          <div class="db-stat"><div class="db-stat-val">${wins}</div><div class="db-stat-lbl">Wins</div></div>
-          <div class="db-stat"><div class="db-stat-val">${losses}</div><div class="db-stat-lbl">Losses</div></div>
-          <div class="db-stat"><div class="db-stat-val">${winPct}%</div><div class="db-stat-lbl">Win Rate</div></div>
-        </div>
-      ` : `<div class="db-empty-msg">Play a match to join the ladder</div>`}
-      ${ladderNearby.length > 0 ? `
-        <div class="db-card-divider"></div>
-        <div class="db-card-subtitle">Club Ladder</div>
-        <div class="db-ladder-list">
-          ${ladderNearby.map((p) => {
-            const pos = ladderVisible.indexOf(p) + 1;
-            const isMe = p.id === playerId;
-            return `<div class="db-ladder-row${isMe ? ' db-ladder-me' : ''}">
-              <span class="db-ladder-pos">${pos}</span>
-              <span class="db-ladder-name">${esc(p.name)}</span>
-              ${isMe ? '<span class="db-ladder-you">YOU</span>' : ''}
-            </div>`;
-          }).join('')}
-        </div>
-      ` : ''}
-      <button class="db-card-link" onclick="navigate('ladder')">Full ladder →</button>
-    </div>`;
-
-  // Upcoming bento card
-  const upcomingBento = `
-    <div class="db-card db-upcoming-card">
-      <div class="db-card-title">Scheduled Matches</div>
-      ${upcoming.length === 0
-        ? '<div class="db-empty-msg">No matches scheduled</div>'
-        : `<div class="db-upcoming-rows">
-            ${upcoming.slice(0, 5).map((m) => `
-              <div class="db-upcoming-row">
-                <div class="db-upcoming-date">${fmtUpcomingDate(m.week_date)}</div>
-                <div class="db-upcoming-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}${dblChip(m)}</div>
-                <div class="db-upcoming-time">${m.match_time ? esc(m.match_time) : '—'}</div>
-              </div>`).join('')}
-          </div>
-          <button class="db-card-link" onclick="openPlayerProfile(${playerId})">View all →</button>`
-      }
-    </div>`;
-
-  // Quick actions bento card
-  const quickBento = `
-    <div class="db-card db-quick-card">
-      <div class="db-card-title">Quick Actions <button class="info-bubble" id="btnQuickActionsInfo">i</button></div>
-      <div class="db-quick-list">
-        <button class="db-quick-item" onclick="openPlayerProfile(${playerId})">
-          <svg class="db-quick-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" fill="#5b7cf9"><g transform="translate(-180,-2159)"><g transform="translate(56,160)"><path d="M134,2008.99998 C131.783496,2008.99998 129.980955,2007.20598 129.980955,2004.99998 C129.980955,2002.79398 131.783496,2000.99998 134,2000.99998 C136.216504,2000.99998 138.019045,2002.79398 138.019045,2004.99998 C138.019045,2007.20598 136.216504,2008.99998 134,2008.99998 M137.775893,2009.67298 C139.370449,2008.39598 140.299854,2006.33098 139.958235,2004.06998 C139.561354,2001.44698 137.368965,1999.34798 134.722423,1999.04198 C131.070116,1998.61898 127.971432,2001.44898 127.971432,2004.99998 C127.971432,2006.88998 128.851603,2008.57398 130.224107,2009.67298 C126.852128,2010.93398 124.390463,2013.89498 124.004634,2017.89098 C123.948368,2018.48198 124.411563,2018.99998 125.008391,2018.99998 C125.519814,2018.99998 125.955881,2018.61598 126.001095,2018.10898 C126.404004,2013.64598 129.837274,2010.99998 134,2010.99998 C138.162726,2010.99998 141.595996,2013.64598 141.998905,2018.10898 C142.044119,2018.61598 142.480186,2018.99998 142.991609,2018.99998 C143.588437,2018.99998 144.051632,2018.48198 143.995366,2017.89098 C143.609537,2013.89498 141.147872,2010.93398 137.775893,2009.67298"/></g></g></svg>
-          My Profile
-        </button>
-        <button class="db-quick-item" onclick="navigate('reportScore')">
-          <svg class="db-quick-icon" viewBox="0 0 98.374 98.374" xmlns="http://www.w3.org/2000/svg" fill="#2ec610"><path d="M97.789,23.118l-7.24-7.24c-0.781-0.781-2.047-0.781-2.828,0L50.464,53.133l-13.291-13.29c-0.781-0.781-2.047-0.781-2.828,0l-7.24,7.24c-0.375,0.375-0.586,0.884-0.586,1.414c0,0.53,0.211,1.039,0.586,1.414L49.05,71.854c0.391,0.391,0.902,0.586,1.414,0.586c0.513,0,1.022-0.195,1.414-0.586l45.91-45.908c0.375-0.375,0.586-0.884,0.586-1.414C98.374,24.002,98.164,23.493,97.789,23.118z"/><path d="M73.583,80.979H10V17.395h65.098l8.485-8c0-1.104-0.896-2-2-2H2c-1.104,0-2,0.896-2,2v79.584c0,1.104,0.896,2,2,2h79.584c1.105,0,2-0.896,2-2v-37.88l-10,10.5L73.583,80.979L73.583,80.979z"/></svg>
-          Report score
-        </button>
-      </div>
-    </div>`;
-
-  // Recent results
-  const recentResults = history.slice(0, 4);
-  const resultsHTML = recentResults.length > 0 ? `
-    <div class="db-results-section">
-      <div class="db-section-heading">Recent Results</div>
-      <div class="db-results-row">
-        ${recentResults.map((m) => {
-          const win = m.result === 'W';
-          const scoreStr = m.player_score != null ? `${m.player_score}–${m.opp_score}` : '';
-          return `
-            <div class="db-result-card ${win ? 'db-result-win' : 'db-result-loss'}">
-              <div class="db-result-badge">${win ? 'WIN' : 'LOSS'}</div>
-              <div class="db-result-opp">${m.opponent_id ? `<span class="nav-player-link" data-player-id="${m.opponent_id}">${esc(m.opponent_name)}</span>` : esc(m.opponent_name)}${dblChip(m)}</div>
-              ${scoreStr ? `<div class="db-result-score">${scoreStr}</div>` : ''}
-              <div class="db-result-date">${fmtShortDate(m.week_date)}</div>
-            </div>`;
-        }).join('')}
-      </div>
-    </div>` : '';
+  // The page owns its own header on a phone, so the shared topbar stands down.
+  document.getElementById('pageTitle').textContent = 'Dashboard';
+  document.querySelector('.content').classList.add('content--member-dash');
 
   content.innerHTML = `
-    <div class="dp-wrap">
-      <div class="dp-columns">
-        <div class="dp-main">
-          ${heroHTML}
-          <div class="dp-bento">
-            ${rankLadderBento}
-            ${upcomingBento}
-            ${quickBento}
-          </div>
-          ${resultsHTML}
-        </div>
-        <div class="dp-right">
-          <div class="dp-right-title">Club Activity</div>
-          ${buildActivityHTML(activity, false)}
-        </div>
+    <div class="dh-page">
+      <header class="dh-header">
+        ${_dhAv({ name: playerData.name, photo_path: playerData.photo_path }, 'dh-me')}
+        <img class="dh-logo" src="/assets/logo-blue.png" alt="WSRC">
+        <span class="dh-header-spacer"></span>
+      </header>
+      <div class="dh-greet">
+        <h2 class="dh-greet-line">${esc(greeting)}</h2>
+        <span class="dh-greet-date">${esc(longDate)}</span>
       </div>
+      ${_dhHeroHTML(hero)}
+      <div class="dh-cta-row">
+        ${played || upcoming.length ? _dhReportHTML() : ''}
+        ${member ? _dhCourtHTML(slot, today) : ''}
+      </div>
+      ${played
+    ? _dhStatsHTML({ rank, change: ladder?.rank_change || 0, sW, sL, dW, dL, streak })
+    : '<div class="dh-stats-empty"><span class="dh-stats-empty-tiles"><i></i><i></i><i></i></span>Your ladder spot, record and streak appear here after your first match.</div>'}
+      ${_dhSchedHTML(sched, today)}
+      ${_dhFeedHTML(feed, playerId)}
     </div>`;
 
-  content.querySelectorAll('.nav-player-link').forEach((el) => {
-    el.addEventListener('click', () => window.openPlayerProfile(Number(el.dataset.playerId)));
+  _dhWire(content, playerId, hero, slot);
+}
+
+// ── Hero ──────────────────────────────────────────────────────────────────────
+
+// Every action on the page is one `data-dh` string, read by the single
+// delegated handler at the bottom of this file. Pipe-separated, because a start
+// time carries a colon of its own; a name never goes in it, since a name can
+// carry anything - it travels in `data-dh-name` beside it.
+const _dhBtn = (label, act, primary, name) =>
+  `<button class="dh-btn${primary ? ' dh-btn--primary' : ''}" data-dh="${esc(act)}"${name ? ` data-dh-name="${esc(name)}"` : ''}>${esc(label)}</button>`;
+
+/** The countdown's inside, so the 60-second tick can rewrite just this much. */
+function _dhCountdownHTML(iso, time) {
+  const target = new Date(String(iso).slice(0, 10) + 'T' + (time || '12:00') + ':00');
+  const diff = target - new Date();
+  if (diff <= 0) return { value: '<span class="dh-cd-now">Today</span>', caption: 'MATCH DAY' };
+  const d = Math.floor(diff / 864e5);
+  const h = Math.floor((diff % 864e5) / 36e5);
+  const m = Math.floor((diff % 36e5) / 6e4);
+  const part = (n, u) => `<span class="dh-cd-n">${n}</span><span class="dh-cd-u">${u}</span>`;
+  return {
+    value: d > 0 ? `${part(d, 'd')} ${part(h, 'h')}` : `${part(h, 'h')} ${part(m, 'm')}`,
+    caption: 'TIME UNTIL MATCH',
+  };
+}
+
+function _dhRingHTML(rank, total) {
+  const C = 2 * Math.PI * 42;
+  const progress = total > 1 ? (total - rank) / (total - 1) : 1;
+  return `<span class="dh-ring">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="dh-ring-track" cx="50" cy="50" r="42" fill="none" stroke-width="8"/>
+      <circle class="dh-ring-fill" cx="50" cy="50" r="42" fill="none" stroke-width="8" stroke-linecap="round"
+        stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - progress)).toFixed(1)}"
+        transform="rotate(-90 50 50)"/>
+    </svg>
+    <span class="dh-ring-in"><b>#${rank}</b><i>OF ${total}</i></span>
+  </span>`;
+}
+
+function _dhHeroHTML(hero) {
+  const card = (cls, inner, lead = '') => `<section class="dh-card${cls}"><div class="dh-card-in">${lead}${inner}</div></section>`;
+  const head = (label, title, sub) => `
+    <span class="dh-card-label">${esc(label)}</span>
+    <h3 class="dh-card-title">${title}</h3>
+    ${sub ? `<p class="dh-card-sub">${sub}</p>` : ''}`;
+
+  if (hero.kind === 'report') {
+    const m = hero.match;
+    const opp = { name: m.opponent_name || (m.opponents || []).map((o) => o.name).join(' & '), photo_path: m.opponent_photo };
+    const where = m.type === 'ladder'
+      ? (m.format === 'doubles' ? 'Doubles ladder match' : 'Ladder match')
+      : [m.league_name, m.division_name].filter(Boolean).join(' ');
+    return card(' dh-card--person', `
+      ${head(m.scheduled_date ? `Score to report · ${_dhShort(m.scheduled_date)}` : 'Score to report', esc(opp.name || 'Your match'),
+    `${esc(where || 'Your match')} · no score entered yet`)}
+      <div class="dh-card-btns">
+        ${_dhBtn('Report score', `report|${m.id}`, true)}
+        ${_dhBtn('Match details', `match|${m.id}`)}
+      </div>`, _dhAv(opp, 'dh-face'));
+  }
+
+  if (hero.kind === 'next') {
+    const m = hero.match;
+    const cd = _dhCountdownHTML(m.week_date, m.match_time);
+    const sub = [
+      _dhShort(m.week_date),
+      m.match_time ? _dhTime(m.match_time) : null,
+      [m.league_name, m.division_name].filter(Boolean).join(' ') || null,
+      m.partner_name ? `with ${m.partner_name}` : null,
+    ].filter(Boolean).map(esc).join(' · ');
+    return card('', `
+      ${head(`Next match · ${_dhWeekday(m.week_date)}`, esc(m.opponent_name || 'TBD'), sub)}
+      <div class="dh-countdown" id="dhCountdown" data-date="${esc(m.week_date)}" data-time="${esc(m.match_time || '')}">
+        <span class="dh-cd-val">${cd.value}</span>
+        <span class="dh-cd-cap">${cd.caption}</span>
+      </div>
+      <div class="dh-card-btns">
+        ${_dhBtn('Match details', `match|${m.id}`, true)}
+        ${m.opponent_id ? _dhBtn(`Message ${_dhFirst(m.opponent_name)}`, `msg|${m.opponent_id}`, false, m.opponent_name) : ''}
+      </div>`);
+  }
+
+  if (hero.kind === 'bye') {
+    const n = hero.next;
+    const sub = n
+      ? `Next up · ${esc(n.opponent_name || 'TBD')} · ${esc(_dhShort(n.week_date))}${n.match_time ? ` · ${esc(_dhTime(n.match_time))}` : ''}`
+      : 'Your league picks up again next week.';
+    return card('', `
+      ${head(`Bye this week · ${hero.bye.league_name}`, 'No match this week', sub)}
+      <div class="dh-card-btns">
+        ${_dhBtn('League schedule', `league|${hero.bye.league_id}`, true, hero.bye.league_name)}
+      </div>`);
+  }
+
+  if (hero.kind === 'ladder') {
+    const top = hero.rank === 1;
+    return card(' dh-card--ring', `
+      ${_dhRingHTML(hero.rank, hero.total)}
+      <div class="dh-ring-text">
+        ${head('Ladder', top ? 'Top of the ladder' : 'Keep climbing', esc(hero.gap))}
+      </div>
+      <div class="dh-card-btns">
+        ${_dhBtn('Enter a match', 'pickup', true)}
+        ${_dhBtn('Find a player', 'players')}
+      </div>`);
+  }
+
+  if (hero.kind === 'club') {
+    const r = hero.result.m;
+    const line = `${_dhList(r.winners.map((p) => p.name))} beat ${_dhList(r.losers.map((p) => p.name))} ${r.score}`;
+    return card(' dh-card--club', `
+      ${head(`Around the club · ${timeAgo(hero.result.at)}`, esc(line), esc(r.tag))}
+      <div class="dh-card-btns">${_dhBtn('All activity', 'activity', true)}</div>`);
+  }
+
+  return card(' dh-card--big', `
+    ${head(hero.total ? `Ladder · ${hero.total} members` : 'Ladder', 'Start your climb',
+    'One match is all it takes to get your spot. Everyone here started at the bottom.')}
+    <div class="dh-card-btns">
+      ${_dhBtn('Enter a match', 'pickup', true)}
+      ${_dhBtn('Find a player', 'players')}
+    </div>`);
+}
+
+// ── Report a score, Book a court ──────────────────────────────────────────────
+
+function _dhReportHTML() {
+  return `
+    <button class="dh-report" data-dh="reportScore">
+      <span class="dh-cta-icon">${DH_ICON.pencil}</span>
+      <span class="dh-cta-text">
+        <b>Report a score</b>
+        <i>Ladder or league</i>
+      </span>
+      <span class="dh-cta-go"><span class="dh-go-short">Enter</span><span class="dh-go-long">Enter score</span></span>
+    </button>`;
+}
+
+function _dhCourtHTML(slot, today) {
+  const line = slot
+    ? `${slot.courtName} · ${_dhWhenWord(slot.date, today)}${_dhTime(slot.startTime)}`
+    : 'No open courts today';
+  return `
+    <div class="dh-court">
+      <span class="dh-cta-icon">${DH_ICON.cal}</span>
+      <span class="dh-cta-text">
+        <i class="dh-court-label">Book a court</i>
+        <b>${esc(line)}</b>
+      </span>
+      <button class="dh-cta-go dh-cta-go--navy" data-dh="${esc(slot ? `book|${slot.courtId}|${slot.date}|${slot.startTime}` : 'book')}">${slot
+    ? '<span class="dh-go-short">Book</span><span class="dh-go-long">Book it</span>'
+    : 'Schedule'}</button>
+    </div>`;
+}
+
+/** 'today ' / 'tomorrow ' / 'Thu ' — the word that goes before a time. */
+function _dhWhenWord(date, today) {
+  if (date === today) return 'today ';
+  if (date === _dhShiftDay(today, 1)) return 'tomorrow ';
+  return `${WD_SHORT[_dhDate(date).getDay()]} `;
+}
+
+// ── Numbers ───────────────────────────────────────────────────────────────────
+
+function _dhStatsHTML({ rank, change, sW, sL, dW, dL, streak }) {
+  const move = change > 0 ? `<em class="dh-up">▲ ${change}</em>`
+    : change < 0 ? `<em class="dh-down">▼ ${Math.abs(change)}</em>`
+      : '<em>no change</em>';
+  const played = dW + dL;
+  const streakCap = !streak ? 'none yet'
+    : streak.n > 1 ? `${streak.n} ${streak.result === 'W' ? 'wins' : 'losses'}`
+      : `last ${WD_SHORT[_dhDate(streak.last).getDay()]}`;
+  const tile = (value, caption, label) =>
+    `<div class="dh-stat"><b>${value}</b><span class="dh-stat-cap">${caption}</span><span class="dh-stat-lbl">${esc(label)}</span></div>`;
+  return `<div class="dh-stats">
+    ${tile(rank ? `#${rank}` : '—', rank ? move : '<em>not yet</em>', 'Ladder')}
+    ${tile(`${sW}–${sL}`, '<em>season</em>', 'Singles')}
+    ${tile(played ? `${dW}–${dL}` : '—', played ? '<em>season</em>' : '<em>none yet</em>', 'Doubles')}
+    ${tile(streak ? `${streak.result}${streak.n}` : '—', `<em>${esc(streakCap)}</em>`, 'Streak')}
+  </div>`;
+}
+
+// ── On the schedule ───────────────────────────────────────────────────────────
+
+/** A 15%-alpha fill and a darkened ink from one booking-type colour. */
+function _dhTint(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return { bg: '#eef2ff', fg: '#1e2758' };
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  const dark = [r, g, b].map((c) => Math.round(c * 0.55));
+  return { bg: `rgba(${r},${g},${b},.15)`, fg: `rgb(${dark[0]},${dark[1]},${dark[2]})` };
+}
+
+function _dhSchedHTML(rows, today) {
+  const body = rows.length
+    ? rows.map((r) => {
+      const d = _dhDate(r.date);
+      const tint = r.tag ? _dhTint(r.tag.color) : null;
+      const tag = r.tag
+        ? `<span class="dh-sched-tag" style="background:${tint.bg};color:${tint.fg}">${esc(r.tag.name)}</span>` : '';
+      const right = r.kind === 'event'
+        ? (r.going
+          ? '<span class="dh-sched-going">✓ Going</span>'
+          : r.joinable ? `<button class="dh-sched-join" data-dh="event|${r.id}">Join</button>` : '')
+        : `<button class="dh-sched-act" data-dh="${esc(_dhRowAction(r))}">${esc(r.action)}</button>`;
+      return `<div class="dh-sched-row">
+          <span class="dh-sched-day${r.date === today ? ' dh-sched-day--now' : ''}">
+            <i>${WD_SHORT[d.getDay()].toUpperCase()}</i><b>${d.getDate()}</b>
+          </span>
+          <span class="dh-sched-text">
+            <span class="dh-sched-title">${esc(r.title)}${tag}</span>
+            <span class="dh-sched-sub">${esc(r.sub)}</span>
+          </span>
+          ${right}
+        </div>`;
+    }).join('')
+    : '<p class="dh-sched-empty">Nothing coming up. Events and your matches show here.</p>';
+  return `<section class="dh-sched">
+    <div class="dh-block-head">
+      <h3>On the schedule</h3>
+      <button class="dh-block-link" data-dh="mine">See all</button>
+    </div>
+    ${body}
+  </section>`;
+}
+
+const _dhRowAction = (r) => (r.kind === 'match' ? `match|${r.id}` : `book|${r.courtId}|${r.date}|`);
+
+// ── Around the club ───────────────────────────────────────────────────────────
+
+function _dhFeedHTML(rows, meId) {
+  const head = `<div class="dh-block-head">
+      <h3>Around the club</h3>
+      <button class="dh-block-link" data-dh="activity">All activity</button>
+    </div>`;
+  if (!rows.length) {
+    return `<section class="dh-feed">${head}
+      <p class="dh-sched-empty">No results yet this week.</p>
+    </section>`;
+  }
+  const body = rows.map((r) => {
+    if (r.kind === 'move') {
+      // Full names, because that is who the club knows; a pair is abbreviated
+      // only because two of them plus two more never fit on a phone.
+      const names = r.passed.length
+        ? _dhList(r.passed.map((p) => (p.id === meId ? 'you' : p.name)))
+        : `${r.moved} player${r.moved === 1 ? '' : 's'}`;
+      return `<div class="dh-feed-row dh-feed-row--move">
+          <span class="dh-move-icon">${DH_ICON.up}</span>
+          <span class="dh-feed-text"><b>${esc(r.winner.name)}</b> passes ${esc(names)}</span>
+          <span class="dh-feed-when">${esc(timeAgo(r.at))}</span>
+          <span class="dh-move-n">▲ ${r.moved}</span>
+        </div>`;
+    }
+    const m = r.m;
+    const iLost = m.losers.some((p) => p.id === meId);
+    const pair = m.format === 'doubles';
+    const avs = `<span class="dh-avs${pair ? ' dh-avs--pair' : ''}">${
+      m.winners.map((p) => _dhAv(p, 'dh-av')).join('')
+    }<span class="dh-avs-gap"></span>${
+      m.losers.map((p) => _dhAv(p, 'dh-av dh-av--lost')).join('')
+    }</span>`;
+    const who = (p) => (pair ? abbrevName(p.name) : p.name);
+    const loserText = iLost ? 'you' : _dhList(m.losers.map(who));
+    return `<div class="dh-feed-row" data-match="${m.id}">
+        ${avs}
+        <span class="dh-feed-text">
+          <b>${esc(_dhList(m.winners.map(who)))}</b> beat ${esc(loserText)}${pair ? '<i class="dh-feed-dbl"> · doubles</i>' : ''}
+        </span>
+        <span class="dh-feed-when">${esc(timeAgo(r.at))}</span>
+        <span class="dh-feed-score${iLost ? ' dh-feed-score--lost' : ''}">${esc(m.score)}</span>
+      </div>`;
+  }).join('');
+  return `<section class="dh-feed">${head}${body}</section>`;
+}
+
+// ── Wiring ────────────────────────────────────────────────────────────────────
+
+// One timer for the whole page. Cleared when the dashboard is rebuilt or the
+// element leaves, so navigating away never leaves it running.
+let _dhTick = null;
+
+function _dhWire(content, playerId) {
+  if (_dhTick) clearInterval(_dhTick);
+
+  content.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-dh]');
+    if (!el) return;
+    const [verb, a, b, c] = el.dataset.dh.split('|');
+    const name = el.dataset.dhName || '';
+    switch (verb) {
+      case 'report': window.navigate('reportScore', { matchId: Number(a) }); break;
+      case 'reportScore': window.navigate('reportScore'); break;
+      case 'match': window.openMatchCard(a); break;
+      case 'msg': openMessagePlayerModal(Number(a), name); break;
+      case 'league': window.navigate('leagueDetail', { league: { id: Number(a), name } }); break;
+      case 'pickup': window.openPickupGameModal(); break;
+      case 'players': window.navigate('players'); break;
+      case 'activity': window.navigate('activity'); break;
+      case 'mine': window.openPlayerProfile(playerId); break;
+      case 'event': window.navigate('events', { eventId: Number(a) }); break;
+      case 'book':
+        window.navigate('courtBooking', a
+          ? { booking: { courtId: Number(a), date: b, startTime: c || null } }
+          : {});
+        break;
+      default: break;
+    }
   });
 
-  document.getElementById('btnQuickActionsInfo')?.addEventListener('click', () => {
-    modal.open('Quick Actions', `
-      <div class="info-modal-section">
-        <h4>Report League Match Score</h4>
-        <p>Use this after playing a scheduled league match. It submits the result for your match in the current season.</p>
-      </div>`);
-  });
+  const cd = document.getElementById('dhCountdown');
+  if (!cd) return;
+  _dhTick = setInterval(() => {
+    if (!cd.isConnected) { clearInterval(_dhTick); _dhTick = null; return; }
+    const next = _dhCountdownHTML(cd.dataset.date, cd.dataset.time);
+    cd.querySelector('.dh-cd-val').innerHTML = next.value;
+    cd.querySelector('.dh-cd-cap').textContent = next.caption;
+  }, 60000);
 }

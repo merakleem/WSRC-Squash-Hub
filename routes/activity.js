@@ -11,7 +11,7 @@ router.get('/activity', wrap(async (req, res) => {
   const db = getDB();
 
   const players = db.prepare(`
-    SELECT id, club_locker_rating, exclude_from_ladder
+    SELECT id, name, club_locker_rating, exclude_from_ladder
     FROM players
     WHERE exclude_from_ladder = 0 OR exclude_from_ladder IS NULL
     ORDER BY
@@ -21,6 +21,7 @@ router.get('/activity', wrap(async (req, res) => {
   `).all();
   const ladderPlayerIds = new Set(players.map((p) => p.id));
   const ranking = players.map((p) => p.id);
+  const nameById = new Map(players.map((p) => [p.id, p.name]));
 
   // One query over one table. The feed used to assemble three - league,
   // tournament and ladder - each with its own idea of the match date and of who
@@ -107,6 +108,12 @@ router.get('/activity', wrap(async (req, res) => {
       const day = (match.confirmed_at || '').slice(0, 10);
       const placesWon = (winnerIdx !== -1 && loserIdx !== -1 && winnerIdx > loserIdx)
         ? winnerIdx - loserIdx : 0;
+      // Who the winner went past, in the order they were standing. The feed
+      // names them - "Tom Reyes passes Sam Chen & Ivo Thiessen" - and only the
+      // replay knows, because the ladder has already moved on since.
+      const passed = placesWon
+        ? ranking.slice(loserIdx, winnerIdx).map((pid) => ({ id: pid, name: nameById.get(pid) || '' }))
+        : [];
       activity.push({
         ...match,
         // Positions and "moved up N places" are leapfrog concepts. Under a
@@ -119,6 +126,7 @@ router.get('/activity', wrap(async (req, res) => {
           ? (p2Idx !== -1 ? p2Idx + 1 : null)
           : (eloRanksOn(day)?.get(effP2Id) ?? null),
         places_moved: showPositions ? placesWon : 0,
+        passed: showPositions ? passed : [],
       });
     }
 
@@ -169,7 +177,7 @@ router.get('/activity', wrap(async (req, res) => {
       p1_name: team1.map((p) => p.name).join(' & '),
       p2_name: team2.map((p) => p.name).join(' & '),
       player1_score: m.player1_score, player2_score: m.player2_score,
-      p1_pos: null, p2_pos: null, places_moved: 0,
+      p1_pos: null, p2_pos: null, places_moved: 0, passed: [],
       submitted_by_player_id: m.submitted_by_player_id,
       submitted_by_name: m.submitted_by_name,
       confirmed_at: m.confirmed_at,

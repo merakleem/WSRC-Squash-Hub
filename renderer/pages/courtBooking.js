@@ -227,6 +227,10 @@ export function renderCourtBooking() {
 
 async function _init() {
   const myInstance = _instance;
+  // A slot handed over by another page (the dashboard's Book a court card).
+  // Consumed once: a later visit starts on today's first court as usual.
+  const prefill = state.bookingPrefill;
+  state.bookingPrefill = null;
   try {
     const courts = await window.api.getCourts();
     if (_instance !== myInstance) return;
@@ -235,11 +239,21 @@ async function _init() {
       cb.courtId = cb.courts[0].id;
       cb.mCourt = cb.courts[0].id;
     }
+    const wanted = prefill && cb.courts.some((c) => c.id === Number(prefill.courtId)) ? prefill : null;
+    if (wanted) {
+      cb.date = wanted.date || cb.date;
+      cb.calMonth = cb.date.slice(0, 7);
+      cb.courtId = Number(wanted.courtId);
+      cb.mCourt = cb.courtId;
+    }
     await _loadSchedule(cb.date);
     if (_instance !== myInstance) return;
     _loadMyBookings();
     _render();
     _scrollToNow();
+    // The hold is taken exactly as it would be by tapping the slot here, so
+    // the five-minute clock and the panel behave identically either way.
+    if (wanted?.startTime) _startReservation(timeToMin(wanted.startTime));
 
     cb.refreshInterval = setInterval(async () => {
       if (_instance !== myInstance) { clearInterval(cb.refreshInterval); return; }
