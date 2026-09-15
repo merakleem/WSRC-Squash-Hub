@@ -198,7 +198,7 @@ function _doublesCardHTML(c) {
           ${h.total ? `
             <div class="mc-bar"><span class="mc-bar-fill" style="width:${barPct}%"></span></div>
             <div class="mc-meetings">${meetings}</div>
-          ` : '<div class="mc-h2h-empty"><span class="mc-long">First meeting — these pairs have never played each other.</span><span class="mc-short">First meeting between these pairs.</span></div>'}
+          ` : '<div class="mc-h2h-empty">First meeting. These pairs have never played.</div>'}
         </div>
       </div>
 

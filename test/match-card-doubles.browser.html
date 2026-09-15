@@ -112,7 +112,9 @@ try {
 
   await openMatchCard(2); await settle();
   ok('a scheduled doubles ladder card reads VS with its kicker', txt($('.mc-kicker')) === 'Doubles ladder match' && (mobile ? !$$('.mc-pairrow-games').length : txt($('.mc-centre--doubles .mc-vs')) === 'VS'));
-  ok('first meeting copy for pairs', mobile ? vis($('.mc-h2h-empty .mc-short')) && txt($('.mc-h2h-empty .mc-short')) === 'First meeting between these pairs.' : txt($('.mc-h2h-empty .mc-long')) === 'First meeting — these pairs have never played each other.');
+  // Same sentence shape as the singles card, and no em dash, at either width.
+  ok('first meeting copy for pairs', txt($('.mc-h2h-empty')) === 'First meeting. These pairs have never played.', txt($('.mc-h2h-empty')));
+  ok('with no em dash in it', !txt($('.mc-h2h-empty')).includes('\u2014'), txt($('.mc-h2h-empty')));
   ok('a participant may submit', !!$('#mcSubmit'));
   click($('#mcSubmit')); await settle();
   ok('Submit hands over to Report Score for that match', calls.some((c) => c[0] === 'navigate' && c[1] === 'reportScore' && c[2]?.matchId === 2));

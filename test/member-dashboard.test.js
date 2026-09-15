@@ -37,19 +37,26 @@ suite('the member dashboard\'s server side', async ({ ok, t }) => {
   console.log('THE COURT THE CARD OFFERS');
   ok('a non-member is never offered one', await p.getStatus('/api/bookings/suggest-slot') === '403');
   let slot = await m.get('/api/bookings/suggest-slot');
-  ok('with no history, the lowest free court wins', slot && slot.courtName === 'Court 1' && slot.mode === 'open', JSON.stringify(slot));
+  ok('with nothing booked, the offer is the lowest court', slot && slot.courtName === 'Court 1' && slot.mode === 'open', JSON.stringify(slot));
   ok('and it is today or tomorrow', [iso(0), iso(1)].includes(slot.date), slot.date);
+  const soonest = slot.date + ' ' + slot.startTime;
 
-  // Fill court 1 for both days; the offer should walk up, not sideways in time.
-  const fill = async (courtId, date) => {
-    for (let h = 6; h < 23; h++) {
+  // A court free earlier beats a lower-numbered one free later: the time is
+  // what a member is choosing between, and the court only breaks a tie.
+  const fill = async (courtId, date, fromHour = 6) => {
+    for (let h = fromHour; h < 23; h++) {
       await a.send('POST', '/api/bookings', { courtId, date, startTime: `${String(h).padStart(2, '0')}:00`, durationMinutes: 60, name: 'Club' });
     }
   };
   await fill(1, iso(0));
   await fill(1, iso(1));
   slot = await m.get('/api/bookings/suggest-slot');
-  ok('a full court 1 passes the offer to court 2, not to a later hour', slot.courtName === 'Court 2', JSON.stringify(slot));
+  ok('a full court 1 hands the same start to court 2', slot.courtName === 'Court 2' && slot.date + ' ' + slot.startTime === soonest, JSON.stringify(slot));
+  // Court 2 busy for the next hour, court 3 free throughout: court 3 is sooner.
+  const [sh] = slot.startTime.split(':').map(Number);
+  await a.send('POST', '/api/bookings', { courtId: 2, date: slot.date, startTime: `${String(sh).padStart(2, '0')}:00`, durationMinutes: 60, name: 'Club' });
+  slot = await m.get('/api/bookings/suggest-slot');
+  ok('a court free sooner wins over a lower-numbered one free later', slot.courtName === 'Court 3' && slot.date + ' ' + slot.startTime === soonest, JSON.stringify(slot));
 
   // Three past bookings on the same court, weekday and hour is a rhythm.
   for (const n of [-7, -14, -21]) {

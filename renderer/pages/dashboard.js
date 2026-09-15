@@ -1335,7 +1335,7 @@ async function renderMemberDashboard(user, content) {
       ${_dhFeedHTML(feed, playerId)}
     </div>`;
 
-  _dhWire(content, playerId, hero, slot);
+  _dhWire(content);
 }
 
 // ── Hero ──────────────────────────────────────────────────────────────────────
@@ -1454,7 +1454,7 @@ function _dhHeroHTML(hero) {
 
   return card(' dh-card--big', `
     ${head(hero.total ? `Ladder · ${hero.total} members` : 'Ladder', 'Start your climb',
-    'One match is all it takes to get your spot. Everyone here started at the bottom.')}
+    'One match is all it takes to get your spot.')}
     <div class="dh-card-btns">
       ${_dhBtn('Enter a match', 'pickup', true)}
       ${_dhBtn('Find a player', 'players')}
@@ -1555,10 +1555,7 @@ function _dhSchedHTML(rows, today) {
     }).join('')
     : '<p class="dh-sched-empty">Nothing coming up. Events and your matches show here.</p>';
   return `<section class="dh-sched">
-    <div class="dh-block-head">
-      <h3>On the schedule</h3>
-      <button class="dh-block-link" data-dh="mine">See all</button>
-    </div>
+    <div class="dh-block-head"><h3>On the schedule</h3></div>
     ${body}
   </section>`;
 }
@@ -1619,7 +1616,7 @@ function _dhFeedHTML(rows, meId) {
 // element leaves, so navigating away never leaves it running.
 let _dhTick = null;
 
-function _dhWire(content, playerId) {
+function _dhWire(content) {
   if (_dhTick) clearInterval(_dhTick);
 
   content.addEventListener('click', (e) => {
@@ -1636,7 +1633,6 @@ function _dhWire(content, playerId) {
       case 'pickup': window.openPickupGameModal(); break;
       case 'players': window.navigate('players'); break;
       case 'activity': window.navigate('activity'); break;
-      case 'mine': window.openPlayerProfile(playerId); break;
       case 'event': window.navigate('events', { eventId: Number(a) }); break;
       case 'book':
         window.navigate('courtBooking', a

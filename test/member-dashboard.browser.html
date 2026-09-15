@@ -151,6 +151,8 @@ try {
   ok('doubles too', /1–0/.test(stats[2]), stats[2]);
   ok('and the streak counts the doubles win as the newest', /W3/.test(stats[3]), stats[3]);
 
+  ok('the schedule has no See all: there is no schedule page to go to', !$('.dh-sched .dh-block-link'));
+  ok('but the feed keeps its link to the full one', txt($('.dh-feed .dh-block-link')) === 'All activity');
   const rowsEls = $$('.dh-sched-row');
   ok('six rows: bookings, the fixture and the events, in time order', rowsEls.length === 6, String(rowsEls.length));
   ok('a solo booking says so and offers Manage', /Solo booking/.test(txt(rowsEls[0])) && /Manage/.test(txt(rowsEls[0])), txt(rowsEls[0]));
@@ -200,6 +202,7 @@ try {
   await paint();
   ok('is welcomed rather than greeted', /^Welcome, Priya/.test(txt($('.dh-greet-line'))), txt($('.dh-greet-line')));
   ok('and pushed to start climbing', txt($('.dh-card-title')) === 'Start your climb', txt($('.dh-card-title')));
+  ok('with one sentence, not a pep talk', txt($('.dh-card-sub')) === 'One match is all it takes to get your spot.', txt($('.dh-card-sub')));
   ok('there is nothing to report a score for yet', !$('.dh-report'));
   ok('but a court to book, named for today', /Court 1 · today 18:00/.test(txt($('.dh-court'))), txt($('.dh-court')));
   ok('the numbers are a placeholder, not zeroes', !$('.dh-stats') && /after your first match/.test(txt($('.dh-stats-empty'))), txt($('.dh-stats-empty')));
