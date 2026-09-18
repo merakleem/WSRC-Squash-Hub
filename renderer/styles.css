@@ -10585,12 +10585,384 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
 .pl-public-row svg { width: 16px; height: 16px; color: #b9c4d4; }
 
 @media (max-width: 768px) {
-  .pl-page { padding: 14px 14px 0; }
-  .pl-search { min-width: 160px; }
-  .pl-menu--filter { width: 92vw; max-width: 560px; grid-template-columns: 1fr 1fr; }
-  .pl-bulkbar { width: max-content; max-width: 94vw; flex-wrap: wrap; padding: 8px 10px; bottom: 12px; }
-  .pl-panel { width: 100%; max-width: 100vw; }
-  .pl-fgrid { grid-template-columns: 1fr; }
+  /* ===== PLAYERS PAGE — MOBILE =====
+     Per design_handoff_players_mobile. Same data, filters, sort and copy as
+     the desktop page: the table becomes a list, the dropdowns become bottom
+     sheets, the slide-over becomes a full-screen sheet, and bulk actions get
+     a select mode because there is no room for a checkbox column until you
+     ask for one. */
+
+  .pl-page { gap: 12px; padding: 14px 16px 28px; }
+  .pl-sum-line { font-size: 12.5px; color: var(--text-muted); }
+
+  /* --- toolbar --- */
+  .pl-toolbar { flex-wrap: nowrap; gap: 8px; }
+  .pl-search { flex: 1; min-width: 0; max-width: none; }
+  .pl-search input { height: 40px; border-radius: 10px; }
+  .pl-filter-btn,
+  .pl-sort-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #dce3ed;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .pl-filter-btn svg,
+  .pl-sort-btn svg { width: 17px; height: 17px; }
+  .pl-filter-btn--on { border-color: var(--primary); background: #f1f4ff; color: var(--primary); }
+  .pl-filter-btn .pl-filter-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 9px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pl-filter-anchor { position: relative; }
+
+  /* --- chips + count + select --- */
+  .pl-chiprow { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+  .pl-chiprow[hidden] { display: none; }
+  .pl-chiprow .pl-chips {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .pl-chiprow .pl-chips::-webkit-scrollbar { display: none; }
+  .pl-chiprow .pl-chip { flex-shrink: 0; }
+  .pl-chiprow .pl-shown { white-space: nowrap; font-size: 12.5px; color: var(--text-muted); }
+  .pl-select-btn { font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+  /* --- list --- */
+  /* The desktop table is 1000px of grid; the list is whatever the phone is. */
+  .pl-card { flex: none; overflow: hidden; margin-bottom: 0; }
+  .pl-body { flex: none; min-width: 0; overflow: visible; }
+  .pl-li {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 11px 12px 11px 14px;
+    border-bottom: 1px solid var(--divider);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pl-li:last-child { border-bottom: none; }
+  .pl-li--sel { background: #f1f4ff; }
+  .pl-li-check { display: flex; align-items: center; }
+  .pl-li-check input { width: 20px; height: 20px; accent-color: var(--primary); pointer-events: none; }
+  .pl-body--select .pl-li { grid-template-columns: 22px 38px minmax(0, 1fr) auto; gap: 10px; padding-left: 12px; }
+  .pl-li-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pl-li-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pl-li-meta {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pl-li-excl { color: #b3261e; }
+  .pl-li-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .pl-li-badges .pl-badge { padding: 2px 7px; font-size: 10.5px; white-space: nowrap; }
+
+  /* --- select mode chrome --- */
+  .pl-selbar { display: inline-flex; align-items: center; gap: 14px; }
+  .pl-selbar-n { font-family: 'Barlow', sans-serif; font-size: 16px; font-weight: 600; color: var(--text); }
+  .pl-selecting .pl-body { padding-bottom: 110px; }
+
+  /* --- bulk bar --- */
+  .pl-bulkbar--mobile {
+    left: 12px;
+    right: 12px;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    width: auto;
+    max-width: none;
+    transform: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr 44px;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 14px;
+    box-shadow: 0 14px 40px rgba(20, 30, 60, .35);
+  }
+  .pl-bulkbar--mobile .pl-bulkbar-btn,
+  .pl-bulkbar--mobile .pl-bulkbar-ic {
+    height: 44px;
+    border-radius: 9px;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .pl-bulkbar--mobile .pl-bulkbar-ic svg { width: 18px; height: 18px; }
+
+  /* --- top bar --- */
+  .topbar-actions .btn#plIoBtn,
+  .topbar-actions .btn#plAddBtn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 8px;
+    justify-content: center;
+  }
+  .topbar-actions .btn#plIoBtn .pl-chev { display: none; }
+  .topbar-actions .btn#plIoBtn svg,
+  .topbar-actions .btn#plAddBtn svg { width: 16px; height: 16px; }
+  /* The select bar is the whole bar: its own buttons are the only actions. */
+  .topbar:has(.pl-selbar) .topbar-left { flex: 1; }
+  .topbar:has(.pl-selbar) .topbar-actions .pl-link { font-size: 14px; font-weight: 600; }
+
+  /* ===== BOTTOM SHEETS ===== */
+  /* Above the shell's fixed hamburger (300), as the shared modal already is:
+     scrim 410, sheet 411, full-screen panel 420, its confirm 430, toasts 440.
+     A discard dialog behind the panel it belongs to is unusable. */
+  .pl-sheet-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 30, 60, .4);
+    z-index: 410;
+    animation: pl-fade .12s ease;
+  }
+  .pl-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 411;
+    max-height: 88%;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -12px 40px rgba(20, 30, 60, .2);
+    animation: pl-up .22s ease;
+  }
+  @keyframes pl-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pl-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .pl-sheet-handle {
+    width: 36px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: 2px;
+    background: #dce3ed;
+    flex-shrink: 0;
+  }
+  .pl-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 20px 12px;
+    border-bottom: 1px solid #e7ebf2;
+    flex-shrink: 0;
+  }
+  .pl-sheet-head h2 { margin: 0; font-family: 'Barlow', sans-serif; font-size: 19px; font-weight: 700; color: var(--primary); }
+  .pl-sheet-head .pl-link { font-size: 14px; font-weight: 600; }
+  .pl-sheet-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px calc(10px + env(safe-area-inset-bottom));
+  }
+  .pl-sheet-group { display: flex; flex-direction: column; }
+  .pl-sheet-body .pl-menu-label { padding: 8px 12px 4px; }
+  .pl-sheet-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .pl-sheet-row > span:first-of-type { flex: 1; }
+  .pl-sheet-row input[type="checkbox"],
+  .pl-sheet-row input[type="radio"] { width: 18px; height: 18px; accent-color: var(--primary); flex-shrink: 0; }
+  .pl-sheet-row--on { background: #f7f9ff; }
+  .pl-sheet-row--on > span:first-of-type { font-weight: 600; }
+  .pl-sheet-row[disabled] { opacity: .5; cursor: default; }
+  .pl-sheet-n { font-size: 12.5px; color: #93a2b5; font-variant-numeric: tabular-nums; }
+  .pl-sheet-foot {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e7ebf2;
+    background: #fafbfd;
+    flex-shrink: 0;
+  }
+  .pl-sheet-primary {
+    width: 100%;
+    height: 46px;
+    border: none;
+    border-radius: 12px;
+    background: var(--primary);
+    color: #fff;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* segmented control: sheet direction toggle, and the add panel's tabs */
+  .pl-mseg { display: flex; gap: 0; padding: 3px; border-radius: 10px; background: #eef0f4; }
+  .pl-mseg-b {
+    flex: 1;
+    height: 34px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: #3d4d60;
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .pl-mseg-b--on { background: #fff; font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+  .pl-mseg--sm { border-radius: 8px; }
+  .pl-mseg--sm .pl-mseg-b { height: 28px; font-size: 12.5px; padding: 0 10px; }
+
+  /* ===== FULL-SCREEN PANEL ===== */
+  .pl-panel--sheet {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    z-index: 420;
+    box-shadow: none;
+    animation: pl-up .22s ease;
+  }
+  .pl-confirm { position: fixed; z-index: 430; }
+  .pl-confirm-card { width: auto; max-width: calc(100% - 32px); }
+  .pl-confirm-btns { flex-wrap: wrap; }
+  .pl-confirm-btns .btn { flex: 1 1 140px; justify-content: center; }
+  .pl-toasts { position: fixed; z-index: 440; max-width: calc(100% - 32px); top: calc(12px + env(safe-area-inset-top)); }
+
+  /* The ✕ leads, then the name: space-between would push the title to the far
+     edge, under the hamburger. */
+  .pl-panel--sheet .pl-panel-head {
+    padding: 14px 16px 12px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 12px;
+  }
+  .pl-panel--sheet .pl-panel-head > div { order: 2; flex: 1; min-width: 0; }
+  .pl-panel--sheet .pl-panel-x { order: 1; flex-shrink: 0; width: 36px; height: 36px; }
+  .pl-panel--sheet .pl-panel-sub { display: block; }
+  /* Delete sits at the end of the form on a phone; the footer is the note and
+     the one primary action. */
+  .pl-panel--sheet .pl-panel-foot .pl-panel-del { display: none; }
+  /* The note only has something to say while editing; empty, its flex:1 would
+     take a third of the row away from the two buttons. */
+  .pl-panel--sheet .pl-panel-note:empty { display: none; }
+  .pl-del-row { display: flex; padding-top: 4px; }
+  .pl-del-row .pl-panel-del { padding: 0; font-size: 14px; font-weight: 600; }
+  .pl-panel--sheet .pl-panel-title {
+    font-size: 19px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pl-panel--sheet .pl-tabs { padding: 12px 16px 0; }
+  .pl-panel--sheet .pl-tabs.pl-mseg { margin: 12px 16px 0; padding: 3px; display: flex; align-self: stretch; }
+  .pl-panel--sheet .pl-panel-body { padding: 16px; }
+  .pl-panel--sheet .pl-form { gap: 18px; }
+  .pl-panel--sheet .pl-fgrid { grid-template-columns: 1fr; gap: 14px; }
+  /* Member number and rating keep a row of their own; min-width:0 or a long
+     value pushes the grid wider than the screen. */
+  .pl-panel--sheet .pl-fgrid .pl-field:nth-last-child(2),
+  .pl-panel--sheet .pl-fgrid .pl-field:last-child { grid-column: auto; min-width: 0; }
+  .pl-panel--sheet .pl-fgrid { grid-template-areas: none; }
+  .pl-panel--sheet .pl-field input { height: 44px; border-radius: 10px; font-size: 15px; }
+  .pl-panel--sheet .pl-toggle { min-height: 44px; padding: 12px 14px; }
+  /* The keyboard pushes a fixed footer off-screen, so it sticks inside the
+     scroller instead. The primary keeps the right edge whether or not the note
+     beside it has anything to say. */
+  .pl-panel--sheet .pl-panel-foot {
+    position: sticky;
+    bottom: 0;
+    justify-content: flex-end;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+  .pl-panel--sheet .pl-panel-foot #plPanelCancel { display: none; }
+  .pl-panel--sheet .pl-panel-foot .btn-primary {
+    height: 46px;
+    padding: 0 22px;
+    border-radius: 12px;
+    font-size: 15px;
+  }
+  .pl-panel--sheet .pl-panel-foot .pl-panel-another {
+    flex: 1;
+    height: 46px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+  .pl-panel--sheet .pl-panel-foot .pl-panel-another + .btn-primary { flex: 1; }
+  /* Badge and hint on one line, then the action across the width: side by side
+     the hint wrapped to three lines beside a button. */
+  .pl-panel--sheet .pl-acct-row { flex-wrap: wrap; row-gap: 10px; }
+  .pl-panel--sheet .pl-acct-hint { flex: 1 1 auto; min-width: 0; }
+  .pl-panel--sheet .pl-acct-row .pl-btn-sm { flex: 1 0 100%; height: 40px; }
+  .pl-panel--sheet .pl-acct-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pl-panel--sheet .pl-acct-links .pl-btn-sm { height: 40px; }
+
+  /* paste a list */
+  .pl-paste { display: flex; flex-direction: column; gap: 10px; }
+  .pl-paste-area {
+    min-height: 180px;
+    padding: 12px;
+    border: 1px solid #dce3ed;
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+    width: 100%;
+  }
+  .pl-paste-area:focus { border-color: var(--accent); outline: none; }
+
+  /* import, in one column */
+  .pl-panel--sheet .pl-maprow { grid-template-columns: 1fr; gap: 8px; }
+  .pl-panel--sheet .pl-maprow > svg { display: none; }
+  .pl-panel--sheet .pl-maprow select { height: 44px; width: 100%; }
+  .pl-panel--sheet .pl-stats { grid-template-columns: repeat(3, 1fr); }
+  .pl-panel--sheet .pl-dropzone { padding: 16px; }
+
+  /* body scroll lock while a sheet or a panel is up */
+  body.pl-sheet-open { overflow: hidden; }
 }
 
 /* ===== MESSAGE PLAYERS MODAL (mp-) =====

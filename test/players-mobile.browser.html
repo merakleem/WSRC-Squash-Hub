@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="main-wrapper" style="position:relative;min-height:100vh">
+  <header class="topbar"><div class="topbar-left"><h1 class="topbar-title" id="pageTitle"></h1></div><div class="topbar-actions" id="topbarActions"></div></header>
+  <main class="content" id="mainContent"></main>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// The admin Players page on a phone, per design_handoff_players_mobile: the
+// table is a list, the dropdowns are bottom sheets, the slide-over is a
+// full-screen sheet, and bulk actions live behind a select mode. The desktop
+// pass is test/players-page.browser.html; this one runs at 390.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const check = (el, v) => { el.checked = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
+const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+const z = (el) => Number(getComputedStyle(el).zIndex);
+
+const mk = (id, name, o = {}) => ({
+  id, name, email: o.email ?? `${name.split(' ')[0].toLowerCase()}@x.invalid`, phone: o.phone ?? '(555) 0100',
+  member_number: o.member_number ?? String(1000 + id), club_locker_rating: 'rating' in o ? o.rating : 3.5,
+  is_member: o.is_member ?? 1, exclude_from_ladder: o.excl ?? 0, is_tester: o.tester ?? 0,
+  account_status: o.acct ?? 'verified', photo_path: null, created_at: '2024-03-01 10:00:00',
+});
+let PLAYERS = [
+  mk(1, 'Sofia Duarte'),
+  mk(2, 'Ben Halvorsen', { acct: 'pending', is_member: 0 }),
+  mk(3, 'Grace Odell', { email: '', acct: 'none', rating: null, member_number: '' }),
+  mk(4, 'Arjun Mehta', { excl: 1 }),
+  mk(5, 'Test Tessa', { tester: 1, is_member: 0, acct: 'none' }),
+  mk(6, 'Zoe Kimura', { phone: '', acct: 'none' }),
+];
+const calls = [];
+let nextId = 100;
+window.api = {
+  getPlayers: async () => PLAYERS.map((p) => ({ ...p })),
+  addPlayer: async (d) => { calls.push(['add', d]); const p = mk(nextId++, d.name, {}); Object.assign(p, d, { account_status: 'none' }); PLAYERS.push(p); return p; },
+  updatePlayer: async (d) => { calls.push(['update', d]); return d; },
+  deletePlayer: async (id) => { calls.push(['delete', id]); PLAYERS = PLAYERS.filter((p) => p.id !== id); return { ok: true }; },
+  bulkPatchPlayers: async (d) => { calls.push(['patch', d]); return { changed: d.ids.length }; },
+  bulkSendInvites: async (d) => { calls.push(['invites', d]); return { sent: d.ids.length, skipped: 0, failed: 0 }; },
+  deletePlayerPhoto: async () => ({ ok: true }),
+  getSeasons: async () => [],
+};
+window.navigate = (p) => calls.push(['navigate', p]);
+
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'admin' };
+state.page = 'players';
+const mod = await import('../renderer/pages/players.js');
+
+try {
+  ok('the suite is running at a phone width', window.innerWidth <= 768, String(window.innerWidth));
+
+  log.textContent += '\nTHE LIST\n';
+  await mod.renderPlayers();
+  await settle(80);
+  ok('the table is gone and a list took its place', $$('.pl-li').length === 6 && !$('.pl-row') && !$('#plHead'));
+  ok('the title is one plain word', txt($('#pageTitle')) === 'Players', txt($('#pageTitle')));
+  ok('and the summary moved into the page', /6 players · 4 members · 3 without accounts/.test(txt($('#plSumLine'))), txt($('#plSumLine')));
+  ok('search says the shorter thing', $('#plSearch').placeholder === 'Search players', $('#plSearch').placeholder);
+  const row = $$('.pl-li')[0];
+  ok('a row leads with the name, sorted', /Arjun Mehta/.test(txt(row.querySelector('.pl-li-name'))), txt(row));
+  ok('the second line is the member number and rating', txt(row.querySelector('.pl-li-meta')).startsWith('Member #1004 · 3.50'), txt(row.querySelector('.pl-li-meta')));
+  ok('an excluded player says so, in red', !!row.querySelector('.pl-li-excl'), txt(row.querySelector('.pl-li-meta')));
+  const noNum = $$('.pl-li').find((r) => /Grace/.test(txt(r)));
+  ok('a player with no number or rating reads plainly', txt(noNum.querySelector('.pl-li-meta')) === 'No member number', txt(noNum.querySelector('.pl-li-meta')));
+  ok('the tester keeps their tag', $$('.pl-li').some((r) => r.querySelector('.pl-testtag')));
+  ok('each row stacks an account badge over a membership one', row.querySelectorAll('.pl-li-badges .pl-badge').length === 2, String(row.querySelectorAll('.pl-badge').length));
+  ok('email and phone are not in the rows', !/x\.invalid/.test(txt($('.pl-body'))) && !/555/.test(txt($('.pl-body'))));
+  ok('the count reads All 6', txt($('#plShown')) === 'All 6');
+
+  log.textContent += '\nTHE FILTER SHEET\n';
+  ok('no dropdown is built on a phone', !$('.pl-menu--filter'));
+  click($('#plFilterBtn'));
+  await settle();
+  ok('the filter button opens a sheet', !!$('#plSheet') && !!$('#plSheetScrim'));
+  ok('the primary says how many it would show', txt($('#plSheetDone')) === 'Show 6 players', txt($('#plSheetDone')));
+  ok('every group is listed with its counts', $$('.pl-sheet-group').length === 5 && /Club members\s*4/.test(txt($('.pl-sheet-group'))), txt($('.pl-sheet-group')));
+  check($('[data-filter="member:no"]'), true);
+  await settle();
+  ok('ticking filters at once, and the primary follows', txt($('#plSheetDone')) === 'Show 2 players' && $$('.pl-li').length === 2, txt($('#plSheetDone')));
+  click($('#plSheetDone'));
+  await settle();
+  ok('the primary closes the sheet, keeping the filter', !$('#plSheet') && $$('.pl-li').length === 2);
+  ok('a chip names it', txt($('.pl-chip')).startsWith('Non-members'), txt($('.pl-chip')));
+  ok('and the button wears a count', !$('#plFilterCount').hidden && $('#plFilterCount').textContent === '1');
+  click($('.pl-chip button'));
+  await settle();
+  ok('removing the chip restores the list', $$('.pl-li').length === 6 && !$('.pl-chip'));
+
+  log.textContent += '\nTHE SORT SHEET\n';
+  click($('#plSortBtn'));
+  await settle();
+  ok('sort opens its own sheet', !!$('#plSheet') && /Sort by/.test(txt($('.pl-sheet-head'))));
+  ok('with a direction toggle', $$('.pl-mseg-b').length === 2 && /A→Z/.test(txt($$('.pl-mseg-b')[0])), txt($('.pl-mseg')));
+  ok('and the five keys the table sorts by', $$('.pl-sheet-row').length === 5 && /Rating\s*empty last/.test(txt($$('.pl-sheet-row')[2])), txt($$('.pl-sheet-row')[2]));
+  check($('[data-sortkey="rating"]'), true);
+  await settle();
+  ok('choosing one applies it and closes', !$('#plSheet') && txt($$('.pl-li')[0].querySelector('.pl-li-meta')).includes('3.50'));
+  click($('#plSortBtn'));
+  await settle();
+  ok('the direction labels follow the key', /Low→High/.test(txt($('.pl-mseg'))), txt($('.pl-mseg')));
+  click($('#plSheetScrim'));
+  await settle();
+  ok('a tap on the scrim closes it', !$('#plSheet'));
+
+  log.textContent += '\nIMPORT / EXPORT\n';
+  click($('#plIoBtn'));
+  await settle();
+  ok('the topbar button opens a sheet too', !!$('#plSheet') && /All players\s*6/.test(txt($('.pl-sheet-body'))), txt($('.pl-sheet-body')));
+  ok('with nothing selected, Selected is disabled', $('[data-io="selected"]').disabled);
+  click($('#plSheetScrim'));
+  await settle();
+
+  log.textContent += '\nSELECT MODE\n';
+  click($('#plSelectBtn'));
+  await settle();
+  ok('the top bar becomes the selection bar', !!$('.pl-selbar') && txt($('.pl-selbar-n')) === '0 selected');
+  ok('Import / Export and Add stand down', !$('#plIoBtn') && !$('#plAddBtn'));
+  ok('rows gain a checkbox', $$('.pl-li-check').length === 6);
+  ok('and only the account badge, to make room', $$('.pl-li')[0].querySelectorAll('.pl-badge').length === 1);
+  click($$('.pl-li')[0]);
+  await settle();
+  ok('a tap now selects instead of opening', txt($('.pl-selbar-n')) === '1 selected' && !$('.pl-panel'));
+  ok('the bulk bar appears, pinned', !!$('#plBulkBar') && $('#plBulkBar').classList.contains('pl-bulkbar--mobile'));
+  ok('offering invites, edit and delete', /Send invites/.test(txt($('#plBulkBar'))) && /Edit fields/.test(txt($('#plBulkBar'))) && !!$('#plBulkDelete'));
+  click($('#plSelAll'));
+  await settle();
+  ok('select all takes the whole view, and says so', txt($('.pl-selbar-n')) === '6 selected' && txt($('#plSelAll')) === 'Deselect all');
+  type($('#plSearch'), 'sofia');
+  await settle();
+  ok('a search narrows the list but keeps the selection', $$('.pl-li').length === 1 && txt($('.pl-selbar-n')) === '6 selected');
+  type($('#plSearch'), '');
+  await settle();
+  click($('#plSelCancel'));
+  await settle();
+  ok('Cancel leaves select mode and drops the selection', !$('.pl-selbar') && !$('#plBulkBar') && !!$('#plIoBtn'));
+  ok('and the chips row comes back', !$('.pl-chiprow').hasAttribute('hidden'));
+
+  log.textContent += '\nA LONG PRESS IS THE OTHER WAY IN\n';
+  $$('.pl-li')[1].dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [] }));
+  await settle(520);
+  ok('holding a row enters select mode with it picked', !!$('.pl-selbar') && txt($('.pl-selbar-n')) === '1 selected', txt($('#pageTitle')));
+  click($('#plSelCancel'));
+  await settle();
+
+  log.textContent += '\nTHE EDIT SHEET\n';
+  click($$('.pl-li')[0]);
+  await settle(60);
+  const panel = $('.pl-panel');
+  ok('a row opens the panel full screen', !!panel && panel.classList.contains('pl-panel--sheet'));
+  ok('with no scrim, there being nothing behind it', !$('#plScrim'));
+  ok('the ✕ leads and the name follows', $('.pl-panel-head').firstElementChild?.id === 'plPanelX' || getComputedStyle($('#plPanelX')).order === '1');
+  ok('it names the player and when they joined', txt($('.pl-panel-title')) === 'Arjun Mehta' && /Player since 2024/.test(txt($('.pl-panel-sub'))));
+  ok('fields stack in one column', getComputedStyle($('.pl-fgrid')).gridTemplateColumns.split(' ').length === 1, getComputedStyle($('.pl-fgrid')).gridTemplateColumns);
+  ok('Delete sits at the end of the form, not in the footer', !!$('#plFormDelete') && getComputedStyle($('.pl-panel-foot .pl-panel-del')).display === 'none');
+  ok('Save is off until something changes', $('#plPanelPrimary').disabled);
+  type($('input[data-f="phone"]'), '204-555-0000');
+  await settle();
+  ok('an edit wakes it up and says so', !$('#plPanelPrimary').disabled && txt($('#plPanelNote')) === 'Unsaved changes');
+  click($('#plPanelX'));
+  await settle();
+  ok('closing a dirty panel asks first', !!$('#plConfirm') && /Discard changes\?/.test(txt($('#plConfirm'))));
+  // The dialog belongs to the panel, so it has to sit above it.
+  ok('and the question is visible above the panel it guards', z($('#plConfirm')) > z($('.pl-panel')), `${z($('#plConfirm'))} vs ${z($('.pl-panel'))}`);
+  click($('#plConfirmCancel'));
+  await settle();
+  ok('Keep editing leaves the panel open', !$('#plConfirm') && !!$('.pl-panel'));
+  click($('#plPanelX'));
+  await settle();
+  click($('#plConfirmOk'));
+  await settle();
+  ok('Discard closes it', !$('.pl-panel'));
+
+  log.textContent += '\nTHE ADD SHEET\n';
+  click($('#plAddBtn'));
+  await settle(60);
+  ok('add opens as a sheet with three tabs', $('.pl-panel--sheet') && $$('.pl-tabs button').map((b) => txt(b)).join('|') === 'One player|Paste list|Import CSV', $$('.pl-tabs button').map((b) => txt(b)).join('|'));
+  ok('the spreadsheet grid is not offered here', !$('.pl-dgrid'));
+  ok('one player is the tab you land on', $('.pl-mseg-b--on').textContent.trim() === 'One player' && !!$('input[data-f="name"]'));
+  ok('both footer buttons wait for a name', $('#plPanelPrimary').disabled && $('#plPanelAnother').disabled);
+  click($('[data-tab="paste"]'));
+  await settle();
+  ok('Paste list is a textarea, not a grid', !!$('#plPasteArea') && !$('.pl-dgrid'));
+  type($('#plPasteArea'), 'Nina Park, nina@x.invalid\nOmar Diaz, omar@x.invalid, 204-555-0101, 1200, 3.10\n\n');
+  await settle();
+  ok('it counts the lines that carry a name', txt($('#plPasteCount')) === '2 ready to add', txt($('#plPasteCount')));
+  ok('and the primary says what it will do', txt($('#plPanelPrimary')) === 'Add 2 players', txt($('#plPanelPrimary')));
+  click($('#plPanelPrimary'));
+  await settle(120);
+  ok('saving adds every parsed row', calls.filter((c) => c[0] === 'add').length === 2, JSON.stringify(calls.filter((c) => c[0] === 'add').map((c) => c[1].name)));
+  ok('with the columns read in order', calls.find((c) => c[0] === 'add' && c[1].name === 'Omar Diaz')?.[1].member_number === '1200');
+  ok('and the panel closes', !$('.pl-panel'));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

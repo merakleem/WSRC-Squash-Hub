@@ -40,7 +40,26 @@ const pl = {
   selected: new Set(),
   ioOpen: false,
   filterOpen: false,
+  // Mobile only. The table becomes a list, the dropdowns become bottom sheets,
+  // and bulk actions need a mode of their own because there is no room for a
+  // checkbox column until you ask for one.
+  selectMode: false,
+  sheet: null,          // null | 'filter' | 'sort' | 'io'
 };
+
+// The shell's own breakpoint. Layouts that differ in structure rather than in
+// size branch on this; anything CSS can do alone is left to the media query.
+const _mq = window.matchMedia ? window.matchMedia('(max-width: 768px)') : { matches: false, addEventListener() {} };
+const _isMobile = () => _mq.matches;
+_mq.addEventListener('change', () => {
+  if (state.page !== 'players' || !isAdmin()) return;
+  // Sheets and select mode are mobile furniture; a rotation into desktop must
+  // not leave them behind.
+  pl.sheet = null;
+  pl.selectMode = false;
+  _closeSheet();
+  renderPlayers();
+});
 
 // The open slide-over panel, or null. Holds everything the panel needs so a
 // row click from the profile page can open it too.
@@ -218,55 +237,50 @@ export async function renderPlayers() {
 
   // --- admin ---
   content.classList.add('content--flush');
+  const mobile = _isMobile();
   _renderPageTitle();
-  document.getElementById('topbarActions').innerHTML = `
-    <span class="pl-io-anchor" data-menu-root>
-      <button class="btn btn-secondary" id="plIoBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M8 11l4 4 4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
-        Import / Export
-        <svg class="pl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
-      <span id="plIoMenu"></span>
-    </span>
-    <button class="btn btn-primary" id="plAddBtn">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-      Add players
-    </button>`;
+  _renderTopbar();
 
   content.innerHTML = `
     <div class="pl-page">
+      ${mobile ? `<span class="pl-sum-line" id="plSumLine">${esc(_summaryText())}</span>` : ''}
       <div class="pl-toolbar">
         <div class="pl-search">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-          <input id="plSearch" placeholder="Search name, email, phone or member #" autocomplete="off">
+          <input id="plSearch" placeholder="${mobile ? 'Search players' : 'Search name, email, phone or member #'}" autocomplete="off">
           <button id="plSearchClear" class="pl-search-x" hidden aria-label="Clear">&#10005;</button>
         </div>
         <span class="pl-filter-anchor" data-menu-root>
-          <button class="pl-filter-btn" id="plFilterBtn">
+          <button class="pl-filter-btn" id="plFilterBtn" ${mobile ? 'aria-label="Filter"' : ''}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
-            Filter
+            ${mobile ? '' : 'Filter'}
             <span class="pl-filter-count" id="plFilterCount" hidden></span>
           </button>
           <span id="plFilterMenu"></span>
         </span>
-        <span class="pl-chips" id="plChips"></span>
-        <span class="pl-shown" id="plShown"></span>
+        ${mobile ? `
+          <button class="pl-sort-btn" id="plSortBtn" aria-label="Sort">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>
+          </button>` : ''}
+        ${mobile ? '' : '<span class="pl-chips" id="plChips"></span><span class="pl-shown" id="plShown"></span>'}
       </div>
+      ${mobile ? `
+        <div class="pl-chiprow">
+          <span class="pl-chips" id="plChips"></span>
+          <span class="pl-shown" id="plShown"></span>
+          <button class="pl-link pl-select-btn" id="plSelectBtn">Select</button>
+        </div>` : ''}
       <div class="pl-card">
-        <div class="pl-grid pl-grid--head" id="plHead"></div>
+        ${mobile ? '' : '<div class="pl-grid pl-grid--head" id="plHead"></div>'}
         <div class="pl-body" id="plBody"></div>
       </div>
     </div>`;
 
-  document.getElementById('plIoBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    pl.ioOpen = !pl.ioOpen;
-    pl.filterOpen = false;
-    _renderMenus();
-  });
-  document.getElementById('plAddBtn').addEventListener('click', () => _openPanel('add'));
+  document.getElementById('plSortBtn')?.addEventListener('click', () => _openSheet('sort'));
+  document.getElementById('plSelectBtn')?.addEventListener('click', () => _setSelectMode(true));
   document.getElementById('plFilterBtn').addEventListener('click', (e) => {
     e.stopPropagation();
+    if (_isMobile()) return _openSheet('filter');
     pl.filterOpen = !pl.filterOpen;
     pl.ioOpen = false;
     _renderMenus();
@@ -289,11 +303,89 @@ export async function renderPlayers() {
   _renderTable();
 }
 
-function _renderPageTitle() {
+function _summaryText() {
   const members = state.players.filter((p) => p.is_member).length;
   const noAcct = state.players.filter((p) => p.account_status === 'none').length;
-  document.getElementById('pageTitle').innerHTML =
-    `Players <span class="pl-sum">${state.players.length} players &middot; ${members} members &middot; ${noAcct} without accounts</span>`;
+  return `${state.players.length} players \u00b7 ${members} members \u00b7 ${noAcct} without accounts`;
+}
+
+function _renderPageTitle() {
+  const title = document.getElementById('pageTitle');
+  if (!title) return;
+  // On a phone the summary moves into the page, under the toolbar: the topbar
+  // is 56px and has the hamburger to clear, so the title stays one plain word.
+  if (_isMobile()) {
+    if (pl.selectMode) return;   // the select bar owns the topbar
+    title.textContent = 'Players';
+    const line = document.getElementById('plSumLine');
+    if (line) line.textContent = _summaryText();
+    return;
+  }
+  title.innerHTML = `Players <span class="pl-sum">${esc(_summaryText())}</span>`;
+}
+
+const IO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M8 11l4 4 4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>';
+const PLUS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>';
+
+/**
+ * The top bar's right-hand side, and on a phone the whole bar while selecting.
+ *
+ * Select mode takes the bar over because the actions it offers are about the
+ * selection, not the page: Cancel, how many are picked, and select-all.
+ */
+function _renderTopbar() {
+  const actions = document.getElementById('topbarActions');
+  const title = document.getElementById('pageTitle');
+  if (!actions || !title) return;
+
+  if (_isMobile() && pl.selectMode) {
+    const shown = _filtered();
+    const allOn = shown.length > 0 && shown.every((p) => pl.selected.has(p.id));
+    title.innerHTML = `
+      <span class="pl-selbar">
+        <button class="pl-link" id="plSelCancel">Cancel</button>
+        <span class="pl-selbar-n">${pl.selected.size} selected</span>
+      </span>`;
+    actions.innerHTML = `<button class="pl-link" id="plSelAll">${allOn ? 'Deselect all' : 'Select all'}</button>`;
+    document.getElementById('plSelCancel').addEventListener('click', () => _setSelectMode(false));
+    document.getElementById('plSelAll').addEventListener('click', () => {
+      shown.forEach((p) => { if (allOn) pl.selected.delete(p.id); else pl.selected.add(p.id); });
+      _renderTable();
+    });
+    return;
+  }
+
+  actions.innerHTML = `
+    <span class="pl-io-anchor" data-menu-root>
+      <button class="btn btn-secondary" id="plIoBtn" aria-label="Import or export">
+        ${IO_ICON}
+        <span>Import / Export</span>
+        <svg class="pl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <span id="plIoMenu"></span>
+    </span>
+    <button class="btn btn-primary" id="plAddBtn" aria-label="Add players">
+      ${PLUS_ICON}
+      <span>Add players</span>
+    </button>`;
+  document.getElementById('plIoBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (_isMobile()) return _openSheet('io');
+    pl.ioOpen = !pl.ioOpen;
+    pl.filterOpen = false;
+    _renderMenus();
+  });
+  document.getElementById('plAddBtn').addEventListener('click', () => _openPanel('add'));
+}
+
+/** Enter or leave select mode. Leaving always drops the selection. */
+function _setSelectMode(on) {
+  pl.selectMode = on;
+  if (!on) pl.selected.clear();
+  document.body.classList.toggle('pl-selecting', on);
+  _renderPageTitle();
+  _renderTopbar();
+  _renderTable();
 }
 
 function _renderMenus() {
@@ -352,21 +444,209 @@ function _renderMenus() {
     }
   }
 
-  const btn = document.getElementById('plFilterBtn');
-  if (btn) {
-    btn.classList.toggle('pl-filter-btn--on', pl.filters.length > 0);
-    const count = document.getElementById('plFilterCount');
-    count.hidden = !pl.filters.length;
-    count.textContent = pl.filters.length;
-  }
+  _renderFilterBtn();
 }
 
+/**
+ * The filter button's own state: lit, and wearing how many are on.
+ *
+ * Its own function because only the desktop draws a dropdown, and the count
+ * belongs to the button either way.
+ */
+function _renderFilterBtn() {
+  const btn = document.getElementById('plFilterBtn');
+  if (!btn) return;
+  btn.classList.toggle('pl-filter-btn--on', pl.filters.length > 0);
+  const count = document.getElementById('plFilterCount');
+  if (!count) return;
+  count.hidden = !pl.filters.length;
+  count.textContent = pl.filters.length;
+}
+
+// ===== BOTTOM SHEETS (mobile) =====
+// Filter, sort and import/export are dropdowns anchored to their button on a
+// desktop; on a phone there is nowhere to anchor them, so each becomes a sheet
+// over a scrim. One shell, three bodies.
+
+const SORT_OPTIONS = [
+  ['name', 'Name', '', ['A\u2192Z', 'Z\u2192A']],
+  ['email', 'Email', 'empty last', ['A\u2192Z', 'Z\u2192A']],
+  ['rating', 'Rating', 'empty last', ['Low\u2192High', 'High\u2192Low']],
+  ['member', 'Membership', 'members first', ['First', 'Last']],
+  ['account', 'Account', 'verified first', ['First', 'Last']],
+];
+
+function _openSheet(kind) {
+  _closeSheet();
+  pl.sheet = kind;
+  pl.ioOpen = false;
+  pl.filterOpen = false;
+  document.body.classList.add('pl-sheet-open');
+
+  const scrim = document.createElement('div');
+  scrim.className = 'pl-sheet-scrim';
+  scrim.id = 'plSheetScrim';
+  scrim.addEventListener('click', _closeSheet);
+
+  const sheet = document.createElement('div');
+  sheet.className = 'pl-sheet';
+  sheet.id = 'plSheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+
+  _wrapper().appendChild(scrim);
+  _wrapper().appendChild(sheet);
+  _renderSheet();
+
+  // Swipe down to dismiss, which is what the handle invites.
+  let y0 = null;
+  sheet.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+  sheet.addEventListener('touchend', (e) => {
+    if (y0 == null) return;
+    const dy = e.changedTouches[0].clientY - y0;
+    y0 = null;
+    if (dy > 70 && sheet.scrollTop <= 0) _closeSheet();
+  }, { passive: true });
+}
+
+function _closeSheet() {
+  document.getElementById('plSheetScrim')?.remove();
+  document.getElementById('plSheet')?.remove();
+  document.body.classList.remove('pl-sheet-open');
+  pl.sheet = null;
+}
+
+function _renderSheet() {
+  const sheet = document.getElementById('plSheet');
+  if (!sheet || !pl.sheet) return;
+  const handle = '<span class="pl-sheet-handle"></span>';
+
+  if (pl.sheet === 'filter') {
+    const q = pl.query.trim().toLowerCase();
+    const base = state.players.filter((p) => _matchesQuery(p, q));
+    const countFor = (k, v) => base.filter((p) => _passes(p, pl.filters.filter((f) => !f.startsWith(k + ':'))) && _test(p, k, v)).length;
+    const n = _filtered().length;
+    sheet.innerHTML = `
+      ${handle}
+      <div class="pl-sheet-head">
+        <h2>Filter</h2>
+        <button class="pl-link" id="plSheetClear">Clear all</button>
+      </div>
+      <div class="pl-sheet-body">
+        ${FILTER_GROUPS.map((g) => `
+          <div class="pl-sheet-group">
+            <span class="pl-menu-label">${g.label}</span>
+            ${g.options.map(([v, l]) => {
+    const id = `${g.key}:${v}`;
+    return `<label class="pl-sheet-row"><input type="checkbox" data-filter="${id}" ${pl.filters.includes(id) ? 'checked' : ''}><span>${l}</span><span class="pl-sheet-n">${countFor(g.key, v)}</span></label>`;
+  }).join('')}
+          </div>`).join('')}
+      </div>
+      <div class="pl-sheet-foot">
+        <button class="pl-sheet-primary" id="plSheetDone">Show ${n} player${n === 1 ? '' : 's'}</button>
+      </div>`;
+    sheet.querySelectorAll('[data-filter]').forEach((cb) => cb.addEventListener('change', () => {
+      const id = cb.dataset.filter;
+      pl.filters = pl.filters.includes(id) ? pl.filters.filter((f) => f !== id) : [...pl.filters, id];
+      _renderTable();
+      _renderSheet();
+    }));
+    document.getElementById('plSheetClear').addEventListener('click', () => { pl.filters = []; _renderTable(); _renderSheet(); });
+    document.getElementById('plSheetDone').addEventListener('click', _closeSheet);
+    return;
+  }
+
+  if (pl.sheet === 'sort') {
+    const opt = SORT_OPTIONS.find(([k]) => k === pl.sort.key) || SORT_OPTIONS[0];
+    const [asc, desc] = opt[3];
+    sheet.innerHTML = `
+      ${handle}
+      <div class="pl-sheet-head">
+        <h2>Sort by</h2>
+        <span class="pl-mseg pl-mseg--sm">
+          <button class="pl-mseg-b${pl.sort.dir === 1 ? ' pl-mseg-b--on' : ''}" data-dir="1">${asc}</button>
+          <button class="pl-mseg-b${pl.sort.dir === -1 ? ' pl-mseg-b--on' : ''}" data-dir="-1">${desc}</button>
+        </span>
+      </div>
+      <div class="pl-sheet-body">
+        ${SORT_OPTIONS.map(([k, label, hint]) => `
+          <label class="pl-sheet-row${pl.sort.key === k ? ' pl-sheet-row--on' : ''}">
+            <input type="radio" name="plSort" data-sortkey="${k}" ${pl.sort.key === k ? 'checked' : ''}>
+            <span>${label}</span>
+            <span class="pl-sheet-n">${hint}</span>
+          </label>`).join('')}
+      </div>`;
+    sheet.querySelectorAll('[data-dir]').forEach((b) => b.addEventListener('click', () => {
+      pl.sort = { ...pl.sort, dir: Number(b.dataset.dir) };
+      _renderTable();
+      _renderSheet();
+    }));
+    sheet.querySelectorAll('[data-sortkey]').forEach((r) => r.addEventListener('change', () => {
+      pl.sort = { key: r.dataset.sortkey, dir: pl.sort.dir };
+      _renderTable();
+      _closeSheet();
+    }));
+    return;
+  }
+
+  // import / export
+  sheet.innerHTML = `
+    ${handle}
+    <div class="pl-sheet-body">
+      <span class="pl-menu-label">Export CSV &middot; all fields</span>
+      <button class="pl-sheet-row" data-io="all"><span>All players</span><span class="pl-sheet-n">${state.players.length}</span></button>
+      <button class="pl-sheet-row" data-io="view"><span>Current view</span><span class="pl-sheet-n">${_filtered().length}</span></button>
+      <button class="pl-sheet-row" data-io="selected" ${pl.selected.size ? '' : 'disabled'}><span>Selected</span><span class="pl-sheet-n">${pl.selected.size}</span></button>
+      <div class="pl-menu-rule"></div>
+      <button class="pl-sheet-row" data-io="import"><span class="pl-menu-ic">${IO_ICON}Import from CSV&hellip;</span></button>
+    </div>`;
+  sheet.querySelectorAll('[data-io]').forEach((b) => b.addEventListener('click', () => {
+    const kind = b.dataset.io;
+    _closeSheet();
+    if (kind === 'import') return _openPanel('add', { tab: 'import' });
+    const list = kind === 'all' ? state.players : kind === 'view' ? _filtered() : state.players.filter((p) => pl.selected.has(p.id));
+    _exportCsv(list, kind === 'all' ? 'all' : kind === 'view' ? 'view' : 'selected');
+  }));
+}
+
+/** One list row on a phone. The table's eight columns become two lines. */
+function _mobileRowHTML(p) {
+  const a = _acct(p);
+  const bits = [p.member_number ? `Member #${esc(p.member_number)}` : 'No member number'];
+  if (p.club_locker_rating != null) bits.push(Number(p.club_locker_rating).toFixed(2));
+  const meta = bits.join(' \u00b7 ') + (p.exclude_from_ladder ? ' <span class="pl-li-excl">\u00b7 Excluded</span>' : '');
+  return `
+    <div class="pl-li${pl.selected.has(p.id) ? ' pl-li--sel' : ''}" data-id="${p.id}">
+      ${pl.selectMode ? `<span class="pl-li-check"><input type="checkbox" data-check="${p.id}" tabindex="-1" ${pl.selected.has(p.id) ? 'checked' : ''}></span>` : ''}
+      ${_plAvatarHTML(p, 38)}
+      <span class="pl-li-text">
+        <span class="pl-li-name">${esc(p.name)}${p.is_tester ? '<span class="pl-testtag" title="Tester account">TEST</span>' : ''}</span>
+        <span class="pl-li-meta">${meta}</span>
+      </span>
+      <span class="pl-li-badges">
+        <span class="pl-badge ${a.cls}">${a.text}</span>
+        ${pl.selectMode ? '' : `<span class="pl-badge ${p.is_member ? 'pl-badge--green' : 'pl-badge--grey'}">${p.is_member ? 'Member' : 'Non-member'}</span>`}
+      </span>
+    </div>`;
+}
+
+const _emptyHTML = () => `
+  <div class="pl-empty">
+    <span class="pl-empty-t">No players match</span>
+    <span class="pl-empty-s">Try a different search or clear some filters.</span>
+    <button class="btn btn-outline" id="plClearAll">Clear search and filters</button>
+  </div>`;
+
 function _renderTable() {
-  const head = document.getElementById('plHead');
   const body = document.getElementById('plBody');
-  if (!head || !body) return;
+  if (!body) return;
   const shown = _filtered();
   const shownIds = shown.map((p) => p.id);
+
+  if (_isMobile()) return _renderList(body, shown);
+
+  const head = document.getElementById('plHead');
+  if (!head) return;
 
   const th = (key, label) => `
     <button class="pl-th" data-sort="${key}">${label}
@@ -380,11 +660,7 @@ function _renderTable() {
     <span class="pl-th-plain">Ladder</span><span></span>`;
 
   body.innerHTML = shown.length === 0
-    ? `<div class="pl-empty">
-        <span class="pl-empty-t">No players match</span>
-        <span class="pl-empty-s">Try a different search or clear some filters.</span>
-        <button class="btn btn-outline" id="plClearAll">Clear search and filters</button>
-      </div>`
+    ? _emptyHTML()
     : shown.map((p) => {
       const a = _acct(p);
       return `
@@ -407,10 +683,7 @@ function _renderTable() {
         </div>`;
     }).join('');
 
-  const shownEl = document.getElementById('plShown');
-  if (shownEl) shownEl.textContent = shown.length === state.players.length ? `All ${shown.length}` : `${shown.length} of ${state.players.length}`;
-  _renderChips();
-  _renderBulkBar();
+  _afterRender(shown);
 
   head.querySelectorAll('[data-sort]').forEach((b) => b.addEventListener('click', () => {
     const key = b.dataset.sort;
@@ -440,6 +713,19 @@ function _renderTable() {
       if (p) _openPanel('edit', { player: p });
     });
   }
+  _wireClearAll();
+}
+
+/** The count, the chips and the bulk bar, which both layouts share. */
+function _afterRender(shown) {
+  _renderFilterBtn();
+  const shownEl = document.getElementById('plShown');
+  if (shownEl) shownEl.textContent = shown.length === state.players.length ? `All ${shown.length}` : `${shown.length} of ${state.players.length}`;
+  _renderChips();
+  _renderBulkBar();
+}
+
+function _wireClearAll() {
   document.getElementById('plClearAll')?.addEventListener('click', () => {
     pl.query = '';
     pl.filters = [];
@@ -447,6 +733,56 @@ function _renderTable() {
     if (s) { s.value = ''; document.getElementById('plSearchClear').hidden = true; }
     _renderTable();
   });
+}
+
+/**
+ * The phone list. A tap opens the player; in select mode it toggles them
+ * instead, and a long press is the way into select mode without hunting for
+ * the Select button.
+ */
+function _renderList(body, shown) {
+  body.innerHTML = shown.length === 0 ? _emptyHTML() : shown.map(_mobileRowHTML).join('');
+  body.classList.toggle('pl-body--select', pl.selectMode);
+
+  const open = (id) => {
+    const p = state.players.find((x) => x.id === Number(id));
+    if (p) _openPanel('edit', { player: p });
+  };
+  const toggle = (id) => {
+    const n = Number(id);
+    if (pl.selected.has(n)) pl.selected.delete(n); else pl.selected.add(n);
+    _renderTable();
+  };
+
+  body.querySelectorAll('.pl-li').forEach((row) => {
+    const id = row.dataset.id;
+    let timer = null, moved = false;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    row.addEventListener('touchstart', () => {
+      moved = false;
+      timer = setTimeout(() => {
+        timer = null;
+        if (moved || pl.selectMode) return;
+        pl.selected.add(Number(id));
+        _setSelectMode(true);
+      }, 450);
+    }, { passive: true });
+    row.addEventListener('touchmove', () => { moved = true; cancel(); }, { passive: true });
+    row.addEventListener('touchend', cancel, { passive: true });
+    row.addEventListener('click', () => {
+      if (pl.selectMode) toggle(id); else open(id);
+    });
+  });
+
+  _afterRender(shown);
+  _wireClearAll();
+  // The bar's count and its select-all label are read from the selection, so
+  // they are rebuilt here rather than by each thing that changes it.
+  if (pl.selectMode) _renderTopbar();
+  // The chips row and the summary line stand down while selecting: the bar at
+  // the top already says what is going on.
+  document.getElementById('plSumLine')?.toggleAttribute('hidden', pl.selectMode);
+  document.querySelector('.pl-chiprow')?.toggleAttribute('hidden', pl.selectMode);
 }
 
 function _renderChips() {
@@ -468,21 +804,29 @@ function _renderChips() {
 function _renderBulkBar() {
   document.getElementById('plBulkBar')?.remove();
   if (!pl.selected.size || state.page !== 'players') return;
+  const mobile = _isMobile();
   const bar = document.createElement('div');
   bar.id = 'plBulkBar';
-  bar.className = 'pl-bulkbar';
-  bar.innerHTML = `
+  bar.className = `pl-bulkbar${mobile ? ' pl-bulkbar--mobile' : ''}`;
+  const trash = `
+    <button class="pl-bulkbar-ic pl-bulkbar-ic--danger" id="plBulkDelete" title="Delete selected" aria-label="Delete selected">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+    </button>`;
+  // On a phone the count and the clear button live in the top bar instead, so
+  // the bar itself is just the three actions.
+  bar.innerHTML = mobile ? `
+    <button class="pl-bulkbar-btn" id="plBulkInvite">Send invites</button>
+    <button class="pl-bulkbar-btn pl-bulkbar-btn--accent" id="plBulkEdit">Edit fields&hellip;</button>
+    ${trash}` : `
     <span class="pl-bulkbar-n">${pl.selected.size} selected</span>
     <span class="pl-bulkbar-rule"></span>
     <button class="pl-bulkbar-btn" id="plBulkInvite">Send invites</button>
     <button class="pl-bulkbar-btn pl-bulkbar-btn--accent" id="plBulkEdit">Edit fields&hellip;</button>
-    <button class="pl-bulkbar-ic pl-bulkbar-ic--danger" id="plBulkDelete" title="Delete selected">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
-    </button>
+    ${trash}
     <button class="pl-bulkbar-ic" id="plBulkClear" title="Clear selection">&#10005;</button>`;
   _wrapper().appendChild(bar);
 
-  document.getElementById('plBulkClear').addEventListener('click', () => { pl.selected.clear(); _renderTable(); });
+  document.getElementById('plBulkClear')?.addEventListener('click', () => { pl.selected.clear(); _renderTable(); });
   document.getElementById('plBulkEdit').addEventListener('click', () => _openPanel('bulk'));
   document.getElementById('plBulkDelete').addEventListener('click', () => {
     const ids = [...pl.selected];
@@ -496,7 +840,7 @@ function _renderBulkBar() {
         for (const id of ids) {
           try { await window.api.deletePlayer(id); } catch (_) { failed++; }
         }
-        pl.selected.clear();
+        _setSelectMode(false);
         await _refreshPlayers();
         _plToast(failed ? `Deleted ${ids.length - failed}, ${failed} failed` : `${ids.length} player${ids.length === 1 ? '' : 's'} deleted`, failed ? 'err' : 'ok');
       },
@@ -506,7 +850,7 @@ function _renderBulkBar() {
     const ids = [...pl.selected];
     try {
       const { sent, skipped, failed } = await window.api.bulkSendInvites({ ids });
-      pl.selected.clear();
+      _setSelectMode(false);
       await _refreshPlayers();
       let msg = `${sent} invite${sent === 1 ? '' : 's'} sent`;
       if (skipped) msg += ` · ${skipped} skipped (no email or already verified)`;
@@ -646,6 +990,7 @@ function _openPanel(mode, opts = {}) {
     form: _formFor(mode === 'edit' ? opts.player : _blankDraft()),
     drafts: Array.from({ length: 5 }, _blankDraft),
     pasteOpen: false,
+    pasteText: '',
     imp: null,
     bulk: mode === 'bulk' ? {
       mode: 'all',
@@ -654,21 +999,27 @@ function _openPanel(mode, opts = {}) {
     } : null,
   };
   const wrap = _wrapper();
-  const scrim = document.createElement('div');
-  scrim.id = 'plScrim';
-  scrim.className = 'pl-scrim';
-  scrim.addEventListener('click', () => {
-    const aside = document.getElementById('plPanel');
-    if (!aside) return;
-    aside.classList.remove('pl-panel--nudge');
-    void aside.offsetWidth;
-    aside.classList.add('pl-panel--nudge');
-    setTimeout(() => aside.classList.remove('pl-panel--nudge'), 150);
-  });
+  const mobile = _isMobile();
+  // A phone panel is the whole screen, so there is no scrim to click and
+  // nothing to nudge: only the ✕ closes it, and a dirty panel still asks.
+  if (!mobile) {
+    const scrim = document.createElement('div');
+    scrim.id = 'plScrim';
+    scrim.className = 'pl-scrim';
+    scrim.addEventListener('click', () => {
+      const aside = document.getElementById('plPanel');
+      if (!aside) return;
+      aside.classList.remove('pl-panel--nudge');
+      void aside.offsetWidth;
+      aside.classList.add('pl-panel--nudge');
+      setTimeout(() => aside.classList.remove('pl-panel--nudge'), 150);
+    });
+    wrap.appendChild(scrim);
+  }
   const aside = document.createElement('aside');
   aside.id = 'plPanel';
-  aside.className = 'pl-panel';
-  wrap.appendChild(scrim);
+  aside.className = `pl-panel${mobile ? ' pl-panel--sheet' : ''}`;
+  document.body.classList.toggle('pl-sheet-open', mobile);
   wrap.appendChild(aside);
   _renderPanel();
 }
@@ -676,6 +1027,7 @@ function _openPanel(mode, opts = {}) {
 function _closePanel(silent = false) {
   document.getElementById('plScrim')?.remove();
   document.getElementById('plPanel')?.remove();
+  if (!document.getElementById('plSheet')) document.body.classList.remove('pl-sheet-open');
   _panel = null;
   if (!silent) _renderBulkBar();
 }
@@ -706,6 +1058,17 @@ function _updatePanelFooter() {
   const primary = document.getElementById('plPanelPrimary');
   if (!primary) return;
   if (_panel.mode === 'edit') primary.disabled = !_panel.dirty;
+  if (_panel.mode === 'add' && _panel.tab === 'one' && _isMobile()) {
+    const named = !!String(_panel.form.name).trim();
+    primary.disabled = !named;
+    const another = document.getElementById('plPanelAnother');
+    if (another) another.disabled = !named;
+  }
+  if (_panel.mode === 'add' && _panel.tab === 'paste') {
+    const n = _pasteRows().length;
+    primary.disabled = !n;
+    primary.textContent = n ? `Add ${n} player${n === 1 ? '' : 's'}` : 'Add players';
+  }
   if (_panel.mode === 'add' && _panel.tab === 'several') {
     const n = _panel.drafts.filter((d) => d.name.trim()).length;
     primary.disabled = !n;
@@ -730,10 +1093,14 @@ function _panelChrome() {
     primaryLabel = 'Save changes';
   } else if (p.mode === 'add') {
     title = 'Add players';
-    sub = p.tab === 'one' ? 'Every field the profile has; only the name is required.'
+    sub = _isMobile() ? 'Only the name is required.'
+      : p.tab === 'one' ? 'Every field the profile has; only the name is required.'
       : p.tab === 'several' ? 'Type or paste a batch. Everyone is added at once.'
       : 'Bring in a list from a spreadsheet or another system.';
-    primaryLabel = p.tab === 'one' ? 'Add player' : p.tab === 'several' ? 'Add players' : 'Import';
+    const pasted = p.tab === 'paste' ? _pasteRows().length : 0;
+    primaryLabel = p.tab === 'one' ? 'Add player'
+      : p.tab === 'paste' ? (pasted ? `Add ${pasted} player${pasted === 1 ? '' : 's'}` : 'Add players')
+      : p.tab === 'several' ? 'Add players' : 'Import';
     wide = p.tab !== 'one';
   } else {
     title = `Edit ${pl.selected.size} players`;
@@ -744,16 +1111,27 @@ function _panelChrome() {
   return { title, sub, primaryLabel, wide };
 }
 
+// The batch tab is a spreadsheet grid on a desktop and a textarea on a phone;
+// a rotation must land on the one the layout can draw.
+function _normaliseTab(p) {
+  if (p.mode !== 'add') return;
+  if (_isMobile() && p.tab === 'several') p.tab = 'paste';
+  if (!_isMobile() && p.tab === 'paste') p.tab = 'several';
+}
+
 function _renderPanel() {
   const aside = document.getElementById('plPanel');
   if (!aside || !_panel) return;
   const p = _panel;
+  _normaliseTab(p);
+  const mobile = _isMobile();
   const { title, sub, primaryLabel, wide } = _panelChrome();
-  aside.classList.toggle('pl-panel--wide', wide);
+  aside.classList.toggle('pl-panel--wide', wide && !mobile);
 
   let bodyHTML = '';
   if (p.mode === 'edit' || (p.mode === 'add' && p.tab === 'one')) bodyHTML = _formHTML();
   else if (p.mode === 'add' && p.tab === 'several') bodyHTML = _draftsHTML();
+  else if (p.mode === 'add' && p.tab === 'paste') bodyHTML = _pasteHTML();
   else if (p.mode === 'add' && p.tab === 'import') bodyHTML = _importHTML();
   else if (p.mode === 'bulk') bodyHTML = _bulkHTML();
 
@@ -766,9 +1144,10 @@ function _renderPanel() {
       <button class="pl-panel-x" id="plPanelX" title="Close (Esc)">&#10005;</button>
     </div>
     ${p.mode === 'add' ? `
-      <div class="pl-tabs">
-        ${[['one', 'One player'], ['several', 'Several'], ['import', 'Import CSV']].map(([k, l]) =>
-          `<button class="pl-tab${p.tab === k ? ' pl-tab--on' : ''}" data-tab="${k}">${l}</button>`).join('')}
+      <div class="pl-tabs${mobile ? ' pl-mseg' : ''}">
+        ${(mobile ? [['one', 'One player'], ['paste', 'Paste list'], ['import', 'Import CSV']]
+    : [['one', 'One player'], ['several', 'Several'], ['import', 'Import CSV']]).map(([k, l]) =>
+    `<button class="${mobile ? `pl-mseg-b${p.tab === k ? ' pl-mseg-b--on' : ''}` : `pl-tab${p.tab === k ? ' pl-tab--on' : ''}`}" data-tab="${k}">${l}</button>`).join('')}
       </div>` : ''}
     <div class="pl-panel-body">${bodyHTML}</div>
     <div class="pl-panel-foot">
@@ -783,7 +1162,7 @@ function _renderPanel() {
   document.getElementById('plPanelCancel').addEventListener('click', _panelRequestClose);
   document.getElementById('plPanelPrimary').addEventListener('click', () => _panelPrimary(false));
   document.getElementById('plPanelAnother')?.addEventListener('click', () => _panelPrimary(true));
-  document.getElementById('plPanelDelete')?.addEventListener('click', () => {
+  const wireDelete = (el) => el?.addEventListener('click', () => {
     const player = p.player;
     _plConfirm({
       title: `Delete ${player.name}?`,
@@ -800,13 +1179,17 @@ function _renderPanel() {
       },
     });
   });
+  wireDelete(document.getElementById('plPanelDelete'));
   aside.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
     p.tab = b.dataset.tab;
     _renderPanel();
   }));
 
-  if (p.mode === 'edit' || (p.mode === 'add' && p.tab === 'one')) _wireForm();
-  else if (p.mode === 'add' && p.tab === 'several') _wireDrafts();
+  if (p.mode === 'edit' || (p.mode === 'add' && p.tab === 'one')) {
+    _wireForm();
+    wireDelete(document.getElementById('plFormDelete'));
+  } else if (p.mode === 'add' && p.tab === 'several') _wireDrafts();
+  else if (p.mode === 'add' && p.tab === 'paste') _wirePaste();
   else if (p.mode === 'add' && p.tab === 'import') _wireImport();
   else if (p.mode === 'bulk') _wireBulk();
   _updatePanelFooter();
@@ -887,6 +1270,7 @@ function _formHTML() {
             <button class="pl-btn-sm" id="plViewAs">View as this player</button>
           </div>
         </div>` : ''}
+      ${isEdit && _isMobile() ? '<div class="pl-del-row"><button class="pl-panel-del" id="plFormDelete">Delete player</button></div>' : ''}
     </div>`;
 }
 
@@ -1095,6 +1479,74 @@ async function _saveDrafts() {
   if (!rows.length) return _plToast('Enter at least one name', 'warn');
   const seen = new Set(state.players.map((x) => String(x.email || '').toLowerCase()).filter(Boolean));
   const bad = rows.find((d) => d.email.trim() && seen.has(d.email.trim().toLowerCase()));
+  if (bad) return _plToast(`Email ${bad.email} is already in use`, 'err');
+  let added = 0, failed = 0;
+  for (const d of rows) {
+    try { await window.api.addPlayer(_payload(d)); added++; } catch (_) { failed++; }
+  }
+  _closePanel();
+  await _refreshPlayers();
+  _plToast(failed ? `Added ${added}, ${failed} failed` : `${added} player${added === 1 ? '' : 's'} added`, failed ? 'err' : 'ok');
+}
+
+// --- paste a list (mobile) ---
+// The desktop's spreadsheet grid has no room on a phone, so the batch tab is
+// the paste box on its own. Same columns, same parser, same save.
+
+function _parsePasteLine(line) {
+  const c = line.includes('\t') ? line.split('\t') : line.split(',');
+  return {
+    ..._blankDraft(),
+    name: (c[0] || '').trim(),
+    email: (c[1] || '').trim(),
+    phone: (c[2] || '').trim(),
+    member_number: (c[3] || '').trim(),
+    club_locker_rating: (c[4] || '').trim(),
+  };
+}
+
+/** The rows the textarea currently describes; lines without a name are ignored. */
+function _pasteRows() {
+  return String(_panel?.pasteText || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map(_parsePasteLine)
+    .filter((d) => d.name);
+}
+
+function _pasteHTML() {
+  const n = _pasteRows().length;
+  return `
+    <div class="pl-paste">
+      <span class="pl-hint">One player per line: name, email, phone, member #, rating \u2014 tab or comma separated.</span>
+      <textarea id="plPasteArea" class="pl-paste-area" placeholder="Anna Lindqvist, anna@example.com, 204-555-0100, 1061, 3.95">${esc(String(_panel?.pasteText || ''))}</textarea>
+      <span class="pl-hint" id="plPasteCount">${n} ready to add</span>
+    </div>`;
+}
+
+function _wirePaste() {
+  const area = document.getElementById('plPasteArea');
+  if (!area) return;
+  area.addEventListener('input', () => {
+    _panel.pasteText = area.value;
+    const n = _pasteRows().length;
+    const count = document.getElementById('plPasteCount');
+    if (count) count.textContent = `${n} ready to add`;
+    _setDirty();
+    const primary = document.getElementById('plPanelPrimary');
+    if (primary) {
+      primary.disabled = !n;
+      primary.textContent = n ? `Add ${n} player${n === 1 ? '' : 's'}` : 'Add players';
+    }
+  });
+}
+
+async function _savePaste() {
+  const rows = _pasteRows();
+  if (!rows.length) return _plToast('Nothing to add yet', 'warn');
+  const seen = new Set(state.players.map((x) => String(x.email || '').toLowerCase()).filter(Boolean));
+  const bad = rows.find((d) => d.email && seen.has(d.email.toLowerCase()));
   if (bad) return _plToast(`Email ${bad.email} is already in use`, 'err');
   let added = 0, failed = 0;
   for (const d of rows) {
@@ -1397,6 +1849,7 @@ function _panelPrimary(another) {
   const p = _panel;
   if (!p) return;
   if (p.mode === 'edit' || (p.mode === 'add' && p.tab === 'one')) return _saveForm(another);
+  if (p.mode === 'add' && p.tab === 'paste') return _savePaste();
   if (p.mode === 'add' && p.tab === 'several') return _saveDrafts();
   if (p.mode === 'add' && p.tab === 'import') return _runImport();
   if (p.mode === 'bulk') return _saveBulk();
