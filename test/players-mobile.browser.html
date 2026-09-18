@@ -7,9 +7,14 @@
 <style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
 </head>
 <body>
-<div class="main-wrapper" style="position:relative;min-height:100vh">
-  <header class="topbar"><div class="topbar-left"><h1 class="topbar-title" id="pageTitle"></h1></div><div class="topbar-actions" id="topbarActions"></div></header>
-  <main class="content" id="mainContent"></main>
+<!-- The app's real height chain: .app-container is 100dvh, .main-wrapper is the
+     flex column that clips, and .content is what a page is given. A page that
+     scrolls only inside that chain cannot be tested without it. -->
+<div class="app-container">
+  <div class="main-wrapper">
+    <header class="topbar"><div class="topbar-left"><h1 class="topbar-title" id="pageTitle"></h1></div><div class="topbar-actions" id="topbarActions"></div></header>
+    <main class="content" id="mainContent"></main>
+  </div>
 </div>
 <div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
 <div id="toastContainer"></div>
@@ -210,6 +215,29 @@ try {
   ok('saving adds every parsed row', calls.filter((c) => c[0] === 'add').length === 2, JSON.stringify(calls.filter((c) => c[0] === 'add').map((c) => c[1].name)));
   ok('with the columns read in order', calls.find((c) => c[0] === 'add' && c[1].name === 'Omar Diaz')?.[1].member_number === '1200');
   ok('and the panel closes', !$('.pl-panel'));
+  log.textContent += '\nA LIST LONGER THAN THE SCREEN\n';
+  // The desktop scrolls inside .pl-card, which is why .content is flush and
+  // clipped; a phone has no inner scroller, so the page itself must scroll.
+  // Six fixture players fit on screen, so this needs a real club's worth.
+  for (let i = 0; i < 40; i++) PLAYERS.push(mk(200 + i, `Filler ${String(i).padStart(2, '0')}`));
+  await mod.renderPlayers();
+  await settle(80);
+  const scroller = (el) => {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const o = getComputedStyle(n).overflowY;
+      if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+    }
+    return null;
+  };
+  ok('the list is now taller than the screen', $('.pl-body').scrollHeight > window.innerHeight, `${$('.pl-body').scrollHeight}px vs ${window.innerHeight}`);
+  const listScroller = scroller($('.pl-body'));
+  ok('and something can actually scroll it', !!listScroller, listScroller ? listScroller.className : 'nothing scrolls');
+  if (listScroller) {
+    listScroller.scrollTop = listScroller.scrollHeight;
+    await settle();
+    const lastRow = $$('.pl-li').at(-1).getBoundingClientRect();
+    ok('so the last row can be reached', lastRow.top < window.innerHeight && lastRow.bottom > 0, `top ${Math.round(lastRow.top)} of ${window.innerHeight}`);
+  }
 } catch (e) {
   failed++;
   log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n') + '\n';
