@@ -1,6 +1,7 @@
 import { state, isAdmin } from '../state.js';
 import { esc, formatShortDate, toast, modal, avatarHTML, playDayNamesLong, playDatesFor, formatWeekRange, DAY_LONG } from '../utils.js';
 import { startCreateLeague } from './createLeague.js';
+import { isNew, visitPainted } from '../unread.js';
 
 // ===== LEAGUES PAGE =====
 
@@ -62,6 +63,8 @@ export async function renderLeagues() {
   if (isAdmin()) {
     document.getElementById('btnCreateLeague')?.addEventListener('click', openNewLeagueChoice);
   }
+
+  visitPainted('leagues');
 }
 
 const FILTERS = [['all', 'All'], ['upcoming', 'Upcoming'], ['active', 'Active'], ['completed', 'Completed']];
@@ -327,6 +330,12 @@ function _upcomingPill(league, signedUp) {
 
 const _fmtDeadline = (d) => `Sign up by ${_shortDay(d)}`;
 
+// A league posted since the member last opened this tab is tinted and carries
+// a dot before its name, for this visit only. An announcement that has since
+// been built is the same row, so it is never marked a second time.
+const _newCls = (league) => (isNew('leagues', league.created_at) ? ' um-new' : '');
+const _newDot = (league) => (isNew('leagues', league.created_at) ? '<span class="um-mark" role="img" aria-label="New"></span>' : '');
+
 function _upcomingCardHTML(league) {
   const admin = isAdmin();
   const signedUp = !!league.i_signed_up;
@@ -368,10 +377,10 @@ function _upcomingCardHTML(league) {
     : action;
 
   return `
-    <div class="lgl-card lgl-card--upcoming" data-id="${league.id}">
+    <div class="lgl-card lgl-card--upcoming${_newCls(league)}" data-id="${league.id}">
       <div class="lgl-body">
         <div class="lgl-card-head">
-          <h3 class="lgl-name">${esc(league.name)}</h3>
+          <h3 class="lgl-name">${_newDot(league)}${esc(league.name)}</h3>
           <span class="lgl-badges">
             ${_isDoubles(league) ? '<span class="lgl-fmt">Doubles</span>' : ''}
             <span class="lgl-status lgl-status--${pillCls}">${pillText}</span>
@@ -446,10 +455,10 @@ function leagueCardHTML(league) {
   }
 
   return `
-    <div class="lgl-card${done ? ' lgl-card--done' : ''}" data-id="${league.id}">
+    <div class="lgl-card${done ? ' lgl-card--done' : ''}${_newCls(league)}" data-id="${league.id}">
       <div class="lgl-body">
         <div class="lgl-card-head">
-          <h3 class="lgl-name">${esc(league.name)}</h3>
+          <h3 class="lgl-name">${_newDot(league)}${esc(league.name)}</h3>
           <span class="lgl-badges">
             ${_isDoubles(league) ? '<span class="lgl-fmt">Doubles</span>' : ''}
             <span class="lgl-status lgl-status--${done ? 'done' : 'active'}">${done ? 'Completed' : 'Active'}</span>

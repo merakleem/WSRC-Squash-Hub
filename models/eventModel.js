@@ -84,6 +84,9 @@ function _shape(db, e, viewerId) {
     my_signup: mine ? { guests: mine.guests } : null,
     link: _link(db, e),
     preview,
+    // When it was posted, which is how the list decides whether this event is
+    // new to the member since they last opened the tab.
+    created_at: e.created_at,
   };
 }
 

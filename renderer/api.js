@@ -37,6 +37,10 @@ if (typeof window !== 'undefined' && !window.api) {
     bulkPatchPlayers: (d) => _apiFetch('POST', '/api/players/bulk', d),
     bulkSendInvites:  (d) => _apiFetch('POST', '/api/players/send-invite', d),
 
+    // Unread markers: stamps a tab as opened, answering with the stamp it
+    // replaced so the list can mark what the dot pointed at.
+    markTabOpened:    (tab) => _apiFetch('PATCH', `/api/me/opened/${tab}`),
+
     getLeagues:       ()  => _apiFetch('GET',    '/api/leagues'),
     getLeague:        (id)=> _apiFetch('GET',    `/api/leagues/${id}`),
     createLeague:     (d) => _apiFetch('POST',   '/api/leagues', d),

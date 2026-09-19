@@ -1,0 +1,131 @@
+// Unread markers: which tabs have something a member has not seen, the stamp
+// each visit replaces, and who is told nothing at all.
+// Run: node --test test/unread-markers.test.js
+const bcrypt = require('bcryptjs');
+const { suite, scratchDb } = require('./lib/suite');
+const { boot, client } = require('./lib/client');
+
+const ADMIN_PW = process.env.SITE_PASSWORD;
+const iso = (n) => {
+  const d = new Date(Date.now() + n * 864e5);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+suite('a member is told which tabs have something new', async ({ ok, t }) => {
+  const app = boot(scratchDb(t, 'unread-markers'), ({ run }) => {
+    const hash = bcrypt.hashSync('pw123', 4);
+    for (const [i, name] of ['Ana Ruiz', 'Ben Cole', 'Cara Diaz', 'Dev Shah'].entries()) {
+      run('INSERT INTO players (name, email, is_member) VALUES (?, ?, ?)', [name, `p${i + 1}@x.invalid`, i === 2 ? 0 : 1]);
+      run('INSERT INTO user_accounts (player_id, password_hash) VALUES (?, ?)', [i + 1, hash]);
+    }
+  });
+  const { getDB } = require('../database/db');
+  // The whole file runs inside one second, and created_at counts only seconds,
+  // so nothing here can be ordered by waiting. Instead: everything posted so
+  // far happened two minutes ago, and these members last looked one minute
+  // ago - they have seen all of it. Whatever is posted next is new to them.
+  const caughtUp = (...playerIds) => {
+    const db = getDB();
+    db.prepare(`UPDATE leagues SET created_at = datetime('now', '-120 seconds')`).run();
+    db.prepare(`UPDATE events SET created_at = datetime('now', '-120 seconds')`).run();
+    const stamp = db.prepare(`UPDATE member_tab_opens SET opened_at = strftime('%Y-%m-%d %H:%M:%f', 'now', '-60 seconds') WHERE player_id = ?`);
+    for (const id of playerIds) stamp.run(id);
+  };
+  const stampOf = (playerId, tab) => getDB().prepare('SELECT opened_at FROM member_tab_opens WHERE player_id = ? AND tab = ?').get(playerId, tab)?.opened_at || null;
+
+  const a = client(app), member = client(app), other = client(app), nonMember = client(app);
+  await a.login('', ADMIN_PW);
+  await member.login('p1@x.invalid', 'pw123');
+  await other.login('p2@x.invalid', 'pw123');
+  await nonMember.login('p3@x.invalid', 'pw123');
+
+  console.log('A MEMBER WHO HAS NEVER LOOKED IS UP TO DATE');
+  // Sessions are month-long cookies, so a deploy gives no moment to stamp
+  // everyone. Without this rule every existing member would come back to two
+  // dots and a list where everything is marked.
+  const old = (await a.send('POST', '/api/leagues/upcoming', { name: 'Before They Looked', startDate: iso(30), setupType: 'modern' })).body;
+  getDB().prepare(`UPDATE leagues SET created_at = datetime('now', '-120 seconds')`).run();
+  let me = await member.me();
+  ok('nothing is marked on the first read', me.unread.leagues === false && me.unread.events === false, JSON.stringify(me.unread));
+  ok('and both tabs were stamped', !!me.opened.leagues && !!me.opened.events, JSON.stringify(me.opened));
+  ok('the stamp is on the row, not just the answer', stampOf(1, 'leagues') === me.opened.leagues);
+  await other.me();
+  await nonMember.me();
+
+  console.log('\nSOMETHING POSTED SINCE');
+  caughtUp(1, 2, 3);
+  const firstStamp = stampOf(1, 'leagues');
+  const league = (await a.send('POST', '/api/leagues/upcoming', { name: 'Autumn Box League', startDate: iso(30), setupType: 'modern' })).body;
+  me = await member.me();
+  ok('the leagues tab is marked', me.unread.leagues === true);
+  ok('the events tab is not', me.unread.events === false);
+  ok('the stamp did not move on its own', stampOf(1, 'leagues') === firstStamp);
+  ok('every member sees it, not just one', (await other.me()).unread.leagues === true);
+  ok('the league they had already seen is not what marked it', league.id !== old.id);
+
+  console.log('\nOPENING THE TAB');
+  const patched = (await member.send('PATCH', '/api/me/opened/leagues')).body;
+  ok('the visit is handed the stamp it replaced', patched.previous === firstStamp, JSON.stringify(patched));
+  ok('and the new one, which is later', patched.opened_at > patched.previous);
+  me = await member.me();
+  ok('the tab is clear afterwards', me.unread.leagues === false);
+  ok('the other member is still marked', (await other.me()).unread.leagues === true);
+  ok('an unknown tab is refused', (await member.send('PATCH', '/api/me/opened/ladder')).status === 400);
+
+  console.log('\nEVENTS FOLLOW THE SAME RULE, AND ITS VISIBILITY');
+  await a.send('POST', '/api/events', { name: 'Club Social', event_date: iso(10) });
+  ok('a member is marked', (await member.me()).unread.events === true);
+  ok('so is a non-member, by the open one', (await nonMember.me()).unread.events === true);
+  await member.send('PATCH', '/api/me/opened/events');
+  await nonMember.send('PATCH', '/api/me/opened/events');
+  ok('both are clear again', (await member.me()).unread.events === false && (await nonMember.me()).unread.events === false);
+
+  caughtUp(1, 3);
+  await a.send('POST', '/api/events', { name: 'Members Mixer', event_date: iso(12), members_only: true });
+  ok('a members-only event marks a member', (await member.me()).unread.events === true);
+  ok('and does not exist for anyone else', (await nonMember.me()).unread.events === false);
+
+  caughtUp(1);
+  await a.send('POST', '/api/events', { name: 'Long Gone', event_date: iso(-1) });
+  ok('a past event never marks: the dot would point at an empty list', (await member.me()).unread.events === false);
+
+  console.log('\nTHE LIST CARRIES WHAT THE CARDS NEED');
+  const events = await member.get('/api/events');
+  ok('every event says when it was posted', events.length > 0 && events.every((e) => typeof e.created_at === 'string'), JSON.stringify(events[0]));
+  const leagues = await member.get('/api/leagues');
+  ok('so does every league', leagues.length > 0 && leagues.every((l) => typeof l.created_at === 'string'));
+
+  console.log('\nADMINS POSTED THE THINGS');
+  const adminMe = await a.me();
+  ok('an admin is never marked', adminMe.unread.leagues === false && adminMe.unread.events === false);
+  ok('and has no stamps to spend', Object.keys(adminMe.opened).length === 0, JSON.stringify(adminMe.opened));
+  ok('the admin account cannot stamp a tab', await a.status('PATCH', '/api/me/opened/leagues') === '403');
+
+  console.log('\nVIEWING AS A MEMBER SHOWS THEIRS WITHOUT SPENDING IT');
+  caughtUp(2);
+  const beforeLook = stampOf(2, 'leagues');
+  await a.send('POST', '/api/leagues/upcoming', { name: 'Winter Doubles', startDate: iso(60), setupType: 'doubles' });
+  ok('the member is marked', (await other.me()).unread.leagues === true);
+  await a.send('POST', '/api/players/2/view-as');
+  ok('the admin sees exactly what they see', (await a.me()).unread.leagues === true);
+  await a.send('PATCH', '/api/me/opened/leagues');
+  ok('but looking does not clear it for them', stampOf(2, 'leagues') === beforeLook);
+  ok('so the member still has their dot', (await other.me()).unread.leagues === true);
+
+  console.log('\nA MEMBER WHO HAS NEVER OPENED THE APP, WHILE AN ADMIN IS WEARING THEM');
+  // Dev Shah has never signed in, so nothing has ever been stamped for them.
+  // The viewing-as session must not write the row either: that would spend a
+  // marker they have not seen.
+  await a.send('POST', '/api/return-to-admin');
+  await a.send('POST', '/api/players/4/view-as');
+  ok('they read as up to date', (await a.me()).unread.leagues === false);
+  ok('and no row was created for them', getDB().prepare('SELECT COUNT(*) AS n FROM member_tab_opens WHERE player_id = 4').get().n === 0);
+
+  console.log('\nAND THEN THEY SIGN IN FOR THEMSELVES');
+  await a.send('POST', '/api/return-to-admin');
+  const fresh = client(app);
+  await fresh.login('p4@x.invalid', 'pw123');
+  const freshMe = await fresh.me();
+  ok('their first read stamps both tabs', !!freshMe.opened.leagues && !!freshMe.opened.events);
+  ok('and marks nothing', freshMe.unread.leagues === false && freshMe.unread.events === false);
+});

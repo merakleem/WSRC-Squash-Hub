@@ -1,5 +1,6 @@
 import { state, isAdmin } from '../state.js';
 import { esc, toast, clubTodayStr, avatarInner } from '../utils.js';
+import { isNew, visitPainted } from '../unread.js';
 
 // ===== EVENTS =====
 // Club happenings members sign up for. One list, one detail column: socials,
@@ -198,14 +199,18 @@ function _cardHTML(e) {
   const d = _d(e.event_date);
   const p = _pill(e);
   const sel = e.id === ev.selectedId;
+  // Posted since the member last opened Events: a dot before the name and the
+  // list tint, for this visit only. Selected keeps its own look.
+  const fresh = isNew('events', e.created_at);
+  const nameHTML = `<span class="ev-card-name">${esc(e.name)}</span>`;
   return `
-    <div class="ev-card${sel ? ' ev-card--sel' : ''}" data-ev="${e.id}">
+    <div class="ev-card${sel ? ' ev-card--sel' : ''}${fresh ? ' um-new' : ''}" data-ev="${e.id}">
       <div class="ev-date">
         <span class="ev-date-dow">${_DAYS_SHORT[d.getDay()].toUpperCase()}</span>
         <span class="ev-date-day">${d.getDate()}</span>
       </div>
       <div class="ev-card-mid">
-        <span class="ev-card-name">${esc(e.name)}</span>
+        ${fresh ? `<span class="um-nameline"><span class="um-mark" role="img" aria-label="New"></span>${nameHTML}</span>` : nameHTML}
         <div class="ev-card-meta">${_typeChip(e.link, false)}<span class="ev-card-when">${esc(_when(e))}</span>${_membersOnlyPill(e)}</div>
         <div class="ev-card-people">
           <div class="ev-avs">${_avatarStack(e, 'ev-av--card')}</div>
@@ -515,6 +520,7 @@ function _paint() {
   if (newList) newList.scrollTop = listScroll;
 
   _wire(content);
+  visitPainted('events');
 }
 
 function _wire(content) {

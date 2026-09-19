@@ -11536,3 +11536,84 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
 .mp-discard-title { font-family: 'Barlow', sans-serif; font-size: 17px; font-weight: 700; }
 .mp-discard-body { font-size: 13.5px; color: var(--text-muted); }
 .mp-discard-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNREAD MARKERS (um-)
+   A member who has not opened Leagues or Events since something was posted
+   there gets a dot on that nav item - and, on a phone, on the hamburger that
+   hides it. Opening the tab marks the new cards for that one visit and takes
+   the dot away after a beat. Admins never see any of this: they posted the
+   things. There is no count anywhere - the number is one almost every time,
+   and a badge would read as a to-do list.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── The nav dot ── */
+/* On the trailing edge of the row, so two marked tabs line up vertically and
+   neither the icon nor the label column moves. */
+.nav-item .um-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: #aab9ff;
+  transition: opacity 240ms ease;
+}
+.um-dot--out { opacity: 0; }
+
+/* ── The hamburger's dot ── */
+/* A marker inside a closed drawer is not a notification, so the button that
+   hides the rows carries one of its own for any number of marked tabs. It goes
+   while the drawer is open - the rows behind it carry their own. */
+.hamburger-btn .um-dot {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #5b7cf9;
+  box-shadow: 0 0 0 2px #fff;
+  transition: opacity 240ms ease;
+}
+.hamburger-btn.open .um-dot { display: none; }
+
+/* ── The card marker ── */
+/* A dot before the name, where the eye is already going, and the list's own
+   selected tint across the whole card so it reads from the top of the page. A
+   NEW pill would fight the status pill these cards already carry. */
+.um-mark {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #5b7cf9;
+}
+
+.lgl-card.um-new { background: #f7f9ff; }
+.lgl-card.um-new .lgl-foot { background: #f3f6fe; border-top-color: #eef1f8; }
+.lgl-card.um-new .lgl-name { display: flex; align-items: flex-start; gap: 9px; }
+/* Centred on the first line of a name that may wrap: half of the line box
+   (.6em at line-height 1.2) less half the dot. */
+.lgl-name .um-mark { margin-top: calc(.6em - 4px); }
+
+.ev-card.um-new { background: #f7f9ff; }
+/* Selected wins: it keeps its accent border and ring, and drops the tint. */
+.ev-card--sel.um-new { background: #fff; }
+.um-nameline { display: flex; align-items: center; gap: 9px; min-width: 0; }
+
+@media (max-width: 768px) {
+  /* The drawer's rows are taller and its labels bigger, so the dot grows with
+     them; still on the trailing edge, still lined up with each other. */
+  .nav-item .um-dot { width: 9px; height: 9px; }
+  .lgl-card.um-new .lgl-name { gap: 8px; }
+  .um-nameline { gap: 8px; }
+}
+
+/* The 600ms hold is not motion - it is there so the eye can land on the dot
+   before it goes - so it stays. The fade does not: the dot is simply removed. */
+@media (prefers-reduced-motion: reduce) {
+  .nav-item .um-dot,
+  .hamburger-btn .um-dot { transition: none; }
+}
