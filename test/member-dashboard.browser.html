@@ -43,6 +43,7 @@ let REPORTABLE = [];
 let BOOKINGS = [];
 let EVENTS = [];
 let SLOT = null;
+let LEAGUES = [];
 const nav = [];
 
 window.fetch = async (url) => ({ ok: true, json: async () => (String(url).includes('/history') ? HISTORY : {}) });
@@ -54,6 +55,7 @@ window.api = {
   getMyBookings: async () => BOOKINGS,
   getEvents: async () => EVENTS,
   getSuggestedSlot: async () => SLOT,
+  getLeagues: async () => LEAGUES,
 };
 window.navigate = (page, params) => nav.push([page, params]);
 window.openPlayerProfile = () => nav.push(['profile']);
@@ -164,7 +166,7 @@ try {
   ok("a club booking names the club and carries its type tag", /Booked by the club/.test(txt(rowsEls[2])) && txt(rowsEls[2].querySelector('.dh-sched-tag')) === 'Private lesson', txt(rowsEls[2]));
   ok('an event you are going to shows the tag, not a button', /You and 11 others are going/.test(txt(rowsEls[3])) && !!rowsEls[3].querySelector('.dh-sched-going'), txt(rowsEls[3]));
   ok("a booking someone else made names them", /Anna Lindqvist booked · with you/.test(txt(rowsEls[4])), txt(rowsEls[4]));
-  ok('an event still open shows the spots and a Join button', /6 spots open/.test(txt(rowsEls[5])) && !!rowsEls[5].querySelector('.dh-sched-join'), txt(rowsEls[5]));
+  ok('an event still open shows the spots and a Sign up button', /6 spots open/.test(txt(rowsEls[5])) && txt(rowsEls[5].querySelector('.dh-sched-join')) === 'Sign up', txt(rowsEls[5]));
 
   const feed = $$('.dh-feed-row');
   ok('the ladder move sits directly above the match that caused it', feed[0].classList.contains('dh-feed-row--move') && /Tom Reyes passes Sam Chen & Ivo Thiessen/.test(txt(feed[0])), txt(feed[0]));
@@ -172,6 +174,35 @@ try {
   ok('then the result itself', /Tom Reyes beat Sam Chen/.test(txt(feed[1])) && /3–1/.test(txt(feed[1])), txt(feed[1]));
   ok('a doubles result names both pairs and is tagged', /A\. Lindqvist & J\. Wu beat M\. Kane & R\. Patel/.test(txt(feed[2])) && /doubles/.test(txt(feed[2])), txt(feed[2]));
   ok('your own loss reads as yours, in grey', /Marcus Kane beat you/.test(txt(feed[3])) && feed[3].querySelector('.dh-feed-score--lost'), txt(feed[3]));
+
+  console.log('\nA LEAGUE OPEN FOR SIGNUPS');
+  // The block shows the next six things; setting the rest aside leaves only
+  // the leagues, so this section is about them and nothing else. Everything is
+  // put back at the end for the sections that follow.
+  const KEEP = { bookings: BOOKINGS, events: EVENTS, history: HISTORY };
+  BOOKINGS = []; EVENTS = [];
+  HISTORY = { ...HISTORY, upcoming: [] };
+  // One word for one action: the events page says Sign up, so this does too.
+  LEAGUES = [
+    { id: 60, name: 'Autumn Box League', status: 'upcoming', start_date: day(20), signup_count: 7, signup_cap: 12, signup_deadline: day(10), signups_closed: false, deadline_passed: false, i_signed_up: false },
+    { id: 61, name: 'Winter Box League', status: 'upcoming', start_date: day(25), signup_count: 4, signup_cap: null, signups_closed: false, deadline_passed: false, i_signed_up: true },
+    { id: 62, name: 'Closed League', status: 'upcoming', start_date: day(9), signup_count: 9, signups_closed: true, deadline_passed: true, i_signed_up: false },
+    { id: 63, name: 'Spring 2026', status: 'active', start_date: day(-30) },
+  ];
+  await paint();
+  const lrows = $$('.dh-sched-row');
+  ok('an open league appears on the schedule', lrows.some((r) => /Autumn Box League/.test(txt(r))), lrows.map(txt).join(' | '));
+  const open60 = lrows.find((r) => /Autumn Box League/.test(txt(r)));
+  ok('tagged as a league', txt(open60.querySelector('.dh-sched-tag')) === 'League');
+  ok('saying how many have signed up and by when', /7 signed up/.test(txt(open60)) && /sign up by/.test(txt(open60)), txt(open60));
+  ok('with Sign up, not Join', txt(open60.querySelector('.dh-sched-join')) === 'Sign up');
+  const mine61 = lrows.find((r) => /Winter Box League/.test(txt(r)));
+  ok('one they joined says so instead', !!mine61.querySelector('.dh-sched-going') && /signed up/i.test(txt(mine61)), txt(mine61));
+  ok('a closed one they are not in stays off the list', !lrows.some((r) => /Closed League/.test(txt(r))));
+  ok('and a running league is not a signup row', !lrows.some((r) => /Spring 2026/.test(txt(r))));
+  ok('so the block is exactly the two they can act on', lrows.length === 2, String(lrows.length));
+  LEAGUES = [];
+  BOOKINGS = KEEP.bookings; EVENTS = KEEP.events; HISTORY = KEEP.history;
 
   console.log('\nA SCORE STILL OWED');
   REPORTABLE = [{ id: 44, type: 'ladder', format: 'singles', scheduled_date: day(-4), opponent_name: 'Marcus Kane', opponent_photo: null }];

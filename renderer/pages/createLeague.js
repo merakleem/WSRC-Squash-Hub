@@ -6,13 +6,23 @@ import { esc, toast, modal, avatarHTML } from '../utils.js';
 // The wizard builds state.wizard as it goes and posts it once at the end via
 // submitCreateLeague() — nothing is saved before Create league is pressed.
 // Structure numbers recalculate live as fields change; there is no Apply step.
-export function startCreateLeague() {
+/**
+ * Open the wizard.
+ *
+ * `fromUpcoming` is an announced league being built: its name, format, date and
+ * the people who signed up are carried in, and the final submit fills that same
+ * league row rather than inserting a new one - so the league someone joined is
+ * the league that runs.
+ */
+export function startCreateLeague({ fromUpcoming = null } = {}) {
+  const signups = (fromUpcoming?.signups || []).map((s) => ({ id: s.player_id, name: s.name, photo_path: s.photo_path || null }));
   state.wizard = {
     step: 1,
-    setupType: 'traditional',
-    leagueName: '',
-    startDate: defaultStartDate(),
-    rankedPlayers: [],
+    buildingLeagueId: fromUpcoming?.id ?? null,
+    setupType: fromUpcoming?.setup_type || 'traditional',
+    leagueName: fromUpcoming?.name || '',
+    startDate: fromUpcoming?.start_date || defaultStartDate(),
+    rankedPlayers: signups,
     // Traditional
     numTeams: 3,
     numDivisions: 1,
@@ -231,7 +241,7 @@ function _summaryHTML() {
   return [
     cell('League', esc(w.leagueName.trim()) || 'Untitled', { desk: true }),
     cell('Starts', _fmtShort(w.startDate), { desk: true }),
-    cell('Format', doubles ? 'Doubles' : teams ? 'Teams' : 'Divisions only', { desk: true }),
+    cell('Format', doubles ? 'Doubles' : teams ? 'Teams' : 'Box league', { desk: true }),
     doubles ? cell('Players', `${c.players} · ${c.n} pairs`, { desk: true }) : cell('Players', String(c.n)),
     ...(doubles ? [cell('Pairs', String(c.n))] : []),
     cell(teams ? 'Teams × divs' : 'Divisions', c.valid ? (teams ? `${c.teams} × ${c.divisions}` : String(c.divisions)) : '—'),
@@ -406,7 +416,7 @@ function renderStep1() {
             ${formatCard('traditional', 'Teams', 'Current default',
               'Players are grouped into teams. Teams play each other each week, with one match per division.',
               ['Team standings', 'One night, one opponent'])}
-            ${formatCard('modern', 'No teams', '',
+            ${formatCard('modern', 'Box league', '',
               'No teams. Players are grouped into divisions and play everyone in their division (round robin).',
               ['Division standings', 'Round robin'])}
             ${formatCard('doubles', 'Doubles', 'New',
@@ -1822,13 +1832,13 @@ async function submitCreateLeague() {
   btn.innerHTML = '<span class="spinner"></span> Creating…';
 
   const { leagueName, startDate, setupType, numRounds, blackoutDates,
-    matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
+    matchStartTime, selectedCourtIds, matchDuration, matchBuffer, buildingLeagueId } = state.wizard;
   const playDays = _orderedPlayDays();
 
   let payload;
   if (setupType === 'doubles') {
     payload = {
-      name: leagueName, startDate, setup_type: 'doubles',
+      name: leagueName, startDate, setup_type: 'doubles', leagueId: buildingLeagueId,
       numRounds, blackoutDates, playDays, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPairs, dIdx) =>
         divPairs.map((pr, pIdx) => ({ playerIds: [pr.a.id, pr.b.id], rank: dIdx * 1000 + pIdx + 1 })),
@@ -1836,7 +1846,7 @@ async function submitCreateLeague() {
     };
   } else if (setupType === 'modern') {
     payload = {
-      name: leagueName, startDate, setup_type: 'modern',
+      name: leagueName, startDate, setup_type: 'modern', leagueId: buildingLeagueId,
       numRounds, blackoutDates, playDays, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPlayers, dIdx) =>
         divPlayers.map((p, pIdx) => ({ playerId: p.id, rank: dIdx * 1000 + pIdx + 1 })),
@@ -1845,7 +1855,7 @@ async function submitCreateLeague() {
   } else {
     const { rankedPlayers, numTeams, numDivisions, teamNames } = state.wizard;
     payload = {
-      name: leagueName, startDate, setup_type: 'traditional',
+      name: leagueName, startDate, setup_type: 'traditional', leagueId: buildingLeagueId,
       numTeams, numDivisions, numRounds, blackoutDates, playDays, teamNames,
       matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
@@ -1854,7 +1864,7 @@ async function submitCreateLeague() {
 
   try {
     const leagueId = await window.api.createLeague(payload);
-    toast(`League "${leagueName}" created!`, 'success');
+    toast(buildingLeagueId ? `${leagueName} is live` : `League "${leagueName}" created!`, 'success');
     const league = await window.api.getLeague(leagueId);
     window.navigate('leagueDetail', { league });
   } catch (e) {

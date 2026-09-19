@@ -155,7 +155,7 @@ ok('a player gets no New League button', !$('#btnCreateLeague'), txt($('#topbarA
 
 log.textContent += '\nFILTER PILLS\n';
 await show([FALL, BOX, SPRING], ADMIN);
-ok('three status pills are offered', $$('.lgl-pill[data-filter]').map((p) => p.textContent.trim()).join('|') === 'All|Active|Completed');
+ok('four status pills are offered, Upcoming among them', $$('.lgl-pill[data-filter]').map((p) => p.textContent.trim()).join('|') === 'All|Upcoming|Active|Completed');
 ok('then a divider and the three format pills', !!$('.lgl-divider') && $$('.lgl-pill[data-format]').map((p) => p.textContent.trim()).join('|') === 'All formats|Singles|Doubles');
 ok('All is on by default', pill('All').classList.contains('lgl-pill--on'));
 click(pill('Active')); await settle();

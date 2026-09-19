@@ -92,21 +92,21 @@ function addMinutes(timeStr, minutes) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-function createModernLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [], playDays = [] }) {
+function createModernLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [], playDays = [], leagueId: intoLeagueId = null }) {
   const numDivisions = divisions.length;
   const days = normalizePlayDays(startDate, playDays, 'modern');
   // A day with nothing to play on it is a mistake the wizard refuses too.
   if (days.length > minWeeklyMatches(divisions.map((div) => div.length))) throw _validationError('Too many play days for this league.');
   const useNewCourts = courtIds.length > 0;
   const effectiveCourts = useNewCourts ? courtIds.length : numCourts;
-  const leagueId = leagueModel.createLeagueRecord({
+  const leagueId = _writeLeagueRecord({
     name, startDate, numTeams: 0, numDivisions, setup_type: 'modern',
     numRounds, blackoutDates, matchStartTime,
     numCourts: effectiveCourts,
     matchDuration, matchBuffer,
     scheduleCourts: useNewCourts ? true : scheduleCourts,
     playDays: days,
-  });
+  }, intoLeagueId);
 
   // Create divisions
   const divisionIds = [];
@@ -214,7 +214,7 @@ function createModernLeague({ name, startDate, divisions, numRounds = 1, blackou
  * every membership query works unchanged. Mirrors createModernLeague rather
  * than generalising it, so the singles paths stay byte-identical.
  */
-function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [], playDays = [] }) {
+function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blackoutDates = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [], playDays = [], leagueId: intoLeagueId = null }) {
   if (!Array.isArray(divisions) || divisions.length === 0) throw _validationError('Add at least one division.');
   const seen = new Set();
   divisions.forEach((div, i) => {
@@ -236,14 +236,14 @@ function createDoublesLeague({ name, startDate, divisions, numRounds = 1, blacko
   if (days.length > minWeeklyMatches(divisions.map((div) => div.length))) throw _validationError('Too many play days for this league.');
   const useNewCourts = courtIds.length > 0;
   const effectiveCourts = useNewCourts ? courtIds.length : numCourts;
-  const leagueId = leagueModel.createLeagueRecord({
+  const leagueId = _writeLeagueRecord({
     name, startDate, numTeams: 0, numDivisions, setup_type: 'doubles',
     numRounds, blackoutDates, matchStartTime,
     numCourts: effectiveCourts,
     matchDuration, matchBuffer,
     scheduleCourts: useNewCourts ? true : scheduleCourts,
     playDays: days,
-  });
+  }, intoLeagueId);
 
   const divisionIds = [];
   for (let i = 0; i < numDivisions; i++) {
@@ -341,13 +341,40 @@ function _validationError(message) {
   return err;
 }
 
+/**
+ * Write the `leagues` row for a league being created.
+ *
+ * `intoLeagueId` is an announcement being built: the row already exists, has
+ * people signed up against it, and only needs the columns the wizard just
+ * decided. Filling it in rather than inserting a new one is the whole point -
+ * the league someone joined is the league that runs.
+ */
+function _writeLeagueRecord(fields, intoLeagueId) {
+  if (!intoLeagueId) return leagueModel.createLeagueRecord(fields);
+  return leagueModel.activateAnnouncement(intoLeagueId, {
+    name: fields.name,
+    startDate: fields.startDate,
+    numTeams: fields.numTeams,
+    numDivisions: fields.numDivisions,
+    setupType: fields.setup_type || 'traditional',
+    numRounds: fields.numRounds ?? 1,
+    blackoutDates: JSON.stringify(fields.blackoutDates || []),
+    matchStartTime: fields.matchStartTime || '19:00',
+    numCourts: fields.numCourts ?? 2,
+    matchDuration: fields.matchDuration ?? 45,
+    matchBuffer: fields.matchBuffer ?? 15,
+    scheduleCourts: fields.scheduleCourts ? 1 : 0,
+    playDays: JSON.stringify(fields.playDays || []),
+  });
+}
+
 function createLeague(data) {
   if (data.setup_type === 'doubles') return createDoublesLeague(data);
   if (data.setup_type === 'modern') return createModernLeague(data);
   return createTraditionalLeague(data);
 }
 
-function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [] }) {
+function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, numDivisions, numRounds = 1, blackoutDates = [], teamNames = [], matchStartTime = '19:00', numCourts = 2, matchDuration = 45, matchBuffer = 15, scheduleCourts = false, courtIds = [], leagueId: intoLeagueId = null }) {
   const total = numTeams * numDivisions;
   if (total !== rankedPlayers.length) {
     throw new Error(
@@ -360,12 +387,12 @@ function createTraditionalLeague({ name, startDate, rankedPlayers, numTeams, num
   // Teams leagues play one day a week: a team fixture is the whole set of
   // division matches, and the teams gather for it. Whatever the wizard sent,
   // only the start date's weekday is kept.
-  const leagueId = leagueModel.createLeagueRecord({
-    name, startDate, numTeams, numDivisions, numRounds, blackoutDates, matchStartTime,
+  const leagueId = _writeLeagueRecord({
+    name, startDate, numTeams, numDivisions, setup_type: 'traditional', numRounds, blackoutDates, matchStartTime,
     numCourts: effectiveCourts, matchDuration, matchBuffer,
     scheduleCourts: useNewCourts ? true : scheduleCourts,
     playDays: normalizePlayDays(startDate, [], 'traditional'),
-  });
+  }, intoLeagueId);
 
   // --- Teams ---
   const TEAM_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';

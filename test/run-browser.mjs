@@ -33,6 +33,7 @@ const WIDTHS = {
   'league-doubles': [1280, 390],
   'member-dashboard': [390, 1280],
   'players-mobile': [390],
+  'leagues-upcoming': [1280, 390],
   'league-multiday': [1280, 390],
   'league-wizard-days': [1280, 390],
 };

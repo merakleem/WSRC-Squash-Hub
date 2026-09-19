@@ -479,6 +479,30 @@ const MIGRATIONS = [
     // exactly as before. Each match's own day is matches.scheduled_date.
     up: (db, h) => { h.addColumn('leagues', 'play_days', `TEXT NOT NULL DEFAULT '[]'`); },
   },
+  {
+    id: 29, name: 'a league can be announced before it is built',
+    // An upcoming league is an announcement: a name, a format, a start date and
+    // a description, with members signing themselves up. None of the scheduling
+    // columns mean anything until the wizard fills them in, and the same row
+    // becomes the running league, so the signups stay attached to the league
+    // people actually joined.
+    //
+    // status is already TEXT and defaults to 'active', so every existing league
+    // keeps reading exactly as it does now; 'upcoming' is simply a third value.
+    up: (db, h) => {
+      h.addColumn('leagues', 'description', `TEXT NOT NULL DEFAULT ''`);
+      h.addColumn('leagues', 'signup_cap', `INTEGER`);       // null = no limit
+      h.addColumn('leagues', 'signup_deadline', `TEXT`);      // null = no deadline
+      h.createTable(`CREATE TABLE league_signups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        league_id INTEGER NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(league_id, player_id)
+      )`);
+      h.createIndex(`CREATE INDEX IF NOT EXISTS idx_league_signups_league ON league_signups (league_id)`);
+    },
+  },
 ];
 
 /**

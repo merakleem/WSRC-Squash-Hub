@@ -86,14 +86,33 @@ router.get('/leagues', wrap(async (req, res) => {
     for (const row of rows) myPartner[row.league_id] = row.partner;
   }
 
+  // Signups, for the upcoming leagues' cards: the count, a few faces, and
+  // whether this viewer is on the list.
+  const signupCounts = leagueModel.getSignupCounts();
+  const mySignups = playerId ? leagueModel.getSignupsForPlayer(playerId) : [];
+  const today = clubToday();
+  const previews = {};
+  for (const l of leagues) {
+    if (l.status !== 'upcoming') continue;
+    previews[l.id] = leagueModel.getSignups(l.id).slice(0, 4)
+      .map((r) => ({ id: r.player_id, name: r.name, photo_path: r.photo_path || null }));
+  }
+
   res.json(leagues.map((l) => {
     const counts = countMap[l.id];
-    const status = counts && counts.total > 0 && counts.done === counts.total ? 'completed' : 'active';
+    // An announced league has no matches to count, so the derived status would
+    // call it active and it would never read as upcoming anywhere.
+    const status = l.status === 'upcoming' ? 'upcoming'
+      : counts && counts.total > 0 && counts.done === counts.total ? 'completed' : 'active';
     const weeks = weekMap[l.id];
+    const upcoming = status === 'upcoming'
+      ? { ...signupState(l, signupCounts[l.id] || 0, today), signup_preview: previews[l.id] || [], i_signed_up: mySignups.includes(l.id) }
+      : {};
     return {
       ...l,
       player_ids: memberMap[l.id] || [],
       status,
+      ...upcoming,
       total_weeks: weeks?.total_weeks || 0,
       weeks_started: weeks?.weeks_started || 0,
       last_week_date: weeks?.last_week_date || null,
@@ -108,12 +127,148 @@ router.get('/leagues', wrap(async (req, res) => {
 }));
 
 router.get('/leagues/:id', wrap(async (req, res) => {
-  const league = await leagueService.getFullLeague(Number(req.params.id));
+  const id = Number(req.params.id);
+  const league = await leagueService.getFullLeague(id);
   if (!league) return res.status(404).json({ error: 'League not found' });
-  res.json(league);
+  if (league.status !== 'upcoming') return res.json(league);
+
+  // An announcement has no weeks to send; it has a roster. Member numbers and
+  // ratings are the admin's to see, as everywhere else.
+  const isAdminUser = req.session?.role === 'admin';
+  const rows = leagueModel.getSignups(id);
+  const signups = rows.map((r) => ({
+    player_id: r.player_id,
+    name: r.name,
+    photo_path: r.photo_path || null,
+    signed_up_at: r.created_at,
+    ...(isAdminUser ? { member_number: r.member_number || null, club_locker_rating: r.club_locker_rating ?? null } : {}),
+  }));
+  res.json({
+    ...league,
+    signups,
+    ...signupState(league, rows.length, clubToday()),
+    i_signed_up: !!req.session?.playerId && rows.some((r) => r.player_id === req.session.playerId),
+  });
+}));
+
+// ===== UPCOMING LEAGUES =====
+// Announced, open for signups, not yet built. Everything a member does here is
+// one row in league_signups; building the league fills in the same league row.
+
+const SETUP_TYPES = ['traditional', 'modern', 'doubles'];
+
+/** What a league's signups mean right now, for both the list and the page. */
+function signupState(league, count, today) {
+  const cap = league.signup_cap ?? null;
+  const full = cap != null && count >= cap;
+  const pastDeadline = !!league.signup_deadline && league.signup_deadline < today;
+  return {
+    signup_count: count,
+    spots_left: cap == null ? null : Math.max(0, cap - count),
+    full,
+    signups_closed: full || pastDeadline,
+    deadline_passed: pastDeadline,
+  };
+}
+
+/** Validate the announced fields. Returns an error string, or ''. */
+function checkAnnouncement({ name, startDate, setupType, signupCap, signupDeadline }) {
+  if (!name || !String(name).trim()) return 'A name is required.';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(startDate || ''))) return 'A start date is required.';
+  if (setupType && !SETUP_TYPES.includes(setupType)) return 'Unknown format.';
+  if (signupCap != null && (!Number.isInteger(signupCap) || signupCap < 2)) return 'Spots must be a whole number of at least 2.';
+  if (signupDeadline && !/^\d{4}-\d{2}-\d{2}$/.test(signupDeadline)) return 'Invalid deadline.';
+  if (signupDeadline && signupDeadline > startDate) return 'Deadline must be on or before the start date.';
+  return '';
+}
+
+function readAnnouncement(body) {
+  const cap = body.signupCap === '' || body.signupCap == null ? null : Number(body.signupCap);
+  return {
+    name: String(body.name || '').trim(),
+    startDate: String(body.startDate || '').slice(0, 10),
+    setupType: body.setupType || 'modern',
+    description: String(body.description || '').trim(),
+    signupCap: cap,
+    signupDeadline: body.signupDeadline ? String(body.signupDeadline).slice(0, 10) : null,
+  };
+}
+
+router.post('/leagues/upcoming', requireAdmin, wrap(async (req, res) => {
+  const fields = readAnnouncement(req.body || {});
+  const bad = checkAnnouncement(fields);
+  if (bad) return res.status(400).json({ error: bad });
+  const id = leagueModel.createAnnouncement(fields);
+  res.json({ id });
+}));
+
+router.put('/leagues/:id/announcement', requireAdmin, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const league = leagueModel.getLeagueById(id);
+  if (!league) return res.status(404).json({ error: 'League not found' });
+  if (league.status !== 'upcoming') return res.status(400).json({ error: 'This league has already been built.' });
+  const fields = readAnnouncement(req.body || {});
+  const bad = checkAnnouncement(fields);
+  if (bad) return res.status(400).json({ error: bad });
+  // Lowering the cap under the people already on the list would make the
+  // number a lie, and there is no rule for who to drop.
+  const count = leagueModel.getSignups(id).length;
+  if (fields.signupCap != null && fields.signupCap < count) {
+    return res.status(400).json({ error: `${count} ${count === 1 ? 'person has' : 'people have'} already signed up.` });
+  }
+  res.json(leagueModel.updateAnnouncement(id, fields));
+}));
+
+/** The member signing themselves up. */
+router.post('/leagues/:id/signup', wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const playerId = req.session?.playerId;
+  if (!playerId) return res.status(403).json({ error: 'Only players can sign up.' });
+  const league = leagueModel.getLeagueById(id);
+  if (!league || league.status !== 'upcoming') return res.status(404).json({ error: 'League not found' });
+  const count = leagueModel.getSignups(id).length;
+  const st = signupState(league, count, clubToday());
+  // Already on the list is not a failure: say yes and move on.
+  if (!leagueModel.getSignupsForPlayer(playerId).includes(id)) {
+    if (st.full) return res.status(409).json({ error: 'This league is full.' });
+    if (st.deadline_passed) return res.status(409).json({ error: 'Signups have closed.' });
+    leagueModel.addSignup(id, playerId);
+  }
+  res.json({ ok: true });
+}));
+
+router.delete('/leagues/:id/signup', wrap(async (req, res) => {
+  const playerId = req.session?.playerId;
+  if (!playerId) return res.status(403).json({ error: 'Only players can withdraw.' });
+  leagueModel.removeSignup(Number(req.params.id), playerId);
+  res.json({ ok: true });
+}));
+
+/** The admin adding someone by hand. The cap does not apply to them. */
+router.post('/leagues/:id/signups', requireAdmin, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const playerId = Number(req.body?.playerId);
+  const league = leagueModel.getLeagueById(id);
+  if (!league || league.status !== 'upcoming') return res.status(404).json({ error: 'League not found' });
+  if (!playerId) return res.status(400).json({ error: 'A player is required.' });
+  leagueModel.addSignup(id, playerId);
+  const count = leagueModel.getSignups(id).length;
+  res.json({ ok: true, ...signupState(league, count, clubToday()) });
+}));
+
+router.delete('/leagues/:id/signups/:playerId', requireAdmin, wrap(async (req, res) => {
+  leagueModel.removeSignup(Number(req.params.id), Number(req.params.playerId));
+  res.json({ ok: true });
 }));
 
 router.post('/leagues', requireAdmin, wrap(async (req, res) => {
+  // `leagueId` means "build this announcement", which fills the row in rather
+  // than inserting. Only ever an upcoming one: pointed at a running league it
+  // would overwrite a live schedule.
+  const into = req.body?.leagueId ? leagueModel.getLeagueById(Number(req.body.leagueId)) : null;
+  if (req.body?.leagueId && (!into || into.status !== 'upcoming')) {
+    return res.status(400).json({ error: 'That league is not waiting to be built.' });
+  }
   const leagueId = await leagueService.createLeague(req.body);
   res.json(leagueId);
 }));
@@ -183,7 +338,13 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
 
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
-  const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
+  // An announced league has no league_players yet - the people to write to are
+  // the ones who signed up.
+  const leagueId = Number(req.params.id);
+  const league = leagueModel.getLeagueById(leagueId);
+  const players = league?.status === 'upcoming'
+    ? leagueModel.getSignups(leagueId).map((r) => ({ ...r, player_email: r.email }))
+    : await leagueModel.getLeaguePlayers(leagueId);
   const recipients = players.filter((p) => p.player_email);
   if (recipients.length === 0) return res.json({ sent: 0 });
 

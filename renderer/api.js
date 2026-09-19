@@ -42,6 +42,13 @@ if (typeof window !== 'undefined' && !window.api) {
     createLeague:     (d) => _apiFetch('POST',   '/api/leagues', d),
     deleteLeague:     (id)=> _apiFetch('DELETE', `/api/leagues/${id}`),
     endLeague:        (id)=> _apiFetch('PUT',    `/api/leagues/${id}/end`),
+    // Upcoming leagues: announced, open for signups, not yet built.
+    announceLeague:   (d) => _apiFetch('POST',   '/api/leagues/upcoming', d),
+    editAnnouncement: (id, d) => _apiFetch('PUT', `/api/leagues/${id}/announcement`, d),
+    signUpForLeague:  (id)=> _apiFetch('POST',   `/api/leagues/${id}/signup`),
+    withdrawFromLeague: (id) => _apiFetch('DELETE', `/api/leagues/${id}/signup`),
+    addLeagueSignup:  (id, playerId) => _apiFetch('POST', `/api/leagues/${id}/signups`, { playerId }),
+    removeLeagueSignup: (id, playerId) => _apiFetch('DELETE', `/api/leagues/${id}/signups/${playerId}`),
 
     viewAsPlayer:     (id)=> _apiFetch('POST',   `/api/players/${id}/view-as`),
     returnToAdmin:    ()  => _apiFetch('POST',   '/api/return-to-admin'),

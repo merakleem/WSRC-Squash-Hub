@@ -11,6 +11,18 @@
 <script type="module">
 const out=[]; let fails=0;
 const ok=(n,c,x='')=>{ if(!c) fails++; out.push((c?'  PASS  ':'  FAIL  ')+n+(x!==''?'  ['+x+']':'')); };
+
+// The fixture is dated around one fixed week, and which events are past
+// decides the pills, the month grouping and the spots lines. Pinning "today"
+// to that week keeps the suite saying the same thing every day; without it the
+// first event fell into the past on 19 Sep 2026 and took three assertions with
+// it. Restored in the finally block so nothing else in the page is affected.
+const REAL_DATE = Date;
+const PINNED = new REAL_DATE('2026-09-15T12:00:00').getTime();
+globalThis.Date = class extends REAL_DATE {
+  constructor(...args) { super(...(args.length ? args : [PINNED])); }
+  static now() { return PINNED; }
+};
 try {
 const { EVENTS, DETAILS } = await import('./events-fixture.js');
 const calls=[];
@@ -163,6 +175,7 @@ calls.length=0;
 $('#evDelete').click(); await tick(300);
 ok('second click deletes', calls.some(c=>c[0]==='deleteEvent' && c[1]===1));
 } catch (e) { fails++; out.push('  THREW  '+e.message+'\n'+(e.stack||'').split('\n').slice(0,4).join('\n')); }
+finally { globalThis.Date = REAL_DATE; }
 document.getElementById('log').textContent = out.join('\n')+'\n\n'+(fails? fails+' FAILED':'ALL '+out.length+' PASSED');
 document.title = fails? 'FAIL':'PASS';
 </script></body></html>
