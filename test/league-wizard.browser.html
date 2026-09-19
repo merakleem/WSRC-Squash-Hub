@@ -332,6 +332,32 @@ ok('the doubles payload posts pairs per division', dbl && dbl.setup_type === 'do
 ok('ranks encode division and slot, seeds first', dbl && dbl.divisions[0][0].rank === 1 && dbl.divisions[1][2].rank === 1003 && dbl.divisions[0][0].playerIds.join() === '1,2');
 ok('with the shared fields intact', dbl && JSON.stringify(Object.keys(dbl).sort()) === JSON.stringify(['blackoutDates','courtIds','divisions','leagueId','matchBuffer','matchDuration','matchStartTime','name','numRounds','playDays','setup_type','startDate'].sort()));
 
+log.textContent += '\nBUILDING AN ANNOUNCED LEAGUE\n';
+// The three formats hold their players differently. Teams and a box league
+// read rankedPlayers; the pair builder reads pairs, and a doubles league
+// opened with nobody in it until the signups were put there too.
+const signups = PLAYERS.slice(0, 6).map((p) => ({ player_id: p.id, name: p.name, photo_path: null }));
+for (const [type, label] of [['modern', 'a box league'], ['traditional', 'a Teams league'], ['doubles', 'a doubles league']]) {
+  mod.startCreateLeague({ fromUpcoming: { id: 77, name: 'Announced League', start_date: '2026-10-05', setup_type: type, signups } });
+  await settle();
+  ok(`${label} opens on its announced format`, $('.wz-format--on')?.dataset.type === type, $('.wz-format--on')?.dataset.type);
+  ok('with the name and date carried in', $('#wName')?.value === 'Announced League' && $('#wDate')?.value === '2026-10-05');
+  ok('and the other formats held, not offered', $$('.wz-format--locked').length === 2);
+  click($$('.wz-format')[0]);
+  await settle();
+  ok('so a click on another does nothing', $('.wz-format--on')?.dataset.type === type);
+  click($('#wNext'));
+  await settle(120);
+  if (type === 'doubles') {
+    ok('the six signups are loaded as three pairs', state.wizard.pairs.length === 3 && state.wizard.pairs.every((pr) => pr[0] && pr[1]), JSON.stringify(state.wizard.pairs));
+    ok('and the chip counts them', $('#wzSelChip').textContent === '3 pairs · 6 players', $('#wzSelChip').textContent);
+    ok('as does the summary strip, drawn before they were seeded', /3/.test($$('.wz-sum-val')[4]?.textContent || ''), $$('.wz-sum-val')[4]?.textContent);
+  } else {
+    ok('the six signups are already in the league', state.wizard.rankedPlayers.length === 6, String(state.wizard.rankedPlayers.length));
+    ok('and the chip counts them', $('#wzSelChip').textContent === '6 selected', $('#wzSelChip').textContent);
+  }
+}
+
 document.title = failed ? `FAIL ${failed}` : 'PASS';
 log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
 </script>

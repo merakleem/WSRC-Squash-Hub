@@ -2264,6 +2264,12 @@ tbody td {
 
 
 
+/* Building an announced league: the format is already decided, so the other
+   two cards are shown but inert rather than removed - the admin can still see
+   what they picked. */
+.wz-format--locked { opacity: .45; cursor: default; pointer-events: none; }
+.wz-locked-note { font-style: normal; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+
 /* ===== UPCOMING LEAGUES (lgl- card additions, lgu- page) =====
    A league that has been announced but not built: members sign themselves up,
    and the admin builds it from whoever joined. The card keeps the running

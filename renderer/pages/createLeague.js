@@ -32,6 +32,7 @@ export function startCreateLeague({ fromUpcoming = null } = {}) {
     modernDivisionPlayers: null,
     // Doubles: [playerId|null, playerId|null] per pair, in the order made.
     pairs: [],
+    pairsSeeded: false,
     // Shared
     numRounds: 1,
     // Extra weekdays (0 = Sunday) the league plays on, beyond the start
@@ -377,10 +378,11 @@ function _footerHTML({ cancel = false, nextDisabled = false } = {}) {
 function renderStep1() {
   const w = state.wizard;
 
+  const locked = !!state.wizard.buildingLeagueId;
   const formatCard = (type, title, tag, desc, chips) => {
     const on = w.setupType === type;
     return `
-      <div class="wz-format${on ? ' wz-format--on' : ''}" data-type="${type}">
+      <div class="wz-format${on ? ' wz-format--on' : ''}${locked && !on ? ' wz-format--locked' : ''}" data-type="${type}">
         <div class="wz-format-top">
           <span class="wz-radio"><span></span></span>
           <span class="wz-format-title">${title}</span>
@@ -411,7 +413,7 @@ function renderStep1() {
           </div>
         </div>
         <div class="wz-field">
-          <span class="wz-label">Format</span>
+          <span class="wz-label">Format${locked ? ' <i class="wz-locked-note">set when the league was announced</i>' : ''}</span>
           <div class="wz-formats wz-formats--3">
             ${formatCard('traditional', 'Teams', 'Current default',
               'Players are grouped into teams. Teams play each other each week, with one match per division.',
@@ -442,6 +444,9 @@ function renderStep1() {
 
   document.getElementById('wizardCard').querySelectorAll('.wz-format').forEach((card) => {
     card.addEventListener('click', () => {
+      // The format is what members signed up to; changing it here would strand
+      // them, since the three formats hold their players differently.
+      if (locked) return;
       const next = card.dataset.type;
       // Doubles holds pairs where the other two hold a ranked list, so moving
       // between them starts the player step over.
@@ -633,6 +638,17 @@ async function renderStep2() {
 function renderStep2Doubles({ allPlayers, ladderOrder }) {
   const w = state.wizard;
   w.pairs = w.pairs || [];
+  // Built from an announcement: the signups arrive in rankedPlayers, which is
+  // what the other two formats read - the pair builder reads w.pairs, so they
+  // have to be put there or a doubles league opens with nobody in it. Ladder
+  // order, two to a pair, exactly as clicking each of them in would do. Once
+  // only, so clearing the pairs does not bring them back.
+  if (!w.pairsSeeded && w.rankedPlayers.length) {
+    w.pairsSeeded = true;
+    const rank = (id) => { const i = ladderOrder.indexOf(id); return i === -1 ? Infinity : i; };
+    const ids = [...w.rankedPlayers].sort((a, b) => rank(a.id) - rank(b.id)).map((x) => x.id);
+    for (let i = 0; i < ids.length; i += 2) w.pairs.push([ids[i], ids[i + 1] ?? null]);
+  }
   const byId = (id) => allPlayers.find((p) => p.id === id) || null;
   const rankOf = (id) => { const i = ladderOrder.indexOf(id); return i === -1 ? Infinity : i + 1; };
 
@@ -814,6 +830,9 @@ function renderStep2Doubles({ allPlayers, ladderOrder }) {
     if (!el) return;
     if (el.dataset.action === 'add-player') { addPlayer(Number(el.dataset.id)); w.modernDivisionPlayers = null; refresh(); } else if (el.dataset.action === 'remove-pair-player') { removePlayer(Number(el.dataset.id)); refresh(); }
   });
+  // The summary strip is drawn by the step chrome before this runs, so with
+  // pairs seeded from an announcement it would still read "0 pairs".
+  document.getElementById('wzSummary').innerHTML = _summaryHTML();
   _flushError();
 }
 
