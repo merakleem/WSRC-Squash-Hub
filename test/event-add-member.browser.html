@@ -1,0 +1,236 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="app-container">
+  <div class="main-wrapper">
+    <header class="topbar"><div class="topbar-left"><h1 class="topbar-title" id="pageTitle"></h1></div><div class="topbar-actions" id="topbarActions"></div></header>
+    <main class="content" id="mainContent"></main>
+  </div>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// The admin adds a member to an event: the strip, the list that opens upward,
+// the rules that stop it, and what a member never sees.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const settle = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+const day = (n) => { const d = new Date(Date.now() + n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const toasts = () => $$('#toastContainer .toast').map((t) => t.textContent);
+const type = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const key = (el, k) => el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+const press = (el) => el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+const mobile = window.innerWidth <= 768;
+
+const who = (id, name, num, guests = 0) => ({ player_id: id, name, initials: name.split(' ').map((w) => w[0]).join(''), photo_path: null, member_number: num, guests });
+const ev = (over) => ({
+  id: 1, name: 'Club Social', description: '', event_date: day(10), start_time: '18:00', end_time: '20:00',
+  members_only: 0, guests_allowed: 2, max_people: 12, members_count: 2, guests_count: 0, total: 2,
+  spots_left: 10, full: false, my_signup: null, link: null, preview: [], created_at: '2026-09-01 10:00:00',
+  attendees: [who(1, 'Sofia Duarte', 'M-1'), who(2, 'Iain Chalmers', 'M-2', 2)], ...over,
+});
+const EVENTS = {
+  1: ev({}),
+  2: ev({ id: 2, name: 'Members Dinner', max_people: 3, members_count: 3, total: 3, spots_left: 0, full: true,
+    attendees: [who(1, 'Sofia Duarte', 'M-1'), who(2, 'Iain Chalmers', 'M-2'), who(3, 'Nadia Farouk', 'M-3')] }),
+  3: ev({ id: 3, name: 'Members Mixer', members_only: 1 }),
+  4: ev({ id: 4, name: 'Junior Open Morning', members_count: 0, total: 0, spots_left: 12, attendees: [] }),
+  5: ev({ id: 5, name: 'Season Opener', event_date: day(-7) }),
+  6: ev({ id: 6, name: 'Tasting Table', max_people: 3, members_count: 2, total: 2, spots_left: 1 }),
+};
+const PLAYERS = [
+  { id: 1, name: 'Sofia Duarte', member_number: 'M-1', is_member: 1 },
+  { id: 2, name: 'Iain Chalmers', member_number: 'M-2', is_member: 1 },
+  { id: 7, name: 'Marcus Adeyemi', member_number: '1088', is_member: 1 },
+  { id: 8, name: 'Maya Lindstrom', member_number: '1176', is_member: 1 },
+  { id: 9, name: 'Tom Marchetti', member_number: '1302', is_member: 1 },
+  { id: 10, name: 'Emma Marsh', member_number: '1019', is_member: 1 },
+  { id: 11, name: 'Mark Oduya', member_number: '1044', is_member: 1 },
+  { id: 12, name: 'Mal Rivera', member_number: '1055', is_member: 1 },
+  { id: 13, name: 'Marco Guest', member_number: '1066', is_member: 0 },
+];
+let addCalls = [];
+let addFails = null;   // set to a function to make the next add throw
+window.api = {
+  getEvents: async (scope) => Object.values(EVENTS)
+    .filter((e) => (scope === 'past' ? e.event_date < day(0) : e.event_date >= day(0)))
+    .map((e) => JSON.parse(JSON.stringify(e))),
+  getEvent: async (id) => JSON.parse(JSON.stringify(EVENTS[Number(id)])),
+  getPlayers: async () => JSON.parse(JSON.stringify(PLAYERS)),
+  addEventSignup: async (id, playerId) => {
+    addCalls.push([id, playerId]);
+    if (addFails) { const f = addFails; addFails = null; return f(); }
+    const e = EVENTS[Number(id)];
+    const p = PLAYERS.find((x) => x.id === playerId);
+    e.attendees.push(who(playerId, p.name, p.member_number));
+    e.members_count++; e.total++;
+    if (e.max_people != null) { e.spots_left = Math.max(0, e.max_people - e.total); e.full = e.total >= e.max_people; }
+    return { ok: true, total: e.total, max_people: e.max_people, full: e.full };
+  },
+  removeEventAttendee: async () => ({ ok: true }),
+  searchLinkables: async () => [],
+};
+window.navigate = () => {};
+
+const { state } = await import('../renderer/state.js');
+const { renderEvents } = await import('../renderer/pages/events.js');
+
+const open = async (id, scope = 'upcoming') => {
+  state.currentEventId = id;
+  renderEvents();
+  await settle(160);
+  if (scope === 'past') {
+    const tab = $$('.ev-tabs .tab').find((b) => b.dataset.tab === 'past');
+    tab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle(160);
+  }
+};
+const asAdmin = () => { state.currentUser = { role: 'admin', playerId: null, unread: {}, opened: {} }; };
+
+try {
+  log.textContent += `THE STRIP AT REST (width ${window.innerWidth})\n`;
+  asAdmin();
+  await open(1);
+  ok('the card no longer clips its own dropdown', getComputedStyle($('.ev-roster')).overflow !== 'hidden', getComputedStyle($('.ev-roster')).overflow);
+  const strip = $('.ev-roster-add');
+  ok('the add strip is drawn', !!strip && !!$('#evAdd'));
+  ok('it asks for a name or a number', $('#evAdd').placeholder === 'Add a member by name or number');
+  ok('it sits below the rows', strip.previousElementSibling.classList.contains('ev-row'));
+  ok('and above the admin footer', mobile || strip.nextElementSibling.classList.contains('ev-roster-foot'));
+  ok('the list starts closed', $('#evAddDrop').hidden && $('#evAdd').getAttribute('aria-expanded') === 'false');
+
+  log.textContent += '\nSEARCHING\n';
+  type($('#evAdd'), 'ma');
+  await settle(40);
+  let hits = $$('.ev-roster-add-hit');
+  ok('it offers matches', hits.length > 0 && hits.length <= 6, String(hits.length));
+  ok('at most six', hits.length === 6, String(hits.length));
+  ok('the first is active for the keyboard', hits[0].classList.contains('is-active') && hits[0].getAttribute('aria-selected') === 'true');
+  ok('the input says the list is open', $('#evAdd').getAttribute('aria-expanded') === 'true' && !!$('#evAdd').getAttribute('aria-activedescendant'));
+  ok('a match shows its member number', /#1088/.test(txt(hits[0])), txt(hits[0]));
+  ok('nobody already going is offered', !hits.some((h) => /Sofia|Iain/.test(txt(h))));
+  const dropBox = $('.ev-roster-add-drop').getBoundingClientRect();
+  const inputBox = $('#evAdd').getBoundingClientRect();
+  ok('the list opens upward, clear of the field', dropBox.bottom <= inputBox.top + 8, `${dropBox.bottom} vs ${inputBox.top}`);
+
+  log.textContent += '\nNO MATCH\n';
+  type($('#evAdd'), 'zzz');
+  await settle(40);
+  ok('it says so plainly', /No one matches\./.test(txt($('.ev-roster-add-none'))), txt($('.ev-roster-add-none')));
+  type($('#evAdd'), 'sofia');
+  await settle(40);
+  ok('and names someone who is already on', /Sofia Duarte is already on the list/.test(txt($('.ev-roster-add-none'))), txt($('.ev-roster-add-none')));
+
+  log.textContent += '\nADDING\n';
+  addCalls = [];
+  type($('#evAdd'), 'marcus');
+  await settle(40);
+  press($$('.ev-roster-add-hit')[0]);
+  await settle(200);
+  ok('it calls the admin route once', addCalls.length === 1 && addCalls[0][0] === 1 && addCalls[0][1] === 7, JSON.stringify(addCalls));
+  ok('there is no confirm step', !$('.modal-overlay.show') && !/Add Marcus/.test(txt($('#modalBody'))));
+  ok('they are on the roster', $$('.ev-row').some((r) => /Marcus Adeyemi/.test(txt(r))));
+  ok('their row is marked as the new one', !!$('.ev-row--new') && /Marcus/.test(txt($('.ev-row--new'))));
+  ok('with no guests', /—/.test(txt($('.ev-row--new'))), txt($('.ev-row--new')));
+  ok('the field is empty again', $('#evAdd').value === '');
+  ok('and nothing needed saying', toasts().length === 0, toasts().join('|'));
+
+  log.textContent += '\nTHE KEYBOARD\n';
+  addCalls = [];
+  type($('#evAdd'), 'ma');
+  await settle(40);
+  key($('#evAdd'), 'ArrowDown');
+  const second = $$('.ev-roster-add-hit')[1];
+  ok('arrow keys move the active option', second.classList.contains('is-active') && $('#evAdd').getAttribute('aria-activedescendant') === second.id);
+  key($('#evAdd'), 'Escape');
+  await settle(20);
+  ok('escape closes the list', $('#evAddDrop').hidden && $('#evAdd').getAttribute('aria-expanded') === 'false');
+  type($('#evAdd'), 'maya');
+  await settle(40);
+  key($('#evAdd'), 'Enter');
+  await settle(200);
+  ok('enter adds the active one', addCalls.length === 1 && addCalls[0][1] === 8, JSON.stringify(addCalls));
+
+  log.textContent += '\nTHE ADD THAT FILLS IT\n';
+  await open(6);
+  type($('#evAdd'), 'marcus');
+  await settle(40);
+  press($$('.ev-roster-add-hit')[0]);
+  await settle(220);
+  ok('it says the event is now full', toasts().some((t) => /That fills the event/.test(t)), toasts().join('|'));
+  ok('the field is replaced by the blocked strip', !$('#evAdd') && !!$('.ev-roster-add--full'));
+  ok('which says why', /Event is full/.test(txt($('.ev-roster-add-blocked'))), txt($('.ev-roster-add-blocked')));
+  ok('and shows the number', /3 of 3/.test(txt($('.ev-roster-add-blocked'))), txt($('.ev-roster-add-blocked')));
+
+  log.textContent += '\nAN EVENT THAT WAS ALREADY FULL\n';
+  await open(2);
+  ok('there is no field to type in', !$('#evAdd'));
+  ok('the strip is there, saying why', !!$('.ev-roster-add--full') && /Event is full/.test(txt($('.ev-roster-add-blocked'))));
+  ok('it is not simply missing', !!$('.ev-roster-add'));
+
+  log.textContent += '\nTHE LAST SPOT GOES MID-SEARCH\n';
+  await open(1);
+  $('#toastContainer').innerHTML = '';
+  addFails = () => { const e = EVENTS[1]; e.max_people = e.total; e.full = true; e.spots_left = 0; throw new Error('This event just filled up.'); };
+  type($('#evAdd'), 'tom');
+  await settle(40);
+  press($$('.ev-roster-add-hit')[0]);
+  await settle(240);
+  ok('the admin is told, without an apology', toasts().some((t) => t === 'This event just filled up.'), toasts().join('|'));
+  ok('the list is gone', !$('.ev-roster-add-drop') || $('#evAddDrop')?.hidden !== false);
+  ok('and the control is blocked, from the re-read', !!$('.ev-roster-add--full'));
+
+  log.textContent += '\nMEMBERS-ONLY\n';
+  await open(3);
+  type($('#evAdd'), 'mar');
+  await settle(40);
+  hits = $$('.ev-roster-add-hit');
+  ok('members are offered', hits.some((h) => /Marcus Adeyemi/.test(txt(h))));
+  ok('a non-member is not offered at all', !hits.some((h) => /Marco Guest/.test(txt(h))), hits.map(txt).join('|'));
+  ok('and is not shown as unpickable either', !$('.ev-roster-add-hit[disabled]'));
+  // A different event: the one above was left full by the 409 section.
+  await open(4);
+  type($('#evAdd'), 'marco');
+  await settle(40);
+  ok('on an open event they are offered', $$('.ev-roster-add-hit').some((h) => /Marco Guest/.test(txt(h))));
+
+  log.textContent += '\nEMPTY ROSTER\n';
+  await open(4);
+  ok('it says no one yet', /No one yet\./.test(txt($('.ev-roster-none'))));
+  ok('and tells the admin what to do', /You can add people below/.test(txt($('.ev-roster-none'))), txt($('.ev-roster-none')));
+  ok('the field is there to do it with', !!$('#evAdd'));
+
+  log.textContent += '\nA PAST EVENT\n';
+  await open(5, 'past');
+  ok('the control stays after the date', !!$('#evAdd'), txt($('.ev-roster')).slice(0, 60));
+  ok('and the roster still removes', !!$('[data-remove]'));
+
+  log.textContent += '\nWHAT A MEMBER SEES\n';
+  state.currentUser = { role: 'player', playerId: 1, unread: {}, opened: {} };
+  await open(1);
+  ok('no add control at all', !$('.ev-roster-add') && !$('#evAdd'));
+  ok('no member numbers', !$('.ev-row-no'));
+  ok('and no remove buttons', !$('[data-remove]'));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

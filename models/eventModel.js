@@ -183,13 +183,16 @@ function deleteEvent(id) {
 
 // Sign up, or change a guest count. One transaction covers the read and the
 // write, so the capacity check cannot race another member's.
-function _writeSignup(eventId, playerId, guests, today, { mustExist }) {
+function _writeSignup(eventId, playerId, guests, today, { mustExist, allowPast = false }) {
   const db = getDB();
   const g = Number(guests) || 0;
   const txn = db.transaction(() => {
     const e = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!e) throw _validationError('Event not found.', 404);
-    if (e.event_date < today) throw _validationError('This event has already happened.', 409);
+    // The date closes signups for members, but not for the admin: the roster is
+    // the club's record of who came, and it is often only afterwards that it is
+    // known. Every other rule still holds for them.
+    if (e.event_date < today && !allowPast) throw _validationError('This event has already happened.', 409);
     if (e.members_only && !_canSeeMembersOnly(db, playerId, false)) {
       throw _validationError('This event is for club members.', 403);
     }
@@ -216,6 +219,22 @@ function _writeSignup(eventId, playerId, guests, today, { mustExist }) {
 
 function signUp(eventId, playerId, guests, today) {
   _writeSignup(eventId, playerId, guests, today, { mustExist: false });
+}
+
+// The admin puts a member on the list. Same write, and deliberately the same
+// rules: a full event is full for everyone, and a members-only event takes
+// members only, whoever is doing the adding. Guests are the member's own call,
+// so they arrive with none and set their own afterwards.
+function addAttendee(eventId, playerId, today) {
+  const db = getDB();
+  // Already going: leave them exactly as they are. Writing the signup again
+  // would set their guests back to none, and their guests are their own.
+  const on = db.prepare('SELECT 1 FROM event_signups WHERE event_id = ? AND player_id = ?').get(eventId, playerId);
+  if (!on) _writeSignup(eventId, playerId, 0, today, { mustExist: false, allowPast: true });
+  const e = db.prepare('SELECT max_people FROM events WHERE id = ?').get(eventId);
+  const { members_count, guests_count } = _counts(db, eventId);
+  const total = members_count + guests_count;
+  return { ok: true, total, max_people: e.max_people, full: e.max_people != null && total >= e.max_people };
 }
 
 function updateSignup(eventId, playerId, guests, today) {
@@ -271,5 +290,5 @@ function searchLinkables(q) {
 
 module.exports = {
   listEvents, getEvent, createEvent, updateEvent, deleteEvent,
-  signUp, updateSignup, withdraw, removeAttendee, exportRows, searchLinkables,
+  signUp, updateSignup, withdraw, addAttendee, removeAttendee, exportRows, searchLinkables,
 };

@@ -101,6 +101,8 @@ if (typeof window !== 'undefined' && !window.api) {
     updateBookingType:  (id, d)   => _apiFetch('PUT',    `/api/booking-types/${id}`, d),
     deleteBookingType:  (id)      => _apiFetch('DELETE', `/api/booking-types/${id}`),
     // ---- Events ----
+    // The admin puts a member on an event; guests stay the member's own call.
+    addEventSignup:       (id, playerId) => _apiFetch('POST', `/api/events/${id}/signups`, { playerId }),
     getEvents:            (scope)   => _apiFetch('GET',    `/api/events?scope=${scope || 'upcoming'}`),
     getEvent:             (id)      => _apiFetch('GET',    `/api/events/${id}`),
     createEvent:          (d)       => _apiFetch('POST',   '/api/events', d),

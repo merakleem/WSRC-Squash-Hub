@@ -36,6 +36,8 @@ window.api = {
   updateEventSignup: async (id, d) => { calls.push(['updateSignup', id, d]); return { ok: true }; },
   withdrawFromEvent: async (id) => { calls.push(['withdraw', id]); return { ok: true }; },
   removeEventAttendee: async (id, pid) => { calls.push(['removeAttendee', id, pid]); return { ok: true }; },
+  getPlayers: async () => [{ id: 200, name: 'Nia Fletcher', member_number: 'M-1200', is_member: 1 }],
+  addEventSignup: async (id, pid) => { calls.push(['addEventSignup', id, pid]); return { ok: true, total: 1, max_people: null, full: false }; },
   searchLinkables: async (q) => [{type:'league',id:4,name:'Winter League 2027',meta:'Registration open'},{type:'tournament',id:9,name:'Club Championships 2026',meta:'3 Oct 2026'}].filter(l=>l.name.toLowerCase().includes(q.toLowerCase())),
 };
 let navved=null;

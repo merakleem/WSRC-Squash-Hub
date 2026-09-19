@@ -10078,8 +10078,12 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   background: #fff;
   border: 1px solid #e7ebf2;
   border-radius: 14px;
-  overflow: hidden;
+  /* No overflow:hidden - the admin's add list opens upward out of this card.
+     The head and the last block round their own corners instead. */
 }
+.ev-roster-head { border-radius: 14px 14px 0 0; }
+.ev-roster-foot { border-radius: 0 0 14px 14px; }
+.ev-roster-add:last-child { border-radius: 0 0 14px 14px; }
 .ev-roster-head {
   padding: 14px 18px;
   border-bottom: 1px solid #e7ebf2;
@@ -10152,6 +10156,88 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   gap: 8px;
   padding: 12px 18px;
   background: #f7f9fc;
+  border-top: 1px solid #f0f3f7;
+}
+
+/* ── The admin adds a member ── */
+/* Its own strip between the rows and the footer, which already carries ADMIN,
+   Print and Export CSV. */
+.ev-roster-add { position: relative; padding: 12px 18px; background: #fff; }
+.ev-roster-add input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #dce3ed;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text, #1c2b3a);
+  background: #fff;
+}
+.ev-roster-add input::placeholder { color: #93a2b5; }
+.ev-roster-add input:focus {
+  outline: none;
+  border-color: #5b7cf9;
+  box-shadow: 0 0 0 2px rgba(91, 124, 249, .18);
+}
+/* A full event: the same box, saying why it cannot be used. */
+.ev-roster-add-blocked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #e7ebf2;
+  border-radius: 9px;
+  background: #f2f4f9;
+  font-size: 13.5px;
+  color: #93a2b5;
+}
+.ev-roster-add-blocked i { font-style: normal; font-size: 12px; }
+
+/* Opens upward: the roster is the last block in a scrolling column, so there
+   is rarely room below it - and on a phone this keeps it above the keyboard. */
+.ev-roster-add-drop {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(100% - 6px);
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(20, 30, 60, .16);
+  overflow: hidden;
+}
+.ev-roster-add-hit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text, #1c2b3a);
+  text-align: left;
+  cursor: pointer;
+}
+.ev-roster-add-hit i { font-style: normal; font-size: 12px; color: #93a2b5; }
+.ev-roster-add-hit:hover,
+.ev-roster-add-hit.is-active { background: #f7f9ff; }
+.ev-roster-add-none { display: block; padding: 10px 12px; font-size: 13px; color: #6b7e93; }
+
+/* The row just added, tinted once so the eye can find it. */
+.ev-row--new { animation: ev-row-new 1.2s ease; }
+@keyframes ev-row-new {
+  from { background: #f7f9ff; }
+  to { background: transparent; }
+}
+.ev-roster-none span { display: block; margin-top: 3px; font-size: 12.5px; color: #6b7e93; }
+@media (prefers-reduced-motion: reduce) {
+  .ev-row--new { animation: none; }
 }
 
 /* ── Modal ── */
@@ -10304,6 +10390,12 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   .ev-back { display: inline-flex; }
   .ev-hero-name { font-size: 26px; }
   .ev-roster-cols, .ev-row-no, .ev-roster-foot { display: none; }
+  /* The footer is hidden here, so the add strip is what closes the card. */
+  .ev-roster-add { padding: 12px 16px 14px; border-radius: 0 0 14px 14px; }
+  .ev-roster-add input,
+  .ev-roster-add-blocked { height: 44px; border-radius: 10px; font-size: 14px; }
+  .ev-roster-add-drop { left: 16px; right: 16px; }
+  .ev-roster-add-hit { min-height: 44px; padding: 0 14px; font-size: 14px; }
 }
 
 
