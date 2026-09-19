@@ -119,6 +119,9 @@ suite('a member is told which tabs have something new', async ({ ok, t }) => {
   // what comes next reaches them. Leaving no row behind is the state in which
   // no marker can ever appear, which is how this was found.
   await a.send('POST', '/api/return-to-admin');
+  // Everything the club has posted predates the look, so "up to date" here is
+  // about having no row rather than about when the last league landed.
+  caughtUp();
   await a.send('POST', '/api/players/4/view-as');
   ok('they read as up to date', (await a.me()).unread.leagues === false);
   ok('and the look left them a baseline', getDB().prepare('SELECT COUNT(*) AS n FROM member_tab_opens WHERE player_id = 4').get().n === 2);
@@ -128,7 +131,8 @@ suite('a member is told which tabs have something new', async ({ ok, t }) => {
   await a.send('POST', '/api/return-to-admin');
   await a.send('POST', '/api/leagues/upcoming', { name: 'Spring Singles', startDate: iso(90), setupType: 'modern' });
   await a.send('POST', '/api/players/4/view-as');
-  ok('the admin sees the dot they would see', (await a.me()).unread.leagues === true);
+  ok('the admin sees the dot they would see', (await a.me()).unread.leagues === true,
+    `stamp ${stampOf(4, 'leagues')} vs ${JSON.stringify(getDB().prepare('SELECT name, created_at FROM leagues ORDER BY id DESC LIMIT 2').all())}`);
   const theirStamp = stampOf(4, 'leagues');
   await a.send('PATCH', '/api/me/opened/leagues');
   ok('and opening the tab in their name does not spend it', stampOf(4, 'leagues') === theirStamp);
@@ -142,4 +146,39 @@ suite('a member is told which tabs have something new', async ({ ok, t }) => {
   ok('and the league announced since the look is still theirs to see', freshMe.unread.leagues === true);
   await fresh.send('PATCH', '/api/me/opened/leagues');
   ok('opening it themselves does clear it', (await fresh.me()).unread.leagues === false);
+
+  console.log('\nPOSTED AFTER THE DEPLOY, READ BY SOMEONE WHO HAS NOT BEEN BACK YET');
+  // The launch case: this ships, an event goes up, and only then does a member
+  // open the app. Starting them at the moment they happen to load it would
+  // swallow that event - and on the day it ships, that is every member.
+  await a.send('POST', '/api/return-to-admin');
+  const db = getDB();
+  db.prepare(`UPDATE schema_migrations SET applied_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-120 seconds') WHERE id = 30`).run();
+  db.prepare(`UPDATE players SET created_at = datetime('now', '-400 seconds')`).run();
+  db.prepare('DELETE FROM member_tab_opens WHERE player_id = 4').run();
+  await a.send('POST', '/api/events', { name: 'Posted At Launch', event_date: iso(14) });
+  const returning = client(app);
+  await returning.login('p4@x.invalid', 'pw123');
+  const first = await returning.me();
+  ok('their very first look carries the dot', first.unread.events === true, JSON.stringify(first));
+  ok('and they start from the deploy, not from now', first.opened.events < db.prepare(`SELECT strftime('%Y-%m-%d %H:%M:%f','now') AS t`).get().t);
+
+  console.log('\nBUT NOT THE CLUB\'S WHOLE HISTORY');
+  db.prepare('DELETE FROM member_tab_opens WHERE player_id = 4').run();
+  db.prepare(`UPDATE leagues SET created_at = datetime('now', '-400 seconds')`).run();
+  const afresh = await client(app);
+  await afresh.login('p4@x.invalid', 'pw123');
+  ok('what was posted before it arrived is taken as seen', (await afresh.me()).unread.leagues === false);
+
+  console.log('\nA MEMBER ADDED AFTER IT ARRIVED STARTS FROM WHEN THEY JOINED');
+  // Otherwise someone who joins next year opens the app to a dot for every
+  // league and event the club has run since this shipped.
+  db.prepare("INSERT INTO players (name, email, is_member) VALUES ('Gus Hall', 'p5@x.invalid', 1)").run();
+  const gus = getDB().prepare('SELECT id FROM players WHERE email = ?').get('p5@x.invalid').id;
+  db.prepare('INSERT INTO user_accounts (player_id, password_hash) VALUES (?, (SELECT password_hash FROM user_accounts WHERE player_id = 1))').run(gus);
+  const newcomer = client(app);
+  await newcomer.login('p5@x.invalid', 'pw123');
+  ok('the event posted before they existed is not theirs to catch up on', (await newcomer.me()).unread.events === false);
+  ok('and they were stamped from their own joining', stampOf(gus, 'events') > first.opened.events, `${stampOf(gus, 'events')} vs ${first.opened.events}`);
+
 });
