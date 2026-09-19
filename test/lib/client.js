@@ -21,27 +21,45 @@ function boot(dbFile, seed) {
   return createApp();
 }
 
+// Roughly one request in sixteen thousand comes back from supertest's agent as
+// a 404 with no body and no content-type, having never reached the app at all
+// - reproducible against a bare Express app with none of our code, so it is
+// the harness, not the server. It is rare per request and common per suite,
+// and it cascades: a lost GET /api/me yields no CSRF token, so the call after
+// it is rejected and the assertion fails somewhere else entirely.
+//
+// Nothing of ours answers that way (our /api 404 is JSON, Express's own is
+// HTML), and the server never saw the request, so there is nothing to
+// double-apply. One retry, and only for that exact shape.
+const phantom = (r) => r.status === 404 && !r.headers['content-type'] && !r.text;
+async function once(make) {
+  const r = await make();
+  return phantom(r) ? make() : r;
+}
+
 function client(app) {
   const agent = request.agent(app);
-  const me = async () => (await agent.get('/api/me')).body;
+  const me = async () => (await once(() => agent.get('/api/me'))).body;
   const send = async (method, p, body) => {
     const csrf = (await me()).csrf || '';
-    let req = agent[method.toLowerCase() === 'delete' ? 'delete' : method.toLowerCase()](p).set('X-CSRF-Token', csrf);
-    if (body !== undefined) req = req.set('Content-Type', 'application/json').send(JSON.stringify(body));
-    const r = await req;
+    const build = () => {
+      const req = agent[method.toLowerCase() === 'delete' ? 'delete' : method.toLowerCase()](p).set('X-CSRF-Token', csrf);
+      return body !== undefined ? req.set('Content-Type', 'application/json').send(JSON.stringify(body)) : req;
+    };
+    const r = await once(build);
     return { status: r.status, body: r.body, text: r.text };
   };
   return {
     agent,
     /** Sign in like the form does. Resolves to the status as a string ('302' = in). */
-    login: async (email, password) => String((await agent.post('/login').type('form').send({ email, password })).status),
+    login: async (email, password) => String((await once(() => agent.post('/login').type('form').send({ email, password }))).status),
     me,
     /** GET, parsed JSON body. */
-    get: async (p) => (await agent.get(p)).body,
+    get: async (p) => (await once(() => agent.get(p))).body,
     /** GET, raw text (HTML pages). */
-    text: async (p) => (await agent.get(p)).text,
+    text: async (p) => (await once(() => agent.get(p))).text,
     /** GET, status as a string. */
-    getStatus: async (p) => String((await agent.get(p)).status),
+    getStatus: async (p) => String((await once(() => agent.get(p))).status),
     /** A mutating call with the session's CSRF token. */
     send,
     /** Same, status only, as a string. */
