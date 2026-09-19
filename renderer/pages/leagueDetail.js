@@ -169,17 +169,6 @@ function _lguActionHTML(league) {
   return '<button class="lgu-join" id="lguSignUp">Sign up</button>';
 }
 
-function _lguNextHTML(league) {
-  const close = league.signup_deadline
-    ? `Signups close ${_lguShort(league.signup_deadline)}.`
-    : 'Signups stay open until the organiser builds the league.';
-  return `
-    <section class="lgu-next">
-      <span class="lgu-label">What happens next</span>
-      <p>${close} The organiser then builds the divisions and schedule, and this page becomes the league's schedule. You can withdraw any time before then.</p>
-    </section>`;
-}
-
 function _lguRosterHTML(league, admin) {
   const rows = league.signups || [];
   const n = rows.length;
@@ -198,9 +187,7 @@ function _lguRosterHTML(league, admin) {
         <div class="lgu-empty">
           <span class="lgu-empty-dots"><i></i><i></i><i></i></span>
           <b>No one has signed up yet</b>
-          <span>${admin
-    ? 'Members see it on the Leagues page and their dashboard. You can add people yourself below.'
-    : 'Be the first — sign up above.'}</span>
+          ${admin ? '<span>Members see it on the Leagues page and their dashboard. You can add people yourself below.</span>' : ''}
         </div>
         ${admin ? _lguAddHTML() : ''}
       </section>`;
@@ -295,7 +282,7 @@ function _renderUpcoming(league) {
         </div>
         <div class="lgu-side">
           ${_lguFactsHTML(league, admin)}
-          ${admin ? _lguBuildHTML(league) : `${_lguActionHTML(league)}${_lguNextHTML(league)}`}
+          ${admin ? _lguBuildHTML(league) : _lguActionHTML(league)}
           ${admin ? '<button class="lgu-cancel" id="lguCancel">Cancel this league&hellip;</button>' : ''}
         </div>
       </div>

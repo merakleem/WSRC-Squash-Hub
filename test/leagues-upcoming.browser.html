@@ -190,7 +190,6 @@ try {
   detail.renderLeagueDetail();
   await settle(80);
   ok('it says they are in', !!$('.lgu-in') && /You're signed up/.test(txt($('.lgu-in'))));
-  ok('and what happens next', /builds the divisions and schedule/.test(txt($('.lgu-next'))));
   ok('their own row is first and marked', $$('.lgu-row')[0].classList.contains('lgu-row--me') && /You/.test(txt($$('.lgu-row')[0])));
   ok('member numbers are not sent to them', !$('.lgu-row--admin') && !$('[data-remove]'));
   ok('and no admin controls are drawn', !$('#lguBuild') && !$('#lguCancel') && !$('#lguAdd'));
