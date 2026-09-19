@@ -114,18 +114,32 @@ suite('a member is told which tabs have something new', async ({ ok, t }) => {
 
   console.log('\nA MEMBER WHO HAS NEVER OPENED THE APP, WHILE AN ADMIN IS WEARING THEM');
   // Dev Shah has never signed in, so nothing has ever been stamped for them.
-  // The viewing-as session must not write the row either: that would spend a
-  // marker they have not seen.
+  // The look seeds their baseline - a member with no row is up to date at
+  // whatever moment it is first read, so setting it now only means more of
+  // what comes next reaches them. Leaving no row behind is the state in which
+  // no marker can ever appear, which is how this was found.
   await a.send('POST', '/api/return-to-admin');
   await a.send('POST', '/api/players/4/view-as');
   ok('they read as up to date', (await a.me()).unread.leagues === false);
-  ok('and no row was created for them', getDB().prepare('SELECT COUNT(*) AS n FROM member_tab_opens WHERE player_id = 4').get().n === 0);
+  ok('and the look left them a baseline', getDB().prepare('SELECT COUNT(*) AS n FROM member_tab_opens WHERE player_id = 4').get().n === 2);
+
+  console.log('\nAND SOMETHING POSTED AFTER THAT LOOK REACHES THEM');
+  caughtUp(4);
+  await a.send('POST', '/api/return-to-admin');
+  await a.send('POST', '/api/leagues/upcoming', { name: 'Spring Singles', startDate: iso(90), setupType: 'modern' });
+  await a.send('POST', '/api/players/4/view-as');
+  ok('the admin sees the dot they would see', (await a.me()).unread.leagues === true);
+  const theirStamp = stampOf(4, 'leagues');
+  await a.send('PATCH', '/api/me/opened/leagues');
+  ok('and opening the tab in their name does not spend it', stampOf(4, 'leagues') === theirStamp);
 
   console.log('\nAND THEN THEY SIGN IN FOR THEMSELVES');
   await a.send('POST', '/api/return-to-admin');
   const fresh = client(app);
   await fresh.login('p4@x.invalid', 'pw123');
   const freshMe = await fresh.me();
-  ok('their first read stamps both tabs', !!freshMe.opened.leagues && !!freshMe.opened.events);
-  ok('and marks nothing', freshMe.unread.leagues === false && freshMe.unread.events === false);
+  ok('both tabs are stamped', !!freshMe.opened.leagues && !!freshMe.opened.events);
+  ok('and the league announced since the look is still theirs to see', freshMe.unread.leagues === true);
+  await fresh.send('PATCH', '/api/me/opened/leagues');
+  ok('opening it themselves does clear it', (await fresh.me()).unread.leagues === false);
 });
