@@ -37,11 +37,22 @@ if (typeof window !== 'undefined' && !window.api) {
     bulkPatchPlayers: (d) => _apiFetch('POST', '/api/players/bulk', d),
     bulkSendInvites:  (d) => _apiFetch('POST', '/api/players/send-invite', d),
 
+    // Unread markers: stamps a tab as opened, answering with the stamp it
+    // replaced so the list can mark what the dot pointed at.
+    markTabOpened:    (tab) => _apiFetch('PATCH', `/api/me/opened/${tab}`),
+
     getLeagues:       ()  => _apiFetch('GET',    '/api/leagues'),
     getLeague:        (id)=> _apiFetch('GET',    `/api/leagues/${id}`),
     createLeague:     (d) => _apiFetch('POST',   '/api/leagues', d),
     deleteLeague:     (id)=> _apiFetch('DELETE', `/api/leagues/${id}`),
     endLeague:        (id)=> _apiFetch('PUT',    `/api/leagues/${id}/end`),
+    // Upcoming leagues: announced, open for signups, not yet built.
+    announceLeague:   (d) => _apiFetch('POST',   '/api/leagues/upcoming', d),
+    editAnnouncement: (id, d) => _apiFetch('PUT', `/api/leagues/${id}/announcement`, d),
+    signUpForLeague:  (id)=> _apiFetch('POST',   `/api/leagues/${id}/signup`),
+    withdrawFromLeague: (id) => _apiFetch('DELETE', `/api/leagues/${id}/signup`),
+    addLeagueSignup:  (id, playerId) => _apiFetch('POST', `/api/leagues/${id}/signups`, { playerId }),
+    removeLeagueSignup: (id, playerId) => _apiFetch('DELETE', `/api/leagues/${id}/signups/${playerId}`),
 
     viewAsPlayer:     (id)=> _apiFetch('POST',   `/api/players/${id}/view-as`),
     returnToAdmin:    ()  => _apiFetch('POST',   '/api/return-to-admin'),
@@ -90,6 +101,8 @@ if (typeof window !== 'undefined' && !window.api) {
     updateBookingType:  (id, d)   => _apiFetch('PUT',    `/api/booking-types/${id}`, d),
     deleteBookingType:  (id)      => _apiFetch('DELETE', `/api/booking-types/${id}`),
     // ---- Events ----
+    // The admin puts a member on an event; guests stay the member's own call.
+    addEventSignup:       (id, playerId) => _apiFetch('POST', `/api/events/${id}/signups`, { playerId }),
     getEvents:            (scope)   => _apiFetch('GET',    `/api/events?scope=${scope || 'upcoming'}`),
     getEvent:             (id)      => _apiFetch('GET',    `/api/events/${id}`),
     createEvent:          (d)       => _apiFetch('POST',   '/api/events', d),

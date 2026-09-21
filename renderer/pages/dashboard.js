@@ -1148,8 +1148,30 @@ export function ladderGapCopy(rows, rank, system) {
  * members-only events from everyone else, so a row never has to mention
  * membership - it is simply not there.
  */
-export function scheduleRows({ bookings = [], upcoming = [], events = [], today, meId, limit = 6 }) {
+export function scheduleRows({ bookings = [], upcoming = [], events = [], leagues = [], today, meId, limit = 6 }) {
   const rows = [];
+
+  // A league open for signups is a date with something to do on it, which is
+  // what this block is. It drops out once it is built - the fixtures take over.
+  for (const l of leagues) {
+    if (l.status !== 'upcoming') continue;
+    const joined = !!l.i_signed_up;
+    if (!joined && l.signups_closed) continue;
+    const n = l.signup_count || 0;
+    const others = joined ? n - 1 : n;
+    rows.push({
+      kind: 'league', id: l.id, date: l.start_date, time: '',
+      title: l.name,
+      tag: { name: 'League', color: '#3550c8' },
+      sub: [
+        `Starts ${_dhShort(l.start_date)}`,
+        joined ? (others ? `you + ${others} signed up` : "you're signed up") : `${n} signed up`,
+        l.signup_deadline && !l.deadline_passed ? `sign up by ${_dhShort(l.signup_deadline)}` : '',
+      ].filter(Boolean).join(' \u00b7 '),
+      going: joined,
+      joinable: !joined && !l.signups_closed,
+    });
+  }
 
   for (const b of bookings) {
     const others = (b.players || []).filter((p) => p.id !== meId).map((p) => p.name);
@@ -1255,7 +1277,7 @@ async function renderMemberDashboard(user, content) {
   const nowMin = clubNow().minutes;
   const member = isMember();
 
-  const [playerData, ladderData, activity, doubles, reportable, bookings, events, slot] = await Promise.all([
+  const [playerData, ladderData, activity, doubles, reportable, bookings, events, leagues, slot] = await Promise.all([
     fetch(`/api/players/${playerId}/history`).then((r) => r.json()),
     window.api.getLadderForSeason().catch(() => null),
     window.api.getActivity().catch(() => []),
@@ -1263,6 +1285,7 @@ async function renderMemberDashboard(user, content) {
     window.api.getReportable().catch(() => []),
     member ? window.api.getMyBookings().catch(() => []) : Promise.resolve([]),
     window.api.getEvents('upcoming').catch(() => []),
+    window.api.getLeagues().catch(() => []),
     member ? window.api.getSuggestedSlot().catch(() => null) : Promise.resolve(null),
   ]);
 
@@ -1308,7 +1331,7 @@ async function renderMemberDashboard(user, content) {
     feed: feed.filter((r) => r.kind === 'result'), played, today,
   });
 
-  const sched = scheduleRows({ bookings, upcoming, events, today, meId: playerId });
+  const sched = scheduleRows({ bookings, upcoming, events, leagues, today, meId: playerId });
   const firstName = _dhFirst(playerData.name || user.name);
   const fresh = playerData.created_at
     && (Date.now() - new Date(String(playerData.created_at).replace(' ', 'T') + 'Z').getTime()) < 7 * 864e5;
@@ -1545,10 +1568,12 @@ function _dhSchedHTML(rows, today) {
       const tint = r.tag ? _dhTint(r.tag.color) : null;
       const tag = r.tag
         ? `<span class="dh-sched-tag" style="background:${tint.bg};color:${tint.fg}">${esc(r.tag.name)}</span>` : '';
-      const right = r.kind === 'event'
+      const right = r.kind === 'event' || r.kind === 'league'
         ? (r.going
-          ? '<span class="dh-sched-going">✓ Going</span>'
-          : r.joinable ? `<button class="dh-sched-join" data-dh="event|${r.id}">Join</button>` : '')
+          ? `<span class="dh-sched-going">✓ ${r.kind === 'league' ? 'Signed up' : 'Going'}</span>`
+          // One word for one action: the events page says Sign up, so this does
+          // too, rather than offering Join for the same thing.
+          : r.joinable ? `<button class="dh-sched-join" data-dh="${r.kind === 'league' ? 'joinLeague' : 'event'}|${r.id}">Sign up</button>` : '')
         : `<button class="dh-sched-act" data-dh="${esc(_dhRowAction(r))}">${esc(r.action)}</button>`;
       return `<div class="dh-sched-row">
           <span class="dh-sched-day${r.date === today ? ' dh-sched-day--now' : ''}">
@@ -1642,6 +1667,7 @@ function _dhWire(content) {
       case 'players': window.navigate('players'); break;
       case 'activity': window.navigate('activity'); break;
       case 'event': window.navigate('events', { eventId: Number(a) }); break;
+      case 'joinLeague': window.navigate('leagueDetail', { league: { id: Number(a), name } }); break;
       case 'book':
         window.navigate('courtBooking', a
           ? { booking: { courtId: Number(a), date: b, startTime: c || null } }

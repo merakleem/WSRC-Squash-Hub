@@ -1,0 +1,212 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="app-container">
+  <button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu"><span class="bar"></span><span class="bar"></span><span class="bar"></span></button>
+  <aside class="sidebar">
+    <nav class="sidebar-nav">
+      <a class="nav-item" data-page="dashboard"><svg class="nav-icon"></svg>Dashboard</a>
+      <a class="nav-item" data-page="leagues"><svg class="nav-icon"></svg>Leagues</a>
+      <a class="nav-item" data-page="events"><svg class="nav-icon"></svg>Events</a>
+    </nav>
+  </aside>
+  <div class="main-wrapper">
+    <header class="topbar"><div class="topbar-left"><h1 class="topbar-title" id="pageTitle"></h1></div><div class="topbar-actions" id="topbarActions"></div></header>
+    <main class="content" id="mainContent"></main>
+  </div>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// Unread markers: the dot on a nav item, the one on the hamburger that hides
+// it, the cards marked on the visit that clears it, and the beat before it goes.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+const day = (n) => { const d = new Date(Date.now() + n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const shown = (el) => !!el && getComputedStyle(el).display !== 'none';
+const bg = (el) => getComputedStyle(el).backgroundColor;
+const navDot = (tab) => $(`.nav-item[data-page="${tab}"] .um-dot`);
+const burgerDot = () => $('#hamburgerBtn .um-dot');
+
+// A stamp with milliseconds, and posts either side of it - exactly how the
+// server hands them over.
+const SEEN = '2026-09-18 12:00:00.000';
+const BEFORE = '2026-09-17 09:00:00';
+const AFTER = '2026-09-18 14:30:00';
+
+const league = (id, name, created_at) => ({
+  id, name, status: 'upcoming', setup_type: 'modern', start_date: day(30), created_at,
+  description: '', play_days: [], player_ids: [], signup_cap: 8, signup_count: 2, spots_left: 6,
+  full: false, signups_closed: false, deadline_passed: false, i_signed_up: false, signup_preview: [],
+});
+const event = (id, name, created_at) => ({
+  id, name, event_date: day(5), start_time: '18:00', end_time: '20:00', created_at,
+  members_only: false, guests_allowed: 0, max_people: null, members_count: 2, guests_count: 0,
+  total: 2, spots_left: null, full: false, my_signup: null, link: null, preview: [],
+});
+
+const LEAGUES = [league(1, 'Autumn Box League', AFTER), league(2, 'Old News League', BEFORE)];
+const EVENTS = [event(10, 'Club Social', AFTER), event(11, 'Last Month Social', BEFORE)];
+const patched = [];
+window.api = {
+  markTabOpened: async (tab) => { patched.push(tab); return { previous: SEEN, opened_at: '2026-09-19 08:00:00.000' }; },
+  getLeagues: async () => JSON.parse(JSON.stringify(LEAGUES)),
+  getLeague: async (id) => ({ ...LEAGUES.find((l) => l.id === Number(id)), weeks: [], divisions: [], players: [], teams: [], pairs: [], courts: [], signups: [] }),
+  getEvents: async () => JSON.parse(JSON.stringify(EVENTS)),
+  getEvent: async (id) => ({ ...EVENTS.find((e) => e.id === Number(id)), attendees: [] }),
+  getPlayers: async () => [],
+  getLadder: async () => [],
+};
+
+const { state } = await import('../renderer/state.js');
+const unread = await import('../renderer/unread.js');
+const leaguesPage = await import('../renderer/pages/leagues.js');
+const eventsPage = await import('../renderer/pages/events.js');
+
+const asMember = (unreadState) => {
+  state.currentUser = { role: 'player', playerId: 42, name: 'Me Myself', unread: { ...unreadState }, opened: { leagues: SEEN, events: SEEN } };
+};
+const clearDots = () => $$('.um-dot').forEach((d) => d.remove());
+
+try {
+  log.textContent += `NOTHING NEW (width ${window.innerWidth})\n`;
+  asMember({ leagues: false, events: false });
+  unread.paintNav();
+  ok('no dot on either tab', !navDot('leagues') && !navDot('events'));
+  ok('none on the hamburger', !burgerDot());
+  ok('and the button says only Menu', $('#hamburgerBtn').getAttribute('aria-label') === 'Menu');
+
+  log.textContent += '\nONE TAB\n';
+  asMember({ leagues: true, events: false });
+  unread.paintNav();
+  ok('the leagues tab carries a dot', !!navDot('leagues'));
+  ok('the events tab does not', !navDot('events'));
+  ok('it is announced, not just drawn', navDot('leagues').getAttribute('aria-label') === 'New');
+  ok('the label is untouched', txt($('.nav-item[data-page="leagues"]')) === 'Leagues', txt($('.nav-item[data-page="leagues"]')));
+  ok('the hamburger speaks for it', !!burgerDot() && $('#hamburgerBtn').getAttribute('aria-label') === 'Menu, something new');
+
+  log.textContent += '\nBOTH TABS\n';
+  asMember({ leagues: true, events: true });
+  unread.paintNav();
+  ok('a dot on each', !!navDot('leagues') && !!navDot('events'));
+  ok('still one on the hamburger', $$('#hamburgerBtn .um-dot').length === 1);
+  const r1 = navDot('leagues').getBoundingClientRect(), r2 = navDot('events').getBoundingClientRect();
+  ok('they line up on the trailing edge', Math.abs(r1.right - r2.right) < 1, `${r1.right} vs ${r2.right}`);
+
+  log.textContent += '\nDRAWER OPEN\n';
+  $('#hamburgerBtn').classList.add('open');
+  ok('the hamburger dot goes while the drawer is open', !shown(burgerDot()));
+  ok('the rows behind it keep theirs', !!navDot('leagues') && !!navDot('events'));
+  $('#hamburgerBtn').classList.remove('open');
+  ok('and it comes back on close', shown(burgerDot()));
+
+  log.textContent += '\nAN ADMIN POSTED THE THINGS\n';
+  clearDots();
+  state.currentUser = { role: 'admin', playerId: null, unread: { leagues: false, events: false }, opened: {} };
+  unread.paintNav();
+  ok('nothing is drawn for them', !navDot('leagues') && !navDot('events') && !burgerDot());
+  unread.beginVisit('leagues');
+  ok('and a visit of theirs marks nothing', unread.isNew('leagues', AFTER) === false);
+
+  log.textContent += '\nTHE VISIT THAT CLEARS LEAGUES\n';
+  clearDots();
+  asMember({ leagues: true, events: true });
+  unread.paintNav();
+  patched.length = 0;
+  unread.beginVisit('leagues');
+  await leaguesPage.renderLeagues();
+  await settle(80);
+  ok('the tab was stamped as opened', patched.join(',') === 'leagues', patched.join(','));
+  const cards = $$('.lgl-card');
+  const fresh = cards.find((c) => /Autumn Box League/.test(txt(c)));
+  const stale = cards.find((c) => /Old News League/.test(txt(c)));
+  ok('the new league is marked', fresh.classList.contains('um-new'));
+  ok('with a dot before its name', !!fresh.querySelector('.lgl-name .um-mark'));
+  ok('the one they had seen is not', !stale.classList.contains('um-new') && !stale.querySelector('.um-mark'));
+  ok('and the marked card is tinted', bg(fresh) !== bg(stale), `${bg(fresh)} vs ${bg(stale)}`);
+  ok('the dot is still on the nav item as the list paints', !!navDot('leagues'));
+  await settle(400);
+  ok('and is still there half a second later', !!navDot('leagues'));
+  await settle(700);
+  ok('then it goes', !navDot('leagues'));
+  ok('the card markers stay for the whole visit', fresh.classList.contains('um-new'));
+  ok('events is still marked', !!navDot('events'));
+  ok('so the hamburger keeps its dot', !!burgerDot() && $('#hamburgerBtn').getAttribute('aria-label') === 'Menu, something new');
+
+  log.textContent += '\nA RE-RENDER DURING THE VISIT KEEPS THE MARKERS\n';
+  await leaguesPage.renderLeagues();
+  await settle(80);
+  ok('the new league is still marked', $$('.lgl-card').find((c) => /Autumn Box League/.test(txt(c))).classList.contains('um-new'));
+  ok('and the tab was not stamped twice', patched.length === 1, patched.join(','));
+
+  log.textContent += '\nLEAVING THE PAGE ENDS THE MARKING\n';
+  unread.beginVisit('dashboard');
+  ok('nothing is new once they have gone', unread.isNew('leagues', AFTER) === false);
+
+  log.textContent += '\nTHE VISIT THAT CLEARS EVENTS\n';
+  patched.length = 0;
+  unread.beginVisit('events');
+  eventsPage.renderEvents();
+  await settle(120);
+  ok('the tab was stamped', patched.join(',') === 'events', patched.join(','));
+  const evCards = $$('.ev-card');
+  const freshEv = evCards.find((c) => /Club Social/.test(txt(c)));
+  const staleEv = evCards.find((c) => /Last Month Social/.test(txt(c)));
+  ok('the new event is marked', freshEv.classList.contains('um-new') && !!freshEv.querySelector('.um-mark'));
+  ok('the older one is not', !staleEv.classList.contains('um-new'));
+  ok('the dot sits before the name', freshEv.querySelector('.um-nameline').firstElementChild.classList.contains('um-mark'));
+  // The first card is selected on arrival, and selected wins over the tint.
+  ok('selected keeps its own look, and still shows the dot',
+    !freshEv.classList.contains('ev-card--sel') || (bg(freshEv) === bg(staleEv) && !!freshEv.querySelector('.um-mark')),
+    `${bg(freshEv)} vs ${bg(staleEv)}`);
+  await settle(950);
+  ok('the events dot goes', !navDot('events'));
+  ok('and so does the hamburger, now nothing is left', !burgerDot());
+  ok('the button is plain again', $('#hamburgerBtn').getAttribute('aria-label') === 'Menu');
+
+  log.textContent += '\nA DETAIL PAGE DOES NOT CLEAR THE LIST\n';
+  clearDots();
+  asMember({ leagues: true, events: true });
+  unread.paintNav();
+  patched.length = 0;
+  unread.beginVisit('eventDetail');
+  await settle(60);
+  ok('nothing was stamped', patched.length === 0, patched.join(','));
+  ok('nothing is marked', unread.isNew('events', AFTER) === false);
+  ok('and the dots are where they were', !!navDot('leagues') && !!navDot('events') && !!burgerDot());
+
+  log.textContent += '\nFIRST LOOK: STAMPED, AND NOTHING TO SEE\n';
+  clearDots();
+  asMember({ leagues: false, events: false });
+  unread.paintNav();
+  patched.length = 0;
+  unread.beginVisit('leagues');
+  await leaguesPage.renderLeagues();
+  await settle(80);
+  ok('a tab with nothing new is not stamped again', patched.length === 0, patched.join(','));
+  ok('no card is marked', !$('.lgl-card.um-new') && !$('.um-mark'));
+  ok('and no dot appears', !navDot('leagues') && !burgerDot());
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

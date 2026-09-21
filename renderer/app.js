@@ -17,6 +17,7 @@ import { renderCreateLeague } from './pages/createLeague.js';
 import { renderTournaments, renderTournamentDetail, renderCreateTournament } from './pages/tournaments.js';
 import { renderEvents } from './pages/events.js';
 import { renderCourtBooking } from './pages/courtBooking.js';
+import { beginVisit, paintNav } from './unread.js';
 
 // ===== NAVIGATION =====
 function navigate(page, params = {}, { pushHistory = true } = {}) {
@@ -48,6 +49,10 @@ function navigate(page, params = {}, { pushHistory = true } = {}) {
   document.querySelectorAll('.nav-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.page === navPage);
   });
+
+  // Opening the Leagues or Events list is what clears its unread marker, and
+  // any navigation ends the visit that marks the cards.
+  beginVisit(page);
 
   // Back button
   const btnBack = document.getElementById('btnBack');
@@ -275,6 +280,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('navClubSettings').style.display = '';
     document.getElementById('sbGroupAdmin').style.display = '';
   }
+
+  // Dots for whatever has been posted since this member last looked.
+  paintNav();
 
   state.players = await window.api.getPlayers();
 

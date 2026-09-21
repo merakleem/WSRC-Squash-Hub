@@ -1,5 +1,6 @@
 import { state, isAdmin } from '../state.js';
 import { esc, toast, clubTodayStr, avatarInner } from '../utils.js';
+import { isNew, visitPainted } from '../unread.js';
 
 // ===== EVENTS =====
 // Club happenings members sign up for. One list, one detail column: socials,
@@ -107,6 +108,8 @@ export function renderEvents() {
     detail: null,
     rosterOpen: false,
     pendingGuests: 0,
+    justAdded: null,         // admin: the attendee whose row tints once
+    addFocus: false,         // admin: put the cursor back after a re-render
     view: 'list',            // mobile: 'list' | 'detail'
     modal: null,             // null | {mode:'create'} | {mode:'edit', id}
     form: null,
@@ -198,14 +201,18 @@ function _cardHTML(e) {
   const d = _d(e.event_date);
   const p = _pill(e);
   const sel = e.id === ev.selectedId;
+  // Posted since the member last opened Events: a dot before the name and the
+  // list tint, for this visit only. Selected keeps its own look.
+  const fresh = isNew('events', e.created_at);
+  const nameHTML = `<span class="ev-card-name">${esc(e.name)}</span>`;
   return `
-    <div class="ev-card${sel ? ' ev-card--sel' : ''}" data-ev="${e.id}">
+    <div class="ev-card${sel ? ' ev-card--sel' : ''}${fresh ? ' um-new' : ''}" data-ev="${e.id}">
       <div class="ev-date">
         <span class="ev-date-dow">${_DAYS_SHORT[d.getDay()].toUpperCase()}</span>
         <span class="ev-date-day">${d.getDate()}</span>
       </div>
       <div class="ev-card-mid">
-        <span class="ev-card-name">${esc(e.name)}</span>
+        ${fresh ? `<span class="um-nameline"><span class="um-mark" role="img" aria-label="New"></span>${nameHTML}</span>` : nameHTML}
         <div class="ev-card-meta">${_typeChip(e.link, false)}<span class="ev-card-when">${esc(_when(e))}</span>${_membersOnlyPill(e)}</div>
         <div class="ev-card-people">
           <div class="ev-avs">${_avatarStack(e, 'ev-av--card')}</div>
@@ -331,6 +338,30 @@ function _actionHTML(e) {
     </div>`;
 }
 
+// The admin's way onto the list: one field, up to six matches, click to add.
+// The same control the upcoming-league roster ships, in its own strip - the
+// footer below it already carries ADMIN, Print and Export CSV.
+//
+// A full event blocks it. The strip stays rather than disappearing: an admin
+// who knows the control lives here should be told why it is unavailable, and a
+// vanished input reads as a bug. Removing someone brings it back.
+function _addHTML(e) {
+  if (e.full) {
+    return `
+      <div class="ev-roster-add ev-roster-add--full">
+        <span class="ev-roster-add-blocked">
+          <span>Event is full</span><i>${e.total} of ${e.max_people}</i>
+        </span>
+      </div>`;
+  }
+  return `
+    <div class="ev-roster-add">
+      <input id="evAdd" placeholder="Add a member by name or number" autocomplete="off"
+        role="combobox" aria-expanded="false" aria-controls="evAddDrop" aria-autocomplete="list">
+      <div class="ev-roster-add-drop" id="evAddDrop" role="listbox" hidden></div>
+    </div>`;
+}
+
 function _rosterHTML(e) {
   const admin = isAdmin();
   const myId = state.currentUser?.playerId;
@@ -343,7 +374,7 @@ function _rosterHTML(e) {
   const shown = ev.rosterOpen ? rows : rows.slice(0, LIMIT);
   const gLabel = (n) => (n === 0 ? '—' : `${n} guest${n === 1 ? '' : 's'}`);
   const rowsHTML = shown.map((a) => `
-    <div class="ev-row${a.isMe ? ' ev-row--me' : ''}${admin ? ' ev-row--admin' : ''}">
+    <div class="ev-row${a.isMe ? ' ev-row--me' : ''}${admin ? ' ev-row--admin' : ''}${a.player_id === ev.justAdded ? ' ev-row--new' : ''}">
       <span class="ev-av ev-av--row${a.isMe ? ' ev-av--me' : ''}">${a.photo_path ? avatarInner(a) : esc(a.isMe ? 'ME' : a.initials)}</span>
       <span class="ev-row-name">${esc(a.isMe ? 'You' : a.name)}</span>
       ${admin ? `<span class="ev-row-no">${esc(a.member_number || '')}</span>` : ''}
@@ -364,9 +395,10 @@ function _rosterHTML(e) {
         <div class="ev-roster-cols">
           <span></span><span>MEMBER</span><span>NO.</span><span class="ev-roster-cols-g">GUESTS</span><span></span>
         </div>` : ''}
-      ${rowsHTML || '<div class="ev-roster-none">No one yet.</div>'}
+      ${rowsHTML || `<div class="ev-roster-none">No one yet.${admin ? '<span>Members sign up from this page. You can add people below.</span>' : ''}</div>`}
       ${rows.length > LIMIT ? `
         <button class="ev-roster-more" id="evRosterToggle">${ev.rosterOpen ? 'Show fewer' : `Show all ${rows.length}`}</button>` : ''}
+      ${admin ? _addHTML(e) : ''}
       ${admin ? `
         <div class="ev-roster-foot">
           <span class="chip chip--league">ADMIN</span>
@@ -515,6 +547,7 @@ function _paint() {
   if (newList) newList.scrollTop = listScroll;
 
   _wire(content);
+  visitPainted('events');
 }
 
 function _wire(content) {
@@ -585,6 +618,7 @@ function _wire(content) {
     try { await window.api.removeEventAttendee(e.id, Number(b.dataset.remove)); } catch (err) { toast(err.message, 'error'); }
     _refresh();
   }));
+  _wireAdd(e);
   document.getElementById('evExportBtn')?.addEventListener('click', () => {
     window.open(`/api/events/${e.id}/export.csv`);
   });
@@ -653,6 +687,128 @@ function _timeHint(f) {
 }
 function _formValid(f) {
   return !!(f.name.trim() && f.date) && !_timeHint(f);
+}
+
+// Typing filters the club list; a click adds straight away. No confirm step -
+// one wrong pick is undone by the x beside the row it makes.
+function _wireAdd(e) {
+  const input = document.getElementById('evAdd');
+  const drop = document.getElementById('evAddDrop');
+  if (!input || !drop) return;
+
+  // The roster is the last block in a scrolling column, so there is rarely room
+  // below it; the list opens upward, which on a phone also keeps it clear of
+  // the keyboard.
+  const already = new Set((e.attendees || []).map((a) => a.player_id));
+  let hits = [];
+  let active = 0;
+
+  const close = () => {
+    drop.hidden = true;
+    drop.innerHTML = '';
+    hits = [];
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  };
+
+  const paint = () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) return close();
+    // A members-only event takes members only, so nobody else is offered -
+    // no greyed row, no note about the gap. This list is admin-only, which is
+    // the only reason it may read is_member at all.
+    const pool = (state.players || []).filter((p) => !already.has(p.id) && (!e.members_only || p.is_member));
+    hits = pool.filter((p) => p.name.toLowerCase().includes(q)
+      || String(p.member_number || '').toLowerCase().includes(q)).slice(0, 6);
+    active = 0;
+    if (!hits.length) {
+      // If the query matches somebody who is already going, say so: otherwise
+      // "No one matches" reads as though they are not in the club.
+      const on = (e.attendees || []).find((a) => a.name.toLowerCase().includes(q));
+      drop.innerHTML = `<span class="ev-roster-add-none">No one matches.${on ? ` ${esc(on.name)} is already on the list.` : ''}</span>`;
+    } else {
+      drop.innerHTML = hits.map((p, i) => `
+        <button class="ev-roster-add-hit${i === 0 ? ' is-active' : ''}" role="option" id="evAddOpt${p.id}"
+          aria-selected="${i === 0}" data-add="${p.id}">${esc(p.name)}${p.member_number ? `<i>#${esc(p.member_number)}</i>` : ''}</button>`).join('');
+      input.setAttribute('aria-activedescendant', `evAddOpt${hits[0].id}`);
+      // mousedown, not click: blur would close the list before a click landed.
+      drop.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('mousedown', (evt) => {
+        evt.preventDefault();
+        add(Number(b.dataset.add));
+      }));
+    }
+    drop.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  };
+
+  const move = (step) => {
+    if (!hits.length) return;
+    active = (active + step + hits.length) % hits.length;
+    drop.querySelectorAll('.ev-roster-add-hit').forEach((b, i) => {
+      b.classList.toggle('is-active', i === active);
+      b.setAttribute('aria-selected', String(i === active));
+    });
+    input.setAttribute('aria-activedescendant', `evAddOpt${hits[active].id}`);
+  };
+
+  const add = async (playerId) => {
+    const who = (state.players || []).find((p) => p.id === playerId);
+    const query = input.value;
+    close();
+    input.value = '';
+    try {
+      const r = await window.api.addEventSignup(e.id, playerId);
+      ev.justAdded = playerId;
+      ev.addFocus = true;
+      await _refresh();
+      if (r.max_people != null && r.total >= r.max_people) toast('That fills the event', 'success');
+    } catch (err) {
+      // Re-read before saying anything: the usual reason an add fails is that
+      // the last spot went while this list was open, and the roster has to show
+      // who took it.
+      await _refresh();
+      if (ev.detail?.full) {
+        toast('This event just filled up.', 'error');
+      } else {
+        toast(`Could not add ${who ? who.name : 'them'}.`, 'error');
+        const back = document.getElementById('evAdd');
+        if (back) { back.value = query; back.focus(); }
+      }
+    }
+  };
+
+  input.addEventListener('input', paint);
+  input.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Escape') return close();
+    if (evt.key === 'ArrowDown') {
+      evt.preventDefault();
+      return move(1);
+    }
+    if (evt.key === 'ArrowUp') {
+      evt.preventDefault();
+      return move(-1);
+    }
+    if (evt.key === 'Enter' && hits.length) {
+      evt.preventDefault();
+      add(hits[active].id);
+    }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 120));
+  // The shell loads the club list at boot, so this is only for a page that was
+  // reached some other way. It cannot be allowed to fail loudly: everything
+  // wired after this call - the modal among it - would go down with it.
+  if (!state.players?.length) {
+    Promise.resolve(window.api.getPlayers?.())
+      .then((list) => { if (list) state.players = list; })
+      .catch(() => {});
+  }
+
+  // A re-render replaced the field the admin was typing in, so put them back in
+  // it - they usually have someone else to add.
+  if (ev.addFocus) { ev.addFocus = false; input.focus(); }
+  // The new row's tint runs once as an animation; the flag only has to outlive
+  // this paint, and clearing it without re-rendering keeps the roster still.
+  if (ev.justAdded != null) setTimeout(() => { ev.justAdded = null; }, 1400);
 }
 
 function _wireModal(content) {

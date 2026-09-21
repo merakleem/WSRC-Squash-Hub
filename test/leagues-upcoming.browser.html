@@ -1,0 +1,207 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="app-container">
+  <div class="main-wrapper">
+    <header class="topbar"><div class="topbar-left"><h1 class="topbar-title" id="pageTitle"></h1></div><div class="topbar-actions" id="topbarActions"></div></header>
+    <main class="content" id="mainContent"></main>
+  </div>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// Leagues announced before they are built: the card, the page, signing up and
+// withdrawing, and what the admin sees while waiting to build.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+const day = (n) => { const d = new Date(Date.now() + n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const mobile = window.innerWidth <= 768;
+
+const who = (id, name) => ({ player_id: id, name, photo_path: null, signed_up_at: day(-2) });
+const OPEN = {
+  id: 1, name: 'Autumn Box League', status: 'upcoming', setup_type: 'modern',
+  start_date: day(30), description: 'Six weeks, one match a week.', signup_cap: 8, signup_deadline: day(20),
+  created_at: day(-3), play_days: [], player_ids: [],
+  signup_count: 3, spots_left: 5, full: false, signups_closed: false, deadline_passed: false,
+  i_signed_up: false, signup_preview: [{ id: 2, name: 'Ben Cole' }, { id: 3, name: 'Cara Diaz' }],
+};
+const MINE = { ...OPEN, id: 2, name: 'Winter Box League', i_signed_up: true, signup_count: 4, spots_left: 4 };
+const FULL = { ...OPEN, id: 3, name: 'Full League', signup_count: 8, spots_left: 0, full: true, signups_closed: true };
+const CLOSED = { ...OPEN, id: 4, name: 'Closed League', signup_deadline: day(-1), deadline_passed: true, signups_closed: true, signup_count: 6, spots_left: 2 };
+const DBL = { ...OPEN, id: 5, name: 'Thursday Doubles', setup_type: 'doubles', signup_count: 9, signup_cap: 12, spots_left: 3 };
+const RUNNING = { id: 9, name: 'Spring 2026', status: 'active', setup_type: 'modern', start_date: day(-40), num_divisions: 2, play_days: [], player_ids: [], total_weeks: 4, weeks_started: 2, last_week_date: day(-5) };
+
+let LEAGUES = [OPEN, MINE, FULL, CLOSED, DBL, RUNNING];
+const calls = [];
+const detailFor = (id) => {
+  const l = LEAGUES.find((x) => x.id === id);
+  const n = l.signup_count || 0;
+  const names = ['Ben Cole', 'Cara Diaz', 'Dev Shah', 'Eli Moss', 'Fay Oduya', 'Gus Hall', 'Hana Ito', 'Ivo Jung', 'Jo Kerr'];
+  const signups = names.slice(0, Math.max(0, l.i_signed_up ? n - 1 : n)).map((nm, i) => who(10 + i, nm));
+  if (l.i_signed_up) signups.unshift(who(42, 'Me Myself'));
+  return { ...l, weeks: [], divisions: [], players: [], teams: [], pairs: [], courts: [], signups };
+};
+window.api = {
+  getLeagues: async () => JSON.parse(JSON.stringify(LEAGUES)),
+  getLeague: async (id) => JSON.parse(JSON.stringify(detailFor(Number(id)))),
+  getPlayers: async () => [{ id: 77, name: 'New Person', member_number: '1077' }],
+  getLadder: async () => [],
+  signUpForLeague: async (id) => { calls.push(['signup', id]); const l = LEAGUES.find((x) => x.id === id); l.i_signed_up = true; l.signup_count++; l.spots_left--; return { ok: true }; },
+  withdrawFromLeague: async (id) => { calls.push(['withdraw', id]); const l = LEAGUES.find((x) => x.id === id); l.i_signed_up = false; l.signup_count--; l.spots_left++; return { ok: true }; },
+  announceLeague: async (d) => { calls.push(['announce', d]); return { id: 99 }; },
+  editAnnouncement: async (id, d) => { calls.push(['edit', id, d]); return {}; },
+  addLeagueSignup: async (id, pid) => { calls.push(['add', id, pid]); return { ok: true, signup_count: 4, signup_cap: 8, full: false }; },
+  removeLeagueSignup: async (id, pid) => { calls.push(['remove', id, pid]); return { ok: true }; },
+  deleteLeague: async (id) => { calls.push(['delete', id]); return { ok: true }; },
+};
+window.navigate = (page, params) => { calls.push(['navigate', page, params]); };
+
+const { state } = await import('../renderer/state.js');
+state.currentUser = { role: 'admin', playerId: null };
+state.page = 'leagues';
+const leagues = await import('../renderer/pages/leagues.js');
+const detail = await import('../renderer/pages/leagueDetail.js');
+
+try {
+  log.textContent += 'THE ADMIN LIST\n';
+  await leagues.renderLeagues();
+  await settle(120);
+  ok('Upcoming is the first group', txt($('.lgl-group-label, .lgl-groups h3, .lgl-group-head')) .startsWith('Upcoming')
+    || txt($('.lgl-groups')).startsWith('Upcoming'), txt($('.lgl-groups')).slice(0, 40));
+  ok('the count line leads with how many are upcoming', /5 upcoming/.test(txt($('#pageTitle'))), txt($('#pageTitle')));
+  ok('a filter pill was added for them', $$('.lgl-pill[data-filter]').map(txt).join('|') === 'All|Upcoming|Active|Completed');
+  const card = $$('.lgl-card--upcoming')[0];
+  ok('an upcoming card is drawn', !!card && /Autumn Box League/.test(txt(card)));
+  ok('with a signups-open pill', txt(card.querySelector('.lgl-status')) === 'Signups open');
+  ok('it says when it starts, not when it started', /Starts /.test(txt(card)) && !/Started/.test(txt(card)));
+  ok('and only pluralises the weekday once', !/days s|dayss/.test(txt(card)), txt(card.querySelector('.lgl-meta')));
+  ok('the format reads as a box league with its spots', /Box league · 8 spots/.test(txt(card)), txt(card.querySelector('.lgl-meta')));
+  ok('the week bar is replaced by the signup block', !card.querySelector('.lgl-progress') && !!card.querySelector('.lgl-signup'));
+  ok('which counts them against the cap', /3 of 8 signed up/.test(txt(card)), txt(card.querySelector('.lgl-signup')));
+  ok('and names the deadline', /Sign up by/.test(txt(card)));
+  ok('an admin is offered the build, not a signup', /Build league/.test(txt(card)) && !card.querySelector('.lgl-act'));
+  const closedCard = $$('.lgl-card--upcoming').find((c) => /Closed League/.test(txt(c)));
+  ok('a closed one says so and is ready to build', txt(closedCard.querySelector('.lgl-status')) === 'Signups closed' && /Ready to build/.test(txt(closedCard)));
+  const fullCard = $$('.lgl-card--upcoming').find((c) => /Full League/.test(txt(c)));
+  ok('a full one reads Full', txt(fullCard.querySelector('.lgl-status')) === 'Full');
+  const dblCard = $$('.lgl-card--upcoming').find((c) => /Thursday Doubles/.test(txt(c)));
+  ok('doubles tells the admin pairs come later', /pairs set at build/.test(txt(dblCard)), txt(dblCard.querySelector('.lgl-meta')));
+
+  log.textContent += '\nANNOUNCING ONE\n';
+  click($('#btnCreateLeague'));
+  await settle();
+  ok('New League offers a choice first', $$('.lgl-choice-row').length === 2 && /Announce it for signups/.test(txt($('.lgl-choice-row'))));
+  click($('[data-choice="announce"]'));
+  await settle();
+  ok('the form asks for six things and no schedule', !!$('#anName') && !!$('#anStart') && !!$('#anDeadline') && !!$('#anCap') && !!$('#anDesc') && !$('#matchStartTime'));
+  ok('the formats are named as members see them', $$('.lgl-seg-b').map(txt).join('|') === 'Teams|Box league|Doubles');
+  ok('box league is the default', txt($('.lgl-seg-b--on')) === 'Box league');
+  click($('[data-fmt="doubles"]'));
+  await settle();
+  ok('picking doubles explains the pairing', /pair them when you build/.test(txt($('#anFormatHelp'))), txt($('#anFormatHelp')));
+  ok('and asks for an even number of spots', /even number/.test(txt($('#anCapHelp'))), txt($('#anCapHelp')));
+  $('#anName').value = 'Spring Doubles';
+  $('#anStart').value = day(40);
+  click($('#anSave'));
+  await settle(120);
+  const sent = calls.find((c) => c[0] === 'announce')?.[1];
+  ok('announcing posts what the admin chose', sent && sent.name === 'Spring Doubles' && sent.setupType === 'doubles' && sent.signupCap === null, JSON.stringify(sent));
+
+  log.textContent += '\nTHE ADMIN PAGE\n';
+  state.currentLeague = await window.api.getLeague(1);
+  state.page = 'leagueDetail';
+  detail.renderLeagueDetail();
+  await settle(80);
+  ok('the page is the announcement, not a schedule', !!$('.lgu-hero') && !$('.week-card'));
+  ok('the hero names it and says when it plays', /Autumn Box League/.test(txt($('.lgu-hero-name'))) && /plays \w+days/.test(txt($('.lgu-hero-when'))), txt($('.lgu-hero-when')));
+  ok('the description is shown', /Six weeks/.test(txt($('.lgu-hero-desc'))));
+  ok('the facts count the signups against the cap', txt($('.lgu-facts-n b')) === '3' && /5 spots left of 8/.test(txt($('.lgu-facts-right'))), txt($('.lgu-facts')));
+  ok('the roster lists them with their numbers, for an admin', $$('.lgu-row--admin').length === 3);
+  ok('each with a way to take them off', $$('[data-remove]').length === 3);
+  ok('and a way to add someone by hand', !!$('#lguAdd'));
+  ok('build is offered once two have signed up', !!$('#lguBuild') && !$('#lguBuild').disabled);
+  ok('with no "by" on the announced date, there being one admin', !/by /.test(txt($('.lgu-facts-rows'))), txt($('.lgu-facts-rows')));
+  ok('and a way to call the whole thing off', !!$('#lguCancel'));
+
+  log.textContent += '\nNOBODY SIGNED UP YET\n';
+  LEAGUES = LEAGUES.map((l) => (l.id === 1 ? { ...l, signup_count: 0, spots_left: 8 } : l));
+  state.currentLeague = await window.api.getLeague(1);
+  detail.renderLeagueDetail();
+  await settle(80);
+  ok('the empty roster is a normal state, not an error', !!$('.lgu-empty') && /No one has signed up yet/.test(txt($('.lgu-empty'))));
+  ok('it tells the admin where members will see it', /Leagues page and their dashboard/.test(txt($('.lgu-empty'))));
+  ok('build waits for two players', $('#lguBuild').disabled && /Needs 2 more players/.test(txt($('.lgu-build'))), txt($('.lgu-build-note')));
+
+  log.textContent += '\nTHE DEADLINE HAS PASSED\n';
+  state.currentLeague = await window.api.getLeague(4);
+  detail.renderLeagueDetail();
+  await settle(80);
+  ok('a banner says so and offers the build', !!$('.lgu-banner') && /Signups closed/.test(txt($('.lgu-banner'))) && !!$('#lguBannerBuild'));
+  ok('and signups can be reopened by moving the date', !!$('#lguReopen'));
+
+  log.textContent += '\nDOUBLES\n';
+  state.currentLeague = await window.api.getLeague(5);
+  detail.renderLeagueDetail();
+  await settle(80);
+  ok('the count says how the pairs will fall', /4 pairs \+ 1/.test(txt($('.lgu-facts-n'))), txt($('.lgu-facts-n')));
+  ok('and the roster says pairs come at build', /pairs are set when you build/.test(txt($('.lgu-roster-head'))), txt($('.lgu-roster-head')));
+
+  log.textContent += '\nA MEMBER\n';
+  state.currentUser = { role: 'user', playerId: 42 };
+  state.page = 'leagues';
+  await leagues.renderLeagues();
+  await settle(120);
+  ok('their own leagues come first', txt($('.lgl-groups')).startsWith('My Leagues'), txt($('.lgl-groups')).slice(0, 30));
+  ok('and the ones they can still join are grouped as such', /Open for signup/.test(txt($('.lgl-groups'))));
+  const joinable = $$('.lgl-card--upcoming').find((c) => /Autumn Box League/.test(txt(c)));
+  ok('an open league offers Sign up', !!joinable.querySelector('[data-signup]'));
+  ok('a member is told what they are joining, not the admin view', /sign up alone|Box league · 8 spots/.test(txt(joinable.querySelector('.lgl-meta'))), txt(joinable.querySelector('.lgl-meta')));
+  const mineCard = $$('.lgl-card--upcoming').find((c) => /Winter Box League/.test(txt(c)));
+  ok('one they joined says Signed up and offers Withdraw', txt(mineCard.querySelector('.lgl-status')) === 'Signed up' && !!mineCard.querySelector('[data-withdraw]'));
+  const fullC = $$('.lgl-card--upcoming').find((c) => /Full League/.test(txt(c)));
+  ok('a full one offers nothing to press', !fullC.querySelector('button') && /No spots left/.test(txt(fullC)));
+  const closedC = $$('.lgl-card--upcoming').find((c) => /Closed League/.test(txt(c)));
+  ok('a closed one says the schedule is coming', /Schedule coming soon/.test(txt(closedC)));
+
+  calls.length = 0;
+  click(joinable.querySelector('[data-signup]'));
+  await settle(160);
+  ok('signing up from the card does not open the league', calls.some((c) => c[0] === 'signup') && !calls.some((c) => c[0] === 'navigate'), JSON.stringify(calls.map((c) => c[0])));
+
+  log.textContent += '\nTHE MEMBER PAGE\n';
+  state.currentLeague = await window.api.getLeague(2);
+  state.page = 'leagueDetail';
+  detail.renderLeagueDetail();
+  await settle(80);
+  ok('it says they are in', !!$('.lgu-in') && /You're signed up/.test(txt($('.lgu-in'))));
+  ok('their own row is first and marked', $$('.lgu-row')[0].classList.contains('lgu-row--me') && /You/.test(txt($$('.lgu-row')[0])));
+  ok('member numbers are not sent to them', !$('.lgu-row--admin') && !$('[data-remove]'));
+  ok('and no admin controls are drawn', !$('#lguBuild') && !$('#lguCancel') && !$('#lguAdd'));
+  click($('#lguWithdraw'));
+  await settle();
+  ok('withdrawing asks first', /Withdraw from Winter Box League/.test(txt($('#modalBody'))), txt($('#modalBody')).slice(0, 60));
+} catch (e) {
+  failed++;
+  log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n') + '\n';
+}
+log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

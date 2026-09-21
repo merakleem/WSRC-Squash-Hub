@@ -113,6 +113,92 @@ function getWeekByes(weekId) {
   );
 }
 
+// ===== UPCOMING LEAGUES =====
+// A league that has been announced but not built. It is an ordinary `leagues`
+// row with status 'upcoming' and none of the scheduling columns meaning
+// anything yet; building it fills that same row in, so the people who signed up
+// stay attached to the league they joined.
+
+/** Announce one. Returns the new league's id. */
+function createAnnouncement({ name, startDate, setupType = 'modern', description = '', signupCap = null, signupDeadline = null }) {
+  const publicToken = crypto.randomBytes(2).toString('hex');
+  const result = run(
+    `INSERT INTO leagues (name, start_date, num_teams, num_divisions, setup_type, status,
+       description, signup_cap, signup_deadline, public_token)
+     VALUES (?, ?, 0, 0, ?, 'upcoming', ?, ?, ?, ?)`,
+    [name, startDate, setupType, description, signupCap, signupDeadline, publicToken],
+  );
+  return result.lastID;
+}
+
+/** Edit the announcement. Only the announced fields; never the schedule. */
+function updateAnnouncement(id, { name, startDate, setupType, description, signupCap, signupDeadline }) {
+  run(
+    `UPDATE leagues SET name = @name, start_date = @startDate, setup_type = @setupType,
+       description = @description, signup_cap = @signupCap, signup_deadline = @signupDeadline
+     WHERE id = @id AND status = 'upcoming'`,
+    { id, name, startDate, setupType, description, signupCap, signupDeadline },
+  );
+  return getLeagueById(id);
+}
+
+/** Everyone signed up, newest first, as the roster shows them. */
+function getSignups(leagueId) {
+  return all(
+    `SELECT s.player_id, s.created_at, p.name, p.email, p.photo_path, p.member_number, p.club_locker_rating
+     FROM league_signups s
+     JOIN players p ON p.id = s.player_id
+     WHERE s.league_id = ?
+     ORDER BY s.created_at DESC, s.id DESC`,
+    [leagueId],
+  );
+}
+
+/** Signup counts for every upcoming league, in one query for the list. */
+function getSignupCounts() {
+  const out = {};
+  for (const r of all('SELECT league_id, COUNT(*) AS n FROM league_signups GROUP BY league_id')) {
+    out[r.league_id] = r.n;
+  }
+  return out;
+}
+
+/** The league ids one player has signed up for. */
+function getSignupsForPlayer(playerId) {
+  return all('SELECT league_id FROM league_signups WHERE player_id = ?', [playerId]).map((r) => r.league_id);
+}
+
+/**
+ * Add a signup. Returns false when they were already on the list, so the
+ * caller can stay quiet rather than report an error nobody caused.
+ */
+function addSignup(leagueId, playerId) {
+  const r = run('INSERT OR IGNORE INTO league_signups (league_id, player_id) VALUES (?, ?)', [leagueId, playerId]);
+  return r.changes > 0;
+}
+
+function removeSignup(leagueId, playerId) {
+  return run('DELETE FROM league_signups WHERE league_id = ? AND player_id = ?', [leagueId, playerId]).changes > 0;
+}
+
+/**
+ * Turn an announcement into a real league: the wizard has decided everything
+ * else, so this fills in the columns it left blank and flips the status. The
+ * id does not change, which is the point.
+ */
+function activateAnnouncement(id, fields) {
+  run(
+    `UPDATE leagues SET name = @name, start_date = @startDate, num_teams = @numTeams,
+       num_divisions = @numDivisions, setup_type = @setupType, num_rounds = @numRounds,
+       blackout_dates = @blackoutDates, match_start_time = @matchStartTime, num_courts = @numCourts,
+       match_duration = @matchDuration, match_buffer = @matchBuffer, schedule_courts = @scheduleCourts,
+       play_days = @playDays, status = 'active'
+     WHERE id = @id`,
+    { id, ...fields },
+  );
+  return id;
+}
+
 /**
  * The bye weeks one player has, from `fromDate` onwards.
  *
@@ -371,6 +457,14 @@ module.exports = {
   setSubForRemaining,
   getWeekByes,
   getPlayerByeWeeks,
+  createAnnouncement,
+  updateAnnouncement,
+  activateAnnouncement,
+  getSignups,
+  getSignupCounts,
+  getSignupsForPlayer,
+  addSignup,
+  removeSignup,
   replacePlayerInLeague,
   updateMatchTiming,
   getLeagueCourts,

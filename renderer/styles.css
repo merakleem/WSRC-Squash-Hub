@@ -2264,6 +2264,432 @@ tbody td {
 
 
 
+/* Building an announced league: the format is already decided, so the other
+   two cards are shown but inert rather than removed - the admin can still see
+   what they picked. */
+.wz-format--locked { opacity: .45; cursor: default; pointer-events: none; }
+.wz-locked-note { font-style: normal; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+
+/* ===== UPCOMING LEAGUES (lgl- card additions, lgu- page) =====
+   A league that has been announced but not built: members sign themselves up,
+   and the admin builds it from whoever joined. The card keeps the running
+   league's shell and swaps the week-progress block for the signup block. */
+
+.lgl-status--blue { background: #eaefff; color: #3550c8; }
+.lgl-status--grey { background: #eef0f4; color: var(--text-muted); }
+.lgl-status--amber { background: #fdf1e2; color: #9a5b12; }
+.lgl-status--green { background: #d5f5e3; color: #155e3a; }
+.lgl-chip--amber { background: #fdf1e2; color: #9a5b12; }
+
+.lgl-signup { display: flex; flex-direction: column; gap: 7px; margin-top: auto; }
+.lgl-faces { display: flex; }
+.lgl-face {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: #e2e6ee;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 9.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.lgl-face + .lgl-face { margin-left: -6px; }
+.lgl-face img { width: 100%; height: 100%; object-fit: cover; }
+.lgl-signup-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--text-muted); }
+.lgl-signup-n--on { font-weight: 600; color: var(--primary); }
+.lgl-signup-when { white-space: nowrap; }
+.lgl-signup-when--closed { color: #9a5b12; font-weight: 600; }
+.lgl-sbar { height: 6px; border-radius: 3px; background: #e2e6ee; overflow: hidden; }
+.lgl-sbar-fill { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.lgl-sbar-fill--full { background: #93a2b5; }
+
+/* The first buttons to live inside a league card; they stop the card's click. */
+.lgl-act {
+  height: 34px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lgl-act--out { background: #fff; border: 1px solid var(--input-border, #dce3ed); color: #3d4d60; }
+.lgl-act-note { font-size: 12.5px; font-weight: 600; color: #93a2b5; }
+.lgl-act-mobile { display: none; }
+.lgl-view--left { margin-right: auto; }
+
+/* ── The announce form and the New League choice ── */
+.lgl-choice { display: flex; flex-direction: column; gap: 10px; }
+.lgl-choice-row {
+  display: grid;
+  grid-template-columns: 40px 1fr 16px;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #dce3ed;
+  border-radius: 14px;
+  background: #fff;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lgl-choice-row:hover { border-color: var(--primary); background: #f7f9ff; }
+.lgl-choice-ic {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #eef0f4;
+  color: #3d4d60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lgl-choice-ic--blue { background: #eaefff; color: #3550c8; }
+.lgl-choice-ic svg { width: 20px; height: 20px; }
+.lgl-choice-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lgl-choice-text b { font-family: 'Barlow', sans-serif; font-size: 16px; font-weight: 700; color: var(--primary); }
+.lgl-choice-text i { font-style: normal; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+.lgl-choice-go { width: 16px; height: 16px; color: #b9c4d4; }
+
+.lgl-form { display: flex; flex-direction: column; gap: 14px; }
+.lgl-field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; font-weight: 600; color: #3d4d60; }
+.lgl-field > span i { font-style: normal; font-weight: 400; color: #93a2b5; }
+.lgl-field input,
+.lgl-field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dce3ed;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+}
+.lgl-field input { height: 40px; }
+.lgl-field textarea { resize: vertical; line-height: 1.5; }
+.lgl-field input:focus,
+.lgl-field textarea:focus { border-color: var(--accent); outline: none; }
+.lgl-field .lgl-cap { width: 120px; }
+.lgl-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.lgl-row2 .lgl-field { min-width: 0; }
+.lgl-help { font-size: 12px; color: var(--text-muted); font-weight: 400; line-height: 1.45; }
+.lgl-form-err { font-size: 12.5px; color: #b3261e; font-weight: 500; }
+.lgl-form-err:empty { display: none; }
+.lgl-form-foot { display: flex; align-items: center; gap: 10px; }
+.lgl-form-foot .lgl-help { flex: 1; }
+.lgl-confirm-body { margin: 0 0 4px; font-size: 13.5px; color: #3d4d60; line-height: 1.5; }
+
+.lgl-seg { display: flex; gap: 0; padding: 3px; border-radius: 10px; background: #eef0f4; }
+.lgl-seg-b {
+  flex: 1;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: #3d4d60;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.lgl-seg-b--on { background: #fff; font-weight: 600; color: var(--primary); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+/* ===== THE UPCOMING LEAGUE PAGE ===== */
+.lgu-page { display: flex; flex-direction: column; gap: 14px; }
+.lgu-cols { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.lgu-main, .lgu-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.lgu-label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: #93a2b5;
+}
+
+.lgu-hero { background: var(--primary); border-radius: 16px; padding: 22px; color: #fff; display: flex; flex-direction: column; gap: 10px; }
+.lgu-hero-pills { display: flex; gap: 8px; }
+.lgu-pill {
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.lgu-pill--blue { background: #eaefff; color: #3550c8; }
+.lgu-pill--grey { background: #eef0f4; color: #3d4d60; }
+.lgu-pill--amber { background: #fdf1e2; color: #9a5b12; }
+.lgu-pill--green { background: #d5f5e3; color: #155e3a; }
+.lgu-pill--fmt { background: rgba(255,255,255,.14); color: #fff; }
+.lgu-hero-name { margin: 0; font-family: 'Barlow', sans-serif; font-size: 28px; font-weight: 800; line-height: 1.1; }
+.lgu-hero-when { margin: 0; font-size: 13px; color: rgba(255,255,255,.75); }
+.lgu-hero-desc {
+  margin: 4px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.12);
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(255,255,255,.85);
+  white-space: pre-line;
+}
+
+.lgu-facts, .lgu-build, .lgu-roster {
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lgu-facts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.lgu-facts-right { font-size: 12.5px; color: var(--text-muted); }
+.lgu-facts-closed { color: #9a5b12; font-weight: 600; }
+.lgu-facts-n { display: flex; align-items: baseline; gap: 8px; }
+.lgu-facts-n b { font-family: 'Barlow', sans-serif; font-size: 30px; font-weight: 800; color: var(--primary); line-height: 1; }
+.lgu-facts-n span { font-size: 13px; color: var(--text-muted); }
+.lgu-bar { height: 7px; border-radius: 4px; background: #e2e6ee; overflow: hidden; }
+.lgu-bar-fill { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.lgu-bar-fill--done { background: #93a2b5; }
+.lgu-facts-rows { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+.lgu-fact { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
+.lgu-fact span { color: var(--text-muted); }
+.lgu-fact b { font-weight: 600; color: var(--text); text-align: right; }
+
+.lgu-join {
+  width: 100%;
+  height: 46px;
+  border: none;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lgu-join:disabled { opacity: .5; cursor: default; }
+.lgu-in {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #bfe9d0;
+  border-radius: 14px;
+  background: #e8f8ef;
+}
+.lgu-in-tick {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #0f7b3f;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lgu-in-tick svg { width: 15px; height: 15px; }
+.lgu-in-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lgu-in-text b { font-size: 14px; font-weight: 600; color: #155e3a; }
+.lgu-in-text i { font-style: normal; font-size: 12.5px; color: #3c7a58; line-height: 1.45; }
+.lgu-out {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #bfe9d0;
+  border-radius: 9px;
+  background: #fff;
+  color: #155e3a;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lgu-build p { margin: 0; font-size: 13px; line-height: 1.55; color: #3d4d60; }
+.lgu-build-note { font-size: 12px; color: var(--text-muted); text-align: center; }
+.lgu-reopen { align-self: stretch; }
+.lgu-cancel {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 4px 0;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #b3261e;
+  cursor: pointer;
+}
+.lgu-confirm { margin: 0 0 4px; font-size: 13.5px; color: #3d4d60; line-height: 1.5; }
+
+.lgu-roster { padding: 14px 0 0; gap: 0; }
+.lgu-roster-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 18px 10px; }
+.lgu-roster-n { font-size: 12.5px; color: var(--text-muted); }
+.lgu-rows { display: flex; flex-direction: column; }
+.lgu-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--divider);
+}
+.lgu-row--admin { grid-template-columns: 26px minmax(0, 1fr) 60px 70px 92px 28px; }
+.lgu-row--cols {
+  grid-template-columns: 26px minmax(0, 1fr) 60px 70px 92px 28px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: #93a2b5;
+}
+.lgu-row--me { background: #f3fbf6; }
+.lgu-av {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #e2e6ee;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.lgu-av--me { background: #d5f5e3; color: #155e3a; }
+.lgu-av img { width: 100%; height: 100%; object-fit: cover; }
+.lgu-row-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lgu-row-num, .lgu-row-rating { font-size: 12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.lgu-row-when { font-size: 12px; color: #93a2b5; white-space: nowrap; }
+.lgu-row-when--me { color: #155e3a; font-weight: 600; }
+.lgu-row-x {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: #b9c4d4;
+  font-size: 13px;
+  cursor: pointer;
+}
+.lgu-row-x:hover { background: #fbeae8; color: #b3261e; }
+
+.lgu-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 36px 24px; text-align: center; border-top: 1px solid var(--divider); }
+.lgu-empty-dots { display: flex; }
+.lgu-empty-dots i { width: 30px; height: 30px; border-radius: 50%; background: #eef0f4; border: 2px dashed #dce3ed; }
+.lgu-empty-dots i + i { margin-left: -8px; }
+.lgu-empty b { font-size: 15px; font-weight: 600; color: var(--text); }
+.lgu-empty span { font-size: 13px; color: var(--text-muted); line-height: 1.5; max-width: 40ch; }
+
+.lgu-add { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--divider); background: #fafbfd; border-radius: 0 0 14px 14px; }
+.lgu-add-search { position: relative; flex: 1; min-width: 0; }
+.lgu-add-search input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #dce3ed;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 13.5px;
+}
+.lgu-add-search input:focus { border-color: var(--accent); outline: none; }
+.lgu-add-drop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(20,30,60,.16);
+  overflow: hidden;
+}
+.lgu-add-hit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.lgu-add-hit:hover { background: #f7f9ff; }
+.lgu-add-hit i { font-style: normal; font-size: 12px; color: #93a2b5; }
+.lgu-add-none { display: block; padding: 10px 12px; font-size: 13px; color: var(--text-muted); }
+
+.lgu-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #fdf1e2;
+  border: 1px solid #f3dcb8;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #9a5b12;
+}
+.lgu-banner span { flex: 1; }
+.lgu-banner-btn {
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .lgu-cols { grid-template-columns: 1fr; }
+  /* The facts come before the roster on a narrow screen: how many spots are
+     left decides whether the list below matters. */
+  .lgu-main { order: 2; }
+  .lgu-side { order: 1; }
+}
+
+@media (max-width: 768px) {
+  .lgu-hero { padding: 18px; border-radius: 14px; }
+  .lgu-hero-name { font-size: 24px; }
+  .lgu-banner { flex-direction: column; align-items: stretch; }
+  .lgu-banner-btn { width: 100%; }
+  .lgu-row--admin { grid-template-columns: 32px minmax(0, 1fr) 36px; }
+  .lgu-row--cols, .lgu-row--admin .lgu-row-num, .lgu-row--admin .lgu-row-rating, .lgu-row--admin .lgu-row-when { display: none; }
+  .lgu-add { flex-wrap: wrap; }
+
+  /* The card footer is hidden on a phone, so a member's action moves into the
+     body where it can still be reached. */
+  .lgl-act-mobile { display: block; }
+  .lgl-act-mobile:empty { display: none; }
+  .lgl-act-mobile .lgl-act { width: 100%; height: 44px; border-radius: 10px; font-size: 14px; }
+  .lgl-act-mobile .lgl-act-note { display: block; padding-top: 2px; }
+  .lgl-row2 { grid-template-columns: 1fr; }
+  .lgl-field input { height: 44px; }
+  .lgl-form-foot { flex-wrap: wrap; }
+  .lgl-form-foot .btn { flex: 1; justify-content: center; }
+}
+
 /* ===== LEAGUE DETAIL ===== */
 .league-header-card {
   position: relative;
@@ -9652,8 +10078,12 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   background: #fff;
   border: 1px solid #e7ebf2;
   border-radius: 14px;
-  overflow: hidden;
+  /* No overflow:hidden - the admin's add list opens upward out of this card.
+     The head and the last block round their own corners instead. */
 }
+.ev-roster-head { border-radius: 14px 14px 0 0; }
+.ev-roster-foot { border-radius: 0 0 14px 14px; }
+.ev-roster-add:last-child { border-radius: 0 0 14px 14px; }
 .ev-roster-head {
   padding: 14px 18px;
   border-bottom: 1px solid #e7ebf2;
@@ -9726,6 +10156,88 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   gap: 8px;
   padding: 12px 18px;
   background: #f7f9fc;
+  border-top: 1px solid #f0f3f7;
+}
+
+/* ── The admin adds a member ── */
+/* Its own strip between the rows and the footer, which already carries ADMIN,
+   Print and Export CSV. */
+.ev-roster-add { position: relative; padding: 12px 18px; background: #fff; }
+.ev-roster-add input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #dce3ed;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text, #1c2b3a);
+  background: #fff;
+}
+.ev-roster-add input::placeholder { color: #93a2b5; }
+.ev-roster-add input:focus {
+  outline: none;
+  border-color: #5b7cf9;
+  box-shadow: 0 0 0 2px rgba(91, 124, 249, .18);
+}
+/* A full event: the same box, saying why it cannot be used. */
+.ev-roster-add-blocked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #e7ebf2;
+  border-radius: 9px;
+  background: #f2f4f9;
+  font-size: 13.5px;
+  color: #93a2b5;
+}
+.ev-roster-add-blocked i { font-style: normal; font-size: 12px; }
+
+/* Opens upward: the roster is the last block in a scrolling column, so there
+   is rarely room below it - and on a phone this keeps it above the keyboard. */
+.ev-roster-add-drop {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(100% - 6px);
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(20, 30, 60, .16);
+  overflow: hidden;
+}
+.ev-roster-add-hit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text, #1c2b3a);
+  text-align: left;
+  cursor: pointer;
+}
+.ev-roster-add-hit i { font-style: normal; font-size: 12px; color: #93a2b5; }
+.ev-roster-add-hit:hover,
+.ev-roster-add-hit.is-active { background: #f7f9ff; }
+.ev-roster-add-none { display: block; padding: 10px 12px; font-size: 13px; color: #6b7e93; }
+
+/* The row just added, tinted once so the eye can find it. */
+.ev-row--new { animation: ev-row-new 1.2s ease; }
+@keyframes ev-row-new {
+  from { background: #f7f9ff; }
+  to { background: transparent; }
+}
+.ev-roster-none span { display: block; margin-top: 3px; font-size: 12.5px; color: #6b7e93; }
+@media (prefers-reduced-motion: reduce) {
+  .ev-row--new { animation: none; }
 }
 
 /* ── Modal ── */
@@ -9878,6 +10390,12 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   .ev-back { display: inline-flex; }
   .ev-hero-name { font-size: 26px; }
   .ev-roster-cols, .ev-row-no, .ev-roster-foot { display: none; }
+  /* The footer is hidden here, so the add strip is what closes the card. */
+  .ev-roster-add { padding: 12px 16px 14px; border-radius: 0 0 14px 14px; }
+  .ev-roster-add input,
+  .ev-roster-add-blocked { height: 44px; border-radius: 10px; font-size: 14px; }
+  .ev-roster-add-drop { left: 16px; right: 16px; }
+  .ev-roster-add-hit { min-height: 44px; padding: 0 14px; font-size: 14px; }
 }
 
 
@@ -10585,12 +11103,392 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
 .pl-public-row svg { width: 16px; height: 16px; color: #b9c4d4; }
 
 @media (max-width: 768px) {
-  .pl-page { padding: 14px 14px 0; }
-  .pl-search { min-width: 160px; }
-  .pl-menu--filter { width: 92vw; max-width: 560px; grid-template-columns: 1fr 1fr; }
-  .pl-bulkbar { width: max-content; max-width: 94vw; flex-wrap: wrap; padding: 8px 10px; bottom: 12px; }
-  .pl-panel { width: 100%; max-width: 100vw; }
-  .pl-fgrid { grid-template-columns: 1fr; }
+  /* ===== PLAYERS PAGE — MOBILE =====
+     Per design_handoff_players_mobile. Same data, filters, sort and copy as
+     the desktop page: the table becomes a list, the dropdowns become bottom
+     sheets, the slide-over becomes a full-screen sheet, and bulk actions get
+     a select mode because there is no room for a checkbox column until you
+     ask for one. */
+
+  /* The desktop scrolls inside the card, which is why .content is flush and
+     clipped. The phone has no inner scroller - the list is the page - so the
+     page itself has to be the one that scrolls. */
+  .pl-page {
+    gap: 12px;
+    padding: 14px 16px 28px;
+    padding-bottom: calc(28px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+  .pl-sum-line { font-size: 12.5px; color: var(--text-muted); }
+
+  /* --- toolbar --- */
+  .pl-toolbar { flex-wrap: nowrap; gap: 8px; }
+  .pl-search { flex: 1; min-width: 0; max-width: none; }
+  .pl-search input { height: 40px; border-radius: 10px; }
+  .pl-filter-btn,
+  .pl-sort-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #dce3ed;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .pl-filter-btn svg,
+  .pl-sort-btn svg { width: 17px; height: 17px; }
+  .pl-filter-btn--on { border-color: var(--primary); background: #f1f4ff; color: var(--primary); }
+  .pl-filter-btn .pl-filter-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 9px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pl-filter-anchor { position: relative; }
+
+  /* --- chips + count + select --- */
+  .pl-chiprow { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+  .pl-chiprow[hidden] { display: none; }
+  .pl-chiprow .pl-chips {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .pl-chiprow .pl-chips::-webkit-scrollbar { display: none; }
+  .pl-chiprow .pl-chip { flex-shrink: 0; }
+  .pl-chiprow .pl-shown { white-space: nowrap; font-size: 12.5px; color: var(--text-muted); }
+  .pl-select-btn { font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+  /* --- list --- */
+  /* The desktop table is 1000px of grid; the list is whatever the phone is. */
+  .pl-card { flex: none; overflow: hidden; margin-bottom: 0; }
+  .pl-body { flex: none; min-width: 0; overflow: visible; }
+  .pl-li {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 11px 12px 11px 14px;
+    border-bottom: 1px solid var(--divider);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pl-li:last-child { border-bottom: none; }
+  .pl-li--sel { background: #f1f4ff; }
+  .pl-li-check { display: flex; align-items: center; }
+  .pl-li-check input { width: 20px; height: 20px; accent-color: var(--primary); pointer-events: none; }
+  .pl-body--select .pl-li { grid-template-columns: 22px 38px minmax(0, 1fr) auto; gap: 10px; padding-left: 12px; }
+  .pl-li-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pl-li-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pl-li-meta {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pl-li-excl { color: #b3261e; }
+  .pl-li-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .pl-li-badges .pl-badge { padding: 2px 7px; font-size: 10.5px; white-space: nowrap; }
+
+  /* --- select mode chrome --- */
+  .pl-selbar { display: inline-flex; align-items: center; gap: 14px; }
+  .pl-selbar-n { font-family: 'Barlow', sans-serif; font-size: 16px; font-weight: 600; color: var(--text); }
+  .pl-selecting .pl-body { padding-bottom: 110px; }
+
+  /* --- bulk bar --- */
+  .pl-bulkbar--mobile {
+    left: 12px;
+    right: 12px;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    width: auto;
+    max-width: none;
+    transform: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr 44px;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 14px;
+    box-shadow: 0 14px 40px rgba(20, 30, 60, .35);
+  }
+  .pl-bulkbar--mobile .pl-bulkbar-btn,
+  .pl-bulkbar--mobile .pl-bulkbar-ic {
+    height: 44px;
+    border-radius: 9px;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .pl-bulkbar--mobile .pl-bulkbar-ic svg { width: 18px; height: 18px; }
+
+  /* --- top bar --- */
+  .topbar-actions .btn#plIoBtn,
+  .topbar-actions .btn#plAddBtn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 8px;
+    justify-content: center;
+  }
+  .topbar-actions .btn#plIoBtn .pl-chev { display: none; }
+  .topbar-actions .btn#plIoBtn svg,
+  .topbar-actions .btn#plAddBtn svg { width: 16px; height: 16px; }
+  /* The select bar is the whole bar: its own buttons are the only actions. */
+  .topbar:has(.pl-selbar) .topbar-left { flex: 1; }
+  .topbar:has(.pl-selbar) .topbar-actions .pl-link { font-size: 14px; font-weight: 600; }
+
+  /* ===== BOTTOM SHEETS ===== */
+  /* Above the shell's fixed hamburger (300), as the shared modal already is:
+     scrim 410, sheet 411, full-screen panel 420, its confirm 430, toasts 440.
+     A discard dialog behind the panel it belongs to is unusable. */
+  .pl-sheet-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 30, 60, .4);
+    z-index: 410;
+    animation: pl-fade .12s ease;
+  }
+  .pl-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 411;
+    max-height: 88%;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -12px 40px rgba(20, 30, 60, .2);
+    animation: pl-up .22s ease;
+  }
+  @keyframes pl-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pl-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .pl-sheet-handle {
+    width: 36px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: 2px;
+    background: #dce3ed;
+    flex-shrink: 0;
+  }
+  .pl-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 20px 12px;
+    border-bottom: 1px solid #e7ebf2;
+    flex-shrink: 0;
+  }
+  .pl-sheet-head h2 { margin: 0; font-family: 'Barlow', sans-serif; font-size: 19px; font-weight: 700; color: var(--primary); }
+  .pl-sheet-head .pl-link { font-size: 14px; font-weight: 600; }
+  .pl-sheet-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px calc(10px + env(safe-area-inset-bottom));
+  }
+  .pl-sheet-group { display: flex; flex-direction: column; }
+  .pl-sheet-body .pl-menu-label { padding: 8px 12px 4px; }
+  .pl-sheet-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .pl-sheet-row > span:first-of-type { flex: 1; }
+  .pl-sheet-row input[type="checkbox"],
+  .pl-sheet-row input[type="radio"] { width: 18px; height: 18px; accent-color: var(--primary); flex-shrink: 0; }
+  .pl-sheet-row--on { background: #f7f9ff; }
+  .pl-sheet-row--on > span:first-of-type { font-weight: 600; }
+  .pl-sheet-row[disabled] { opacity: .5; cursor: default; }
+  .pl-sheet-n { font-size: 12.5px; color: #93a2b5; font-variant-numeric: tabular-nums; }
+  .pl-sheet-foot {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e7ebf2;
+    background: #fafbfd;
+    flex-shrink: 0;
+  }
+  .pl-sheet-primary {
+    width: 100%;
+    height: 46px;
+    border: none;
+    border-radius: 12px;
+    background: var(--primary);
+    color: #fff;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* segmented control: sheet direction toggle, and the add panel's tabs */
+  .pl-mseg { display: flex; gap: 0; padding: 3px; border-radius: 10px; background: #eef0f4; }
+  .pl-mseg-b {
+    flex: 1;
+    height: 34px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: #3d4d60;
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .pl-mseg-b--on { background: #fff; font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+  .pl-mseg--sm { border-radius: 8px; }
+  .pl-mseg--sm .pl-mseg-b { height: 28px; font-size: 12.5px; padding: 0 10px; }
+
+  /* ===== FULL-SCREEN PANEL ===== */
+  .pl-panel--sheet {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    z-index: 420;
+    box-shadow: none;
+    animation: pl-up .22s ease;
+  }
+  .pl-confirm { position: fixed; z-index: 430; }
+  .pl-confirm-card { width: auto; max-width: calc(100% - 32px); }
+  .pl-confirm-btns { flex-wrap: wrap; }
+  .pl-confirm-btns .btn { flex: 1 1 140px; justify-content: center; }
+  .pl-toasts { position: fixed; z-index: 440; max-width: calc(100% - 32px); top: calc(12px + env(safe-area-inset-top)); }
+
+  /* The ✕ leads, then the name: space-between would push the title to the far
+     edge, under the hamburger. */
+  .pl-panel--sheet .pl-panel-head {
+    padding: 14px 16px 12px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 12px;
+  }
+  .pl-panel--sheet .pl-panel-head > div { order: 2; flex: 1; min-width: 0; }
+  .pl-panel--sheet .pl-panel-x { order: 1; flex-shrink: 0; width: 36px; height: 36px; }
+  .pl-panel--sheet .pl-panel-sub { display: block; }
+  /* Delete sits at the end of the form on a phone; the footer is the note and
+     the one primary action. */
+  .pl-panel--sheet .pl-panel-foot .pl-panel-del { display: none; }
+  /* The note only has something to say while editing; empty, its flex:1 would
+     take a third of the row away from the two buttons. */
+  .pl-panel--sheet .pl-panel-note:empty { display: none; }
+  .pl-del-row { display: flex; padding-top: 4px; }
+  .pl-del-row .pl-panel-del { padding: 0; font-size: 14px; font-weight: 600; }
+  .pl-panel--sheet .pl-panel-title {
+    font-size: 19px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pl-panel--sheet .pl-tabs { padding: 12px 16px 0; }
+  .pl-panel--sheet .pl-tabs.pl-mseg { margin: 12px 16px 0; padding: 3px; display: flex; align-self: stretch; }
+  .pl-panel--sheet .pl-panel-body { padding: 16px; }
+  .pl-panel--sheet .pl-form { gap: 18px; }
+  .pl-panel--sheet .pl-fgrid { grid-template-columns: 1fr; gap: 14px; }
+  /* Member number and rating keep a row of their own; min-width:0 or a long
+     value pushes the grid wider than the screen. */
+  .pl-panel--sheet .pl-fgrid .pl-field:nth-last-child(2),
+  .pl-panel--sheet .pl-fgrid .pl-field:last-child { grid-column: auto; min-width: 0; }
+  .pl-panel--sheet .pl-fgrid { grid-template-areas: none; }
+  .pl-panel--sheet .pl-field input { height: 44px; border-radius: 10px; font-size: 15px; }
+  .pl-panel--sheet .pl-toggle { min-height: 44px; padding: 12px 14px; }
+  /* The keyboard pushes a fixed footer off-screen, so it sticks inside the
+     scroller instead. The primary keeps the right edge whether or not the note
+     beside it has anything to say. */
+  .pl-panel--sheet .pl-panel-foot {
+    position: sticky;
+    bottom: 0;
+    justify-content: flex-end;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+  .pl-panel--sheet .pl-panel-foot #plPanelCancel { display: none; }
+  .pl-panel--sheet .pl-panel-foot .btn-primary {
+    height: 46px;
+    padding: 0 22px;
+    border-radius: 12px;
+    font-size: 15px;
+  }
+  .pl-panel--sheet .pl-panel-foot .pl-panel-another {
+    flex: 1;
+    height: 46px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+  .pl-panel--sheet .pl-panel-foot .pl-panel-another + .btn-primary { flex: 1; }
+  /* Badge and hint on one line, then the action across the width: side by side
+     the hint wrapped to three lines beside a button. */
+  .pl-panel--sheet .pl-acct-row { flex-wrap: wrap; row-gap: 10px; }
+  .pl-panel--sheet .pl-acct-hint { flex: 1 1 auto; min-width: 0; }
+  .pl-panel--sheet .pl-acct-row .pl-btn-sm { flex: 1 0 100%; height: 40px; }
+  .pl-panel--sheet .pl-acct-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pl-panel--sheet .pl-acct-links .pl-btn-sm { height: 40px; }
+
+  /* paste a list */
+  .pl-paste { display: flex; flex-direction: column; gap: 10px; }
+  .pl-paste-area {
+    min-height: 180px;
+    padding: 12px;
+    border: 1px solid #dce3ed;
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+    width: 100%;
+  }
+  .pl-paste-area:focus { border-color: var(--accent); outline: none; }
+
+  /* import, in one column */
+  .pl-panel--sheet .pl-maprow { grid-template-columns: 1fr; gap: 8px; }
+  .pl-panel--sheet .pl-maprow > svg { display: none; }
+  .pl-panel--sheet .pl-maprow select { height: 44px; width: 100%; }
+  .pl-panel--sheet .pl-stats { grid-template-columns: repeat(3, 1fr); }
+  .pl-panel--sheet .pl-dropzone { padding: 16px; }
+
+  /* body scroll lock while a sheet or a panel is up */
+  body.pl-sheet-open { overflow: hidden; }
 }
 
 /* ===== MESSAGE PLAYERS MODAL (mp-) =====
@@ -10730,3 +11628,84 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
 .mp-discard-title { font-family: 'Barlow', sans-serif; font-size: 17px; font-weight: 700; }
 .mp-discard-body { font-size: 13.5px; color: var(--text-muted); }
 .mp-discard-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNREAD MARKERS (um-)
+   A member who has not opened Leagues or Events since something was posted
+   there gets a dot on that nav item - and, on a phone, on the hamburger that
+   hides it. Opening the tab marks the new cards for that one visit and takes
+   the dot away after a beat. Admins never see any of this: they posted the
+   things. There is no count anywhere - the number is one almost every time,
+   and a badge would read as a to-do list.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── The nav dot ── */
+/* On the trailing edge of the row, so two marked tabs line up vertically and
+   neither the icon nor the label column moves. */
+.nav-item .um-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: #aab9ff;
+  transition: opacity 240ms ease;
+}
+.um-dot--out { opacity: 0; }
+
+/* ── The hamburger's dot ── */
+/* A marker inside a closed drawer is not a notification, so the button that
+   hides the rows carries one of its own for any number of marked tabs. It goes
+   while the drawer is open - the rows behind it carry their own. */
+.hamburger-btn .um-dot {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #5b7cf9;
+  box-shadow: 0 0 0 2px #fff;
+  transition: opacity 240ms ease;
+}
+.hamburger-btn.open .um-dot { display: none; }
+
+/* ── The card marker ── */
+/* A dot before the name, where the eye is already going, and the list's own
+   selected tint across the whole card so it reads from the top of the page. A
+   NEW pill would fight the status pill these cards already carry. */
+.um-mark {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #5b7cf9;
+}
+
+.lgl-card.um-new { background: #f7f9ff; }
+.lgl-card.um-new .lgl-foot { background: #f3f6fe; border-top-color: #eef1f8; }
+.lgl-card.um-new .lgl-name { display: flex; align-items: flex-start; gap: 9px; }
+/* Centred on the first line of a name that may wrap: half of the line box
+   (.6em at line-height 1.2) less half the dot. */
+.lgl-name .um-mark { margin-top: calc(.6em - 4px); }
+
+.ev-card.um-new { background: #f7f9ff; }
+/* Selected wins: it keeps its accent border and ring, and drops the tint. */
+.ev-card--sel.um-new { background: #fff; }
+.um-nameline { display: flex; align-items: center; gap: 9px; min-width: 0; }
+
+@media (max-width: 768px) {
+  /* The drawer's rows are taller and its labels bigger, so the dot grows with
+     them; still on the trailing edge, still lined up with each other. */
+  .nav-item .um-dot { width: 9px; height: 9px; }
+  .lgl-card.um-new .lgl-name { gap: 8px; }
+  .um-nameline { gap: 8px; }
+}
+
+/* The 600ms hold is not motion - it is there so the eye can land on the dot
+   before it goes - so it stays. The fade does not: the dot is simply removed. */
+@media (prefers-reduced-motion: reduce) {
+  .nav-item .um-dot,
+  .hamburger-btn .um-dot { transition: none; }
+}

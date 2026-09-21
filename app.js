@@ -152,7 +152,19 @@ function createApp() {
       // say so and offer the way back.
       if (req.session.viewingAs) viewing_as = player?.name || 'this player';
     }
-    res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, is_member, name, photo_path, viewing_as, club_timezone: require('./lib/clock').getClubTimezone() });
+    // Which tabs have something the member has not seen, and the stamp each
+    // list will mark its cards against. Empty for an admin: they posted them.
+    const { unread, opened } = require('./lib/unread').unreadFor(req.session);
+    res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, is_member, name, photo_path, viewing_as, unread, opened, club_timezone: require('./lib/clock').getClubTimezone() });
+  });
+
+  // The member opened Leagues or Events. Answers with the stamp this visit
+  // replaced, which is what the list marks its new cards against.
+  app.patch('/api/me/opened/:tab', (req, res) => {
+    if (req.session.role !== 'player' || !req.session.playerId) return res.status(403).json({ error: 'Members only.' });
+    const result = require('./lib/unread').openTab(req.session, req.params.tab);
+    if (!result) return res.status(400).json({ error: 'Unknown tab.' });
+    res.json(result);
   });
 
   // ===== API ROUTES =====

@@ -6,13 +6,23 @@ import { esc, toast, modal, avatarHTML } from '../utils.js';
 // The wizard builds state.wizard as it goes and posts it once at the end via
 // submitCreateLeague() — nothing is saved before Create league is pressed.
 // Structure numbers recalculate live as fields change; there is no Apply step.
-export function startCreateLeague() {
+/**
+ * Open the wizard.
+ *
+ * `fromUpcoming` is an announced league being built: its name, format, date and
+ * the people who signed up are carried in, and the final submit fills that same
+ * league row rather than inserting a new one - so the league someone joined is
+ * the league that runs.
+ */
+export function startCreateLeague({ fromUpcoming = null } = {}) {
+  const signups = (fromUpcoming?.signups || []).map((s) => ({ id: s.player_id, name: s.name, photo_path: s.photo_path || null }));
   state.wizard = {
     step: 1,
-    setupType: 'traditional',
-    leagueName: '',
-    startDate: defaultStartDate(),
-    rankedPlayers: [],
+    buildingLeagueId: fromUpcoming?.id ?? null,
+    setupType: fromUpcoming?.setup_type || 'traditional',
+    leagueName: fromUpcoming?.name || '',
+    startDate: fromUpcoming?.start_date || defaultStartDate(),
+    rankedPlayers: signups,
     // Traditional
     numTeams: 3,
     numDivisions: 1,
@@ -22,6 +32,7 @@ export function startCreateLeague() {
     modernDivisionPlayers: null,
     // Doubles: [playerId|null, playerId|null] per pair, in the order made.
     pairs: [],
+    pairsSeeded: false,
     // Shared
     numRounds: 1,
     // Extra weekdays (0 = Sunday) the league plays on, beyond the start
@@ -231,7 +242,7 @@ function _summaryHTML() {
   return [
     cell('League', esc(w.leagueName.trim()) || 'Untitled', { desk: true }),
     cell('Starts', _fmtShort(w.startDate), { desk: true }),
-    cell('Format', doubles ? 'Doubles' : teams ? 'Teams' : 'Divisions only', { desk: true }),
+    cell('Format', doubles ? 'Doubles' : teams ? 'Teams' : 'Box league', { desk: true }),
     doubles ? cell('Players', `${c.players} · ${c.n} pairs`, { desk: true }) : cell('Players', String(c.n)),
     ...(doubles ? [cell('Pairs', String(c.n))] : []),
     cell(teams ? 'Teams × divs' : 'Divisions', c.valid ? (teams ? `${c.teams} × ${c.divisions}` : String(c.divisions)) : '—'),
@@ -367,10 +378,11 @@ function _footerHTML({ cancel = false, nextDisabled = false } = {}) {
 function renderStep1() {
   const w = state.wizard;
 
+  const locked = !!state.wizard.buildingLeagueId;
   const formatCard = (type, title, tag, desc, chips) => {
     const on = w.setupType === type;
     return `
-      <div class="wz-format${on ? ' wz-format--on' : ''}" data-type="${type}">
+      <div class="wz-format${on ? ' wz-format--on' : ''}${locked && !on ? ' wz-format--locked' : ''}" data-type="${type}">
         <div class="wz-format-top">
           <span class="wz-radio"><span></span></span>
           <span class="wz-format-title">${title}</span>
@@ -401,12 +413,12 @@ function renderStep1() {
           </div>
         </div>
         <div class="wz-field">
-          <span class="wz-label">Format</span>
+          <span class="wz-label">Format${locked ? ' <i class="wz-locked-note">set when the league was announced</i>' : ''}</span>
           <div class="wz-formats wz-formats--3">
             ${formatCard('traditional', 'Teams', 'Current default',
               'Players are grouped into teams. Teams play each other each week, with one match per division.',
               ['Team standings', 'One night, one opponent'])}
-            ${formatCard('modern', 'No teams', '',
+            ${formatCard('modern', 'Box league', '',
               'No teams. Players are grouped into divisions and play everyone in their division (round robin).',
               ['Division standings', 'Round robin'])}
             ${formatCard('doubles', 'Doubles', 'New',
@@ -432,6 +444,9 @@ function renderStep1() {
 
   document.getElementById('wizardCard').querySelectorAll('.wz-format').forEach((card) => {
     card.addEventListener('click', () => {
+      // The format is what members signed up to; changing it here would strand
+      // them, since the three formats hold their players differently.
+      if (locked) return;
       const next = card.dataset.type;
       // Doubles holds pairs where the other two hold a ranked list, so moving
       // between them starts the player step over.
@@ -623,6 +638,17 @@ async function renderStep2() {
 function renderStep2Doubles({ allPlayers, ladderOrder }) {
   const w = state.wizard;
   w.pairs = w.pairs || [];
+  // Built from an announcement: the signups arrive in rankedPlayers, which is
+  // what the other two formats read - the pair builder reads w.pairs, so they
+  // have to be put there or a doubles league opens with nobody in it. Ladder
+  // order, two to a pair, exactly as clicking each of them in would do. Once
+  // only, so clearing the pairs does not bring them back.
+  if (!w.pairsSeeded && w.rankedPlayers.length) {
+    w.pairsSeeded = true;
+    const rank = (id) => { const i = ladderOrder.indexOf(id); return i === -1 ? Infinity : i; };
+    const ids = [...w.rankedPlayers].sort((a, b) => rank(a.id) - rank(b.id)).map((x) => x.id);
+    for (let i = 0; i < ids.length; i += 2) w.pairs.push([ids[i], ids[i + 1] ?? null]);
+  }
   const byId = (id) => allPlayers.find((p) => p.id === id) || null;
   const rankOf = (id) => { const i = ladderOrder.indexOf(id); return i === -1 ? Infinity : i + 1; };
 
@@ -804,6 +830,9 @@ function renderStep2Doubles({ allPlayers, ladderOrder }) {
     if (!el) return;
     if (el.dataset.action === 'add-player') { addPlayer(Number(el.dataset.id)); w.modernDivisionPlayers = null; refresh(); } else if (el.dataset.action === 'remove-pair-player') { removePlayer(Number(el.dataset.id)); refresh(); }
   });
+  // The summary strip is drawn by the step chrome before this runs, so with
+  // pairs seeded from an announcement it would still read "0 pairs".
+  document.getElementById('wzSummary').innerHTML = _summaryHTML();
   _flushError();
 }
 
@@ -1822,13 +1851,13 @@ async function submitCreateLeague() {
   btn.innerHTML = '<span class="spinner"></span> Creating…';
 
   const { leagueName, startDate, setupType, numRounds, blackoutDates,
-    matchStartTime, selectedCourtIds, matchDuration, matchBuffer } = state.wizard;
+    matchStartTime, selectedCourtIds, matchDuration, matchBuffer, buildingLeagueId } = state.wizard;
   const playDays = _orderedPlayDays();
 
   let payload;
   if (setupType === 'doubles') {
     payload = {
-      name: leagueName, startDate, setup_type: 'doubles',
+      name: leagueName, startDate, setup_type: 'doubles', leagueId: buildingLeagueId,
       numRounds, blackoutDates, playDays, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPairs, dIdx) =>
         divPairs.map((pr, pIdx) => ({ playerIds: [pr.a.id, pr.b.id], rank: dIdx * 1000 + pIdx + 1 })),
@@ -1836,7 +1865,7 @@ async function submitCreateLeague() {
     };
   } else if (setupType === 'modern') {
     payload = {
-      name: leagueName, startDate, setup_type: 'modern',
+      name: leagueName, startDate, setup_type: 'modern', leagueId: buildingLeagueId,
       numRounds, blackoutDates, playDays, matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       divisions: state.wizard.modernDivisionPlayers.map((divPlayers, dIdx) =>
         divPlayers.map((p, pIdx) => ({ playerId: p.id, rank: dIdx * 1000 + pIdx + 1 })),
@@ -1845,7 +1874,7 @@ async function submitCreateLeague() {
   } else {
     const { rankedPlayers, numTeams, numDivisions, teamNames } = state.wizard;
     payload = {
-      name: leagueName, startDate, setup_type: 'traditional',
+      name: leagueName, startDate, setup_type: 'traditional', leagueId: buildingLeagueId,
       numTeams, numDivisions, numRounds, blackoutDates, playDays, teamNames,
       matchStartTime, courtIds: selectedCourtIds, matchDuration, matchBuffer,
       rankedPlayers: rankedPlayers.map((p, i) => ({ playerId: p.id, rank: i + 1 })),
@@ -1854,7 +1883,7 @@ async function submitCreateLeague() {
 
   try {
     const leagueId = await window.api.createLeague(payload);
-    toast(`League "${leagueName}" created!`, 'success');
+    toast(buildingLeagueId ? `${leagueName} is live` : `League "${leagueName}" created!`, 'success');
     const league = await window.api.getLeague(leagueId);
     window.navigate('leagueDetail', { league });
   } catch (e) {

@@ -1,6 +1,7 @@
 import { state, isAdmin } from '../state.js';
 import { esc, formatDate, formatShortDate, toast, modal, avatarInner, playDatesFor, playDayNames, formatWeekRange, formatWeekRangeShort, DAY_LONG, clubTodayStr } from '../utils.js';
-import { printBoxes, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague } from './leagues.js';
+import { printBoxes, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague, openAnnounceModal } from './leagues.js';
+import { startCreateLeague } from './createLeague.js';
 
 let leagueEditMode = false;
 export function resetLeagueEditMode() { leagueEditMode = false; }
@@ -58,9 +59,384 @@ function _weekSummary({ total, played }) {
   return `${played} of ${total} played`;
 }
 
+// ===== UPCOMING LEAGUE PAGE =====
+// An announced league has no weeks to show; it has a roster. This is the
+// whole page for one, for a member deciding whether to join and for the admin
+// waiting to build it.
+
+const LGU_FORMAT = { traditional: 'Teams', modern: 'Box league', doubles: 'Doubles' };
+
+const _lguLong = (d) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '');
+const _lguShort = (d) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '');
+const _lguWeekday = (d) => (d ? DAY_LONG[new Date(`${d}T12:00:00`).getDay()] : '');
+
+/** Whole days from today to `date`, negative once it is past. */
+function _lguDaysTo(date) {
+  const a = new Date(`${clubTodayStr()}T12:00:00`);
+  const b = new Date(`${date}T12:00:00`);
+  return Math.round((b - a) / 864e5);
+}
+
+function _lguWhenNote(date) {
+  const n = _lguDaysTo(date);
+  if (n === 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n > 1 && n <= 7) return `in ${n} days`;
+  return '';
+}
+
+function _lguPill(league) {
+  if (league.i_signed_up) return ['green', 'Signed up'];
+  if (league.full) return ['grey', 'Full'];
+  if (league.deadline_passed) return ['amber', 'Signups closed'];
+  return ['blue', 'Signups open'];
+}
+
+/** "9 players · 4 pairs + 1" — doubles says how the pairing will land. */
+function _lguCountCaption(league, n) {
+  if (league.setup_type !== 'doubles') {
+    return league.i_signed_up ? 'players, including you' : n === 1 ? 'player' : 'players';
+  }
+  const pairs = Math.floor(n / 2);
+  const odd = n % 2;
+  return `players · ${pairs} pair${pairs === 1 ? '' : 's'}${odd ? ' + 1' : ''}`;
+}
+
+function _lguHeroHTML(league) {
+  const [pillCls, pillText] = _lguPill(league);
+  const when = [
+    `Starts ${_lguLong(league.start_date)}`,
+    `plays ${_lguWeekday(league.start_date)}s`,
+    league.deadline_passed ? `signups closed ${_lguShort(league.signup_deadline)}`
+      : league.signup_deadline ? `sign up by ${_lguShort(league.signup_deadline)}`
+        : 'no deadline',
+  ].join(' · ');
+  return `
+    <section class="lgu-hero">
+      <span class="lgu-hero-pills">
+        <span class="lgu-pill lgu-pill--${pillCls}">${pillText}</span>
+        <span class="lgu-pill lgu-pill--fmt">${LGU_FORMAT[league.setup_type] || 'Box league'}</span>
+      </span>
+      <h2 class="lgu-hero-name">${esc(league.name)}</h2>
+      <p class="lgu-hero-when">${esc(when)}</p>
+      ${league.description ? `<p class="lgu-hero-desc">${esc(league.description)}</p>` : ''}
+    </section>`;
+}
+
+function _lguFactsHTML(league, admin) {
+  const n = league.signup_count || 0;
+  const cap = league.signup_cap ?? null;
+  const right = league.deadline_passed ? '<span class="lgu-facts-closed">Closed</span>'
+    : cap == null ? 'No limit'
+      : league.full ? 'Full'
+        : `${league.spots_left} spot${league.spots_left === 1 ? '' : 's'} left of ${cap}`;
+  const row = (label, value) => `<div class="lgu-fact"><span>${label}</span><b>${value}</b></div>`;
+  const startNote = _lguWhenNote(league.start_date);
+  const dl = league.signup_deadline;
+  const dlLeft = dl && !league.deadline_passed ? _lguDaysTo(dl) : null;
+  return `
+    <section class="lgu-facts">
+      <div class="lgu-facts-head"><span class="lgu-label">Signed up</span><span class="lgu-facts-right">${right}</span></div>
+      <div class="lgu-facts-n"><b>${n}</b><span>${_lguCountCaption(league, n)}</span></div>
+      ${cap == null ? '' : `<span class="lgu-bar"><span class="lgu-bar-fill${league.full || league.deadline_passed ? ' lgu-bar-fill--done' : ''}" style="width:${Math.min(100, Math.round((n / cap) * 100))}%"></span></span>`}
+      <div class="lgu-facts-rows">
+        ${row('Starts', `${_lguShort(league.start_date)}${startNote ? ` &middot; ${startNote}` : ''}`)}
+        ${row('Plays', `${_lguWeekday(league.start_date)}s`)}
+        ${dl ? row(league.deadline_passed ? 'Signups closed' : 'Sign up by',
+    `${_lguShort(dl)}${dlLeft != null && dlLeft <= 14 ? ` &middot; ${dlLeft} day${dlLeft === 1 ? '' : 's'} left` : ''}`) : row('Sign up by', 'No deadline')}
+        ${row('Spots', cap == null ? 'No limit' : String(cap))}
+        ${admin ? row('Announced', formatShortDate(league.created_at)) : ''}
+      </div>
+    </section>`;
+}
+
+function _lguActionHTML(league) {
+  if (league.i_signed_up) {
+    const sub = league.deadline_passed
+      ? 'Signups have closed — the schedule is coming soon.'
+      : league.setup_type === 'doubles'
+        ? "We'll tell you your partner and division when the league is built."
+        : "We'll tell you your division when the league is built.";
+    return `
+      <section class="lgu-in">
+        <span class="lgu-in-tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+        <span class="lgu-in-text"><b>You're signed up</b><i>${sub}</i></span>
+        ${league.deadline_passed ? '' : '<button class="lgu-out" id="lguWithdraw">Withdraw</button>'}
+      </section>`;
+  }
+  if (league.full) return '<button class="lgu-join" disabled>League is full</button>';
+  if (league.deadline_passed) return '';
+  return '<button class="lgu-join" id="lguSignUp">Sign up</button>';
+}
+
+function _lguRosterHTML(league, admin) {
+  const rows = league.signups || [];
+  const n = rows.length;
+  const me = state.currentUser?.playerId;
+  const cap = league.signup_cap ?? null;
+  const head = admin
+    ? (league.setup_type === 'doubles'
+      ? `${n}${cap ? ` of ${cap}` : ''} · pairs are set when you build`
+      : `${n}${cap ? ` of ${cap}` : ''}`)
+    : `${n} player${n === 1 ? '' : 's'}${cap && !league.full ? ` · ${league.spots_left} spots left` : ''}`;
+
+  if (n === 0) {
+    return `
+      <section class="lgu-roster">
+        <div class="lgu-roster-head"><span class="lgu-label">Who's signed up</span></div>
+        <div class="lgu-empty">
+          <span class="lgu-empty-dots"><i></i><i></i><i></i></span>
+          <b>No one has signed up yet</b>
+          ${admin ? '<span>Members see it on the Leagues page and their dashboard. You can add people yourself below.</span>' : ''}
+        </div>
+        ${admin ? _lguAddHTML() : ''}
+      </section>`;
+  }
+
+  // Your own row first: you look for yourself before anyone else.
+  const sorted = [...rows].sort((a, b) => (a.player_id === me ? -1 : b.player_id === me ? 1 : 0));
+  const body = sorted.map((r) => {
+    const mine = r.player_id === me;
+    const av = `<span class="lgu-av${mine ? ' lgu-av--me' : ''}">${mine ? 'ME' : avatarInner({ name: r.name, photo_path: r.photo_path })}</span>`;
+    if (!admin) {
+      return `<div class="lgu-row${mine ? ' lgu-row--me' : ''}">${av}
+        <span class="lgu-row-name">${mine ? 'You' : esc(r.name)}</span>
+        <span class="lgu-row-when${mine ? ' lgu-row-when--me' : ''}">${mine ? `Signed up ${formatShortDate(r.signed_up_at)}` : formatShortDate(r.signed_up_at)}</span>
+      </div>`;
+    }
+    return `<div class="lgu-row lgu-row--admin" data-player="${r.player_id}">${av}
+      <span class="lgu-row-name">${esc(r.name)}</span>
+      <span class="lgu-row-num">${r.member_number ? esc(r.member_number) : '—'}</span>
+      <span class="lgu-row-rating">${r.club_locker_rating == null ? '—' : Number(r.club_locker_rating).toFixed(2)}</span>
+      <span class="lgu-row-when">${formatShortDate(r.signed_up_at)}</span>
+      <button class="lgu-row-x" data-remove="${r.player_id}" aria-label="Remove ${esc(r.name)}">&#10005;</button>
+    </div>`;
+  }).join('');
+
+  return `
+    <section class="lgu-roster">
+      <div class="lgu-roster-head"><span class="lgu-label">Who's signed up</span><span class="lgu-roster-n">${head}</span></div>
+      ${admin ? '<div class="lgu-row lgu-row--cols"><span></span><span>Member</span><span>No.</span><span>Rating</span><span>Signed up</span><span></span></div>' : ''}
+      <div class="lgu-rows">${body}</div>
+      ${admin ? _lguAddHTML() : ''}
+    </section>`;
+}
+
+function _lguAddHTML() {
+  return `
+    <div class="lgu-add">
+      <div class="lgu-add-search">
+        <input id="lguAdd" placeholder="Add a member by name or number" autocomplete="off">
+        <div class="lgu-add-drop" id="lguAddDrop" hidden></div>
+      </div>
+      <button class="btn btn-outline btn-sm" id="lguExport">Export CSV</button>
+    </div>`;
+}
+
+function _lguBuildHTML(league) {
+  const n = league.signup_count || 0;
+  const enough = n >= 2;
+  const copy = league.setup_type === 'doubles'
+    ? `Opens the doubles wizard with these ${n} loaded into the pair builder. Unpaired players can be left out or given a partner there.`
+    : league.setup_type === 'traditional'
+      ? 'Opens the wizard with everyone on this list already added. A Teams league needs exactly teams × divisions players, so you may have to add or drop a few there.'
+      : 'Opens the league wizard with everyone on this list already added. You need at least 2 players.';
+  return `
+    <section class="lgu-build">
+      <span class="lgu-label">Building</span>
+      <p>${copy} Signups stay open until you build, or until the deadline passes.</p>
+      <button class="lgu-join" id="lguBuild"${enough ? '' : ' disabled'}>Build this league</button>
+      ${enough ? '' : `<span class="lgu-build-note">Needs ${2 - n} more player${2 - n === 1 ? '' : 's'}</span>`}
+      ${league.deadline_passed ? '<button class="btn btn-outline btn-sm lgu-reopen" id="lguReopen">Reopen signups&hellip;</button>' : ''}
+    </section>`;
+}
+
+function _lguBannerHTML(league) {
+  if (!league.deadline_passed) return '';
+  const n = league.signup_count || 0;
+  const detail = league.setup_type === 'doubles'
+    ? `${n} player${n === 1 ? '' : 's'} signed up — that's ${Math.floor(n / 2)} pair${Math.floor(n / 2) === 1 ? '' : 's'}${n % 2 ? ' and one without a partner' : ''}. Build the league to set the pairs${n % 2 ? ', or add one more player first' : ''}.`
+    : `${n} player${n === 1 ? '' : 's'} signed up. Build the league to set the divisions.`;
+  return `
+    <div class="lgu-banner">
+      <span><b>Signups closed ${_lguShort(league.signup_deadline)}.</b> ${esc(detail)}</span>
+      <button class="lgu-banner-btn" id="lguBannerBuild">Build this league</button>
+    </div>`;
+}
+
+function _renderUpcoming(league) {
+  const admin = isAdmin();
+  const content = document.getElementById('mainContent');
+  document.getElementById('pageTitle').textContent = league.name;
+  document.getElementById('topbarActions').innerHTML = admin ? `
+    <button class="btn btn-outline" id="lguEdit">Edit announcement</button>
+    <button class="btn btn-primary" id="lguBuildTop"${(league.signup_count || 0) >= 2 ? '' : ' disabled'}>Build this league</button>` : '';
+
+  content.innerHTML = `
+    <div class="lgu-page">
+      ${admin ? _lguBannerHTML(league) : ''}
+      <div class="lgu-cols">
+        <div class="lgu-main">
+          ${_lguHeroHTML(league)}
+          ${_lguRosterHTML(league, admin)}
+        </div>
+        <div class="lgu-side">
+          ${_lguFactsHTML(league, admin)}
+          ${admin ? _lguBuildHTML(league) : _lguActionHTML(league)}
+          ${admin ? '<button class="lgu-cancel" id="lguCancel">Cancel this league&hellip;</button>' : ''}
+        </div>
+      </div>
+    </div>`;
+
+  _wireUpcoming(league, admin);
+}
+
+async function _lguRefresh(id) {
+  state.currentLeague = await window.api.getLeague(id);
+  renderLeagueDetail();
+}
+
+function _wireUpcoming(league, admin) {
+  const id = league.id;
+  document.getElementById('lguSignUp')?.addEventListener('click', async () => {
+    try {
+      await window.api.signUpForLeague(id);
+      await _lguRefresh(id);
+      toast(`Signed up for ${league.name}`, 'success');
+    } catch (e) { toast(e.message || 'Could not sign up.', 'error'); }
+  });
+  document.getElementById('lguWithdraw')?.addEventListener('click', () => {
+    modal.open('Withdraw', `
+      <p class="lgu-confirm">Withdraw from ${esc(league.name)}? Your spot goes back to the club.</p>
+      <div class="form-actions">
+        <button class="btn btn-outline" id="lguKeep">Keep my spot</button>
+        <button class="btn btn-danger" id="lguGo">Withdraw</button>
+      </div>`);
+    document.getElementById('lguKeep').addEventListener('click', modal.close);
+    document.getElementById('lguGo').addEventListener('click', async () => {
+      modal.close();
+      try {
+        await window.api.withdrawFromLeague(id);
+        await _lguRefresh(id);
+        toast('Withdrawn', 'success');
+      } catch (e) { toast(e.message || 'Could not withdraw.', 'error'); }
+    });
+  });
+
+  if (!admin) return;
+
+  document.getElementById('lguEdit')?.addEventListener('click', () => openAnnounceModal(league));
+  const build = () => startCreateLeague({ fromUpcoming: league });
+  document.getElementById('lguBuild')?.addEventListener('click', build);
+  document.getElementById('lguBuildTop')?.addEventListener('click', build);
+  document.getElementById('lguBannerBuild')?.addEventListener('click', build);
+  document.getElementById('lguReopen')?.addEventListener('click', () => openAnnounceModal(league));
+  document.getElementById('lguExport')?.addEventListener('click', () => _lguExport(league));
+
+  document.querySelectorAll('[data-remove]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const pid = Number(btn.dataset.remove);
+      const who = (league.signups || []).find((r) => r.player_id === pid);
+      modal.open('Remove', `
+        <p class="lgu-confirm">Remove ${esc(who?.name || 'this player')} from ${esc(league.name)}?</p>
+        <div class="form-actions">
+          <button class="btn btn-outline" id="rmNo">Cancel</button>
+          <button class="btn btn-danger" id="rmYes">Remove</button>
+        </div>`);
+      document.getElementById('rmNo').addEventListener('click', modal.close);
+      document.getElementById('rmYes').addEventListener('click', async () => {
+        modal.close();
+        await window.api.removeLeagueSignup(id, pid);
+        await _lguRefresh(id);
+      });
+    });
+  });
+
+  document.getElementById('lguCancel')?.addEventListener('click', () => {
+    modal.open('Cancel league', `
+      <p class="lgu-confirm">Cancel ${esc(league.name)}? Everyone signed up is told it's off, and the announcement is removed.</p>
+      <div class="form-actions">
+        <button class="btn btn-outline" id="cnNo">Keep it</button>
+        <button class="btn btn-danger" id="cnYes">Cancel league</button>
+      </div>`);
+    document.getElementById('cnNo').addEventListener('click', modal.close);
+    document.getElementById('cnYes').addEventListener('click', async () => {
+      modal.close();
+      await window.api.deleteLeague(id);
+      toast(`${league.name} cancelled`, 'success');
+      window.navigate('leagues');
+    });
+  });
+
+  _wireLguAdd(league);
+}
+
+/** The admin's add-a-member search: the club list, minus whoever is already on. */
+function _wireLguAdd(league) {
+  const input = document.getElementById('lguAdd');
+  const drop = document.getElementById('lguAddDrop');
+  if (!input || !drop) return;
+  const already = new Set((league.signups || []).map((r) => r.player_id));
+
+  const close = () => { drop.hidden = true; drop.innerHTML = ''; };
+  const paint = () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) return close();
+    const hits = (state.players || [])
+      .filter((p) => !already.has(p.id))
+      .filter((p) => p.name.toLowerCase().includes(q) || String(p.member_number || '').toLowerCase().includes(q))
+      .slice(0, 6);
+    drop.innerHTML = hits.length
+      ? hits.map((p) => `<button class="lgu-add-hit" data-add="${p.id}">${esc(p.name)}${p.member_number ? `<i>#${esc(p.member_number)}</i>` : ''}</button>`).join('')
+      : '<span class="lgu-add-none">No one matches</span>';
+    drop.hidden = false;
+    drop.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('mousedown', async (e) => {
+      e.preventDefault();
+      const pid = Number(b.dataset.add);
+      close();
+      input.value = '';
+      const r = await window.api.addLeagueSignup(league.id, pid);
+      await _lguRefresh(league.id);
+      // The admin owns the number, so going over the cap is allowed and simply
+      // said out loud.
+      if (r && r.signup_cap != null && r.signup_count > r.signup_cap) toast(`Over the cap — ${r.signup_count} of ${r.signup_cap}`, 'warning');
+      else if (r && r.full) toast('That fills the league', 'success');
+    }));
+  };
+
+  if (!state.players?.length) window.api.getPlayers().then((list) => { state.players = list; });
+  input.addEventListener('input', paint);
+  input.addEventListener('blur', () => setTimeout(close, 120));
+}
+
+function _lguExport(league) {
+  const rows = [['Name', 'Member number', 'Rating', 'Signed up'],
+    ...(league.signups || []).map((r) => [r.name, r.member_number || '', r.club_locker_rating ?? '', String(r.signed_up_at || '').slice(0, 10)])];
+  const csv = rows.map((r) => r.map((v) => {
+    const t = v == null ? '' : String(v);
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  }).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `${league.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-signups.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export function renderLeagueDetail() {
   const league = state.currentLeague;
   if (!league) { window.navigate('leagues'); return; }
+  // Some callers navigate with only an id and a name - the dashboard's bye
+  // card, a league row - and the page cannot be drawn from that: it rendered
+  // "undefined teams / NaN players". Fetch the real thing and come back.
+  if (!Array.isArray(league.weeks)) {
+    window.api.getLeague(league.id)
+      .then((full) => { state.currentLeague = full; renderLeagueDetail(); })
+      .catch(() => window.navigate('leagues'));
+    return;
+  }
+  // An announced league has no weeks, divisions or fixtures to draw.
+  if (league.status === 'upcoming') return _renderUpcoming(league);
 
   const adminMode = isAdmin();
   const isDoubles = league.setup_type === 'doubles';

@@ -1,6 +1,7 @@
 import { state, isAdmin } from '../state.js';
-import { esc, formatShortDate, toast, modal, playDayNamesLong, playDatesFor, formatWeekRange, DAY_LONG } from '../utils.js';
+import { esc, formatShortDate, toast, modal, avatarHTML, playDayNamesLong, playDatesFor, formatWeekRange, DAY_LONG } from '../utils.js';
 import { startCreateLeague } from './createLeague.js';
+import { isNew, visitPainted } from '../unread.js';
 
 // ===== LEAGUES PAGE =====
 
@@ -27,11 +28,17 @@ export async function renderLeagues() {
   state.leagues = await window.api.getLeagues();
   const content = document.getElementById('mainContent');
 
+  const upcomingCount = state.leagues.filter((l) => l.status === 'upcoming').length;
   const activeCount = state.leagues.filter((l) => l.status === 'active').length;
-  const doneCount = state.leagues.length - activeCount;
+  const doneCount = state.leagues.filter((l) => l.status === 'completed').length;
+  const counts = [
+    upcomingCount ? `${upcomingCount} upcoming` : '',
+    `${activeCount} active`,
+    `${doneCount} completed`,
+  ].filter(Boolean).join(' &middot; ');
   document.getElementById('pageTitle').innerHTML = state.leagues.length === 0
     ? 'Leagues'
-    : `Leagues <span class="lgl-count">${activeCount} active &middot; ${doneCount} completed</span>`;
+    : `Leagues <span class="lgl-count">${counts}</span>`;
 
   if (state.leagues.length === 0) {
     // The club has no leagues at all, which is a different message from a
@@ -54,11 +61,13 @@ export async function renderLeagues() {
   }
 
   if (isAdmin()) {
-    document.getElementById('btnCreateLeague')?.addEventListener('click', startCreateLeague);
+    document.getElementById('btnCreateLeague')?.addEventListener('click', openNewLeagueChoice);
   }
+
+  visitPainted('leagues');
 }
 
-const FILTERS = [['all', 'All'], ['active', 'Active'], ['completed', 'Completed']];
+const FILTERS = [['all', 'All'], ['upcoming', 'Upcoming'], ['active', 'Active'], ['completed', 'Completed']];
 const FORMATS = [['all', 'All formats'], ['singles', 'Singles'], ['doubles', 'Doubles']];
 
 // Status pills, a divider, then the format pills. On a phone the divider and
@@ -88,11 +97,19 @@ function _groupsHTML() {
     .filter((l) => _format === 'all' || (_format === 'doubles') === _isDoubles(l));
 
   const playerId = state.currentUser?.playerId;
+  const upcoming = shown.filter((l) => l.status === 'upcoming');
+  const built = shown.filter((l) => l.status !== 'upcoming');
+  const mine = (l) => (l.player_ids || []).includes(playerId) || l.i_signed_up;
   const groups = isAdmin()
-    ? [['Active', shown.filter((l) => l.status === 'active')],
-      ['Completed', shown.filter((l) => l.status === 'completed')]]
-    : [['My Leagues', shown.filter((l) => (l.player_ids || []).includes(playerId))],
-      ['Other Leagues', shown.filter((l) => !(l.player_ids || []).includes(playerId))]];
+    ? [['Upcoming', upcoming],
+      ['Active', built.filter((l) => l.status === 'active')],
+      ['Completed', built.filter((l) => l.status === 'completed')]]
+    // A member's own leagues come first whether they are running or only
+    // signed up for; everything still open to join is the next thing they
+    // want, and the rest is the archive.
+    : [['My Leagues', shown.filter(mine)],
+      ['Open for signup', upcoming.filter((l) => !mine(l))],
+      ['Other Leagues', built.filter((l) => !mine(l))]];
 
   const withCards = groups.filter(([, items]) => items.length > 0);
   if (withCards.length === 0) {
@@ -132,7 +149,263 @@ function _monthDay(dateStr) {
   return d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
 }
 
+// ===== ANNOUNCING A LEAGUE =====
+// New League no longer drops straight into the wizard: a league can be built
+// now, or announced and left open for members to sign themselves up.
+
+const ANNOUNCE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1Z"/><path d="M16 9a3 3 0 0 1 0 6"/><path d="M19 6a7 7 0 0 1 0 12"/></svg>';
+const BUILD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10M15 10v10"/></svg>';
+
+export function openNewLeagueChoice() {
+  modal.open('New league', `
+    <div class="lgl-choice">
+      <button class="lgl-choice-row" data-choice="announce">
+        <span class="lgl-choice-ic lgl-choice-ic--blue">${ANNOUNCE_ICON}</span>
+        <span class="lgl-choice-text">
+          <b>Announce it for signups</b>
+          <i>Members sign up themselves. You build the divisions and fixtures later, from whoever joined.</i>
+        </span>
+        <svg class="lgl-choice-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <button class="lgl-choice-row" data-choice="build">
+        <span class="lgl-choice-ic">${BUILD_ICON}</span>
+        <span class="lgl-choice-text">
+          <b>Build it now</b>
+          <i>Pick the players yourself and set up divisions, weeks and fixtures in five steps.</i>
+        </span>
+        <svg class="lgl-choice-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+    </div>`);
+  document.getElementById('modalBody').querySelectorAll('[data-choice]').forEach((b) => {
+    b.addEventListener('click', () => {
+      modal.close();
+      if (b.dataset.choice === 'build') startCreateLeague();
+      else openAnnounceModal();
+    });
+  });
+}
+
+const FORMAT_OPTIONS = [
+  ['traditional', 'Teams', 'Players are put into teams when you build.'],
+  ['modern', 'Box league', 'Everyone plays everyone in their division. Divisions are set when you build.'],
+  ['doubles', 'Doubles', 'People sign up on their own. You pair them when you build.'],
+];
+
+function _nextMonday() {
+  const d = new Date();
+  d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7 || 7));
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+/**
+ * The announcement form, for a new league or an edit of one.
+ *
+ * Six fields: everything a member needs to decide whether to join, and nothing
+ * about the schedule, which is not decided until the league is built.
+ */
+export function openAnnounceModal(league = null) {
+  const editing = !!league;
+  const f = {
+    name: league?.name || '',
+    setupType: league?.setup_type || 'modern',
+    startDate: league?.start_date || _nextMonday(),
+    signupDeadline: league?.signup_deadline || '',
+    signupCap: league?.signup_cap ?? '',
+    description: league?.description || '',
+  };
+
+  modal.open(editing ? 'Edit announcement' : 'Announce a league', `
+    <div class="lgl-form">
+      <label class="lgl-field"><span>League name</span>
+        <input id="anName" value="${esc(f.name)}" placeholder="Autumn Box League" autocomplete="off">
+      </label>
+      <div class="lgl-field"><span>Format</span>
+        <div class="lgl-seg" id="anFormat">
+          ${FORMAT_OPTIONS.map(([k, label]) => `<button type="button" class="lgl-seg-b${f.setupType === k ? ' lgl-seg-b--on' : ''}" data-fmt="${k}">${label}</button>`).join('')}
+        </div>
+        <span class="lgl-help" id="anFormatHelp"></span>
+      </div>
+      <div class="lgl-row2">
+        <label class="lgl-field"><span>Starts</span>
+          <input id="anStart" type="date" value="${esc(f.startDate)}">
+        </label>
+        <label class="lgl-field"><span>Sign up by <i>optional</i></span>
+          <input id="anDeadline" type="date" value="${esc(f.signupDeadline)}">
+        </label>
+      </div>
+      <label class="lgl-field"><span>Spots <i>optional</i></span>
+        <input id="anCap" type="number" min="2" step="1" value="${esc(String(f.signupCap))}" placeholder="No limit" class="lgl-cap">
+        <span class="lgl-help" id="anCapHelp">Leave empty for no limit. Signups close when it fills.</span>
+      </label>
+      <label class="lgl-field"><span>Description <i>optional</i></span>
+        <textarea id="anDesc" rows="3" placeholder="When it runs, who it's for, anything else worth knowing.">${esc(f.description)}</textarea>
+      </label>
+      <div class="lgl-form-err" id="anErr"></div>
+      <div class="lgl-form-foot">
+        <span class="lgl-help">${editing ? '' : 'Listed under Upcoming as soon as you announce it.'}</span>
+        <button class="btn btn-outline" id="anCancel">Cancel</button>
+        <button class="btn btn-primary" id="anSave">${editing ? 'Save changes' : 'Announce league'}</button>
+      </div>
+    </div>`);
+
+  const help = () => {
+    document.getElementById('anFormatHelp').textContent = FORMAT_OPTIONS.find(([k]) => k === f.setupType)[2];
+    document.getElementById('anCapHelp').textContent = f.setupType === 'doubles'
+      ? 'Leave empty for no limit. Use an even number.'
+      : 'Leave empty for no limit. Signups close when it fills.';
+  };
+  help();
+  document.getElementById('anFormat').querySelectorAll('[data-fmt]').forEach((b) => {
+    b.addEventListener('click', () => {
+      f.setupType = b.dataset.fmt;
+      document.getElementById('anFormat').querySelectorAll('[data-fmt]').forEach((x) => x.classList.toggle('lgl-seg-b--on', x === b));
+      help();
+    });
+  });
+  document.getElementById('anCancel').addEventListener('click', modal.close);
+  document.getElementById('anSave').addEventListener('click', async () => {
+    const body = {
+      name: document.getElementById('anName').value.trim(),
+      setupType: f.setupType,
+      startDate: document.getElementById('anStart').value,
+      signupDeadline: document.getElementById('anDeadline').value || null,
+      signupCap: document.getElementById('anCap').value === '' ? null : Number(document.getElementById('anCap').value),
+      description: document.getElementById('anDesc').value.trim(),
+    };
+    const err = document.getElementById('anErr');
+    err.textContent = '';
+    const btn = document.getElementById('anSave');
+    btn.disabled = true;
+    try {
+      if (editing) {
+        await window.api.editAnnouncement(league.id, body);
+        modal.close();
+        toast('Announcement updated', 'success');
+        const fresh = await window.api.getLeague(league.id);
+        window.navigate('leagueDetail', { league: fresh });
+      } else {
+        const { id } = await window.api.announceLeague(body);
+        modal.close();
+        toast(`${body.name} announced`, 'success');
+        const fresh = await window.api.getLeague(id);
+        window.navigate('leagueDetail', { league: fresh });
+      }
+    } catch (e) {
+      err.textContent = e.message || 'Could not save.';
+      btn.disabled = false;
+    }
+  });
+}
+
+// ===== UPCOMING LEAGUE CARD =====
+
+const FORMAT_LABEL = { traditional: 'Teams', modern: 'Box league', doubles: 'Doubles' };
+
+/** "Mon 5 Oct" */
+function _shortDay(dateStr) {
+  const d = _atNoon(dateStr);
+  return d ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+}
+
+/** What the format line says, which differs by who is reading it. */
+function _upcomingStructure(league, admin) {
+  const fmt = FORMAT_LABEL[league.setup_type] || 'Box league';
+  const spots = league.signup_cap != null ? `${league.signup_cap} spots` : 'no limit';
+  if (league.setup_type === 'doubles') {
+    return admin ? `${fmt} &middot; ${spots} &middot; pairs set at build` : `${fmt} &middot; sign up alone, pairs set later`;
+  }
+  if (league.setup_type === 'traditional') {
+    return admin ? `${fmt} &middot; ${spots}` : `${fmt} &middot; teams set when the league is built`;
+  }
+  return `${fmt} &middot; ${spots}`;
+}
+
+/** The status pill: what a reader most needs to know about this signup. */
+function _upcomingPill(league, signedUp) {
+  if (signedUp) return ['green', 'Signed up'];
+  if (league.full) return ['grey', 'Full'];
+  if (league.deadline_passed) return ['amber', 'Signups closed'];
+  return ['blue', 'Signups open'];
+}
+
+const _fmtDeadline = (d) => `Sign up by ${_shortDay(d)}`;
+
+// A league posted since the member last opened this tab is tinted and carries
+// a dot before its name, for this visit only. An announcement that has since
+// been built is the same row, so it is never marked a second time.
+const _newCls = (league) => (isNew('leagues', league.created_at) ? ' um-new' : '');
+const _newDot = (league) => (isNew('leagues', league.created_at) ? '<span class="um-mark" role="img" aria-label="New"></span>' : '');
+
+function _upcomingCardHTML(league) {
+  const admin = isAdmin();
+  const signedUp = !!league.i_signed_up;
+  const [pillCls, pillText] = _upcomingPill(league, signedUp);
+  const n = league.signup_count || 0;
+  const cap = league.signup_cap ?? null;
+
+  const weekday = _weekdayName(league.start_date);
+  // No time: an announced league has not chosen one, and the column's default
+  // would tell every member seven in the evening.
+  const dateLine = `Starts ${_shortDay(league.start_date)}${weekday ? ` &middot; ${weekday}` : ''}`;
+
+  const faces = (league.signup_preview || []).slice(0, 4);
+  const avatars = faces.length
+    ? `<span class="lgl-faces">${faces.map((f) => avatarHTML(f, 'lgl-face')).join('')}</span>` : '';
+  const countText = cap == null
+    ? (n === 0 ? 'No one signed up yet' : `${n} signed up`)
+    : (n === 0 ? `No one signed up yet` : `${n} of ${cap} signed up`);
+  const rightText = league.deadline_passed ? 'Signups closed'
+    : league.signup_deadline ? _fmtDeadline(league.signup_deadline)
+    : 'No deadline';
+
+  const bar = cap == null ? '' : `
+    <span class="lgl-sbar"><span class="lgl-sbar-fill${league.full ? ' lgl-sbar-fill--full' : ''}" style="width:${Math.min(100, Math.round((n / cap) * 100))}%"></span></span>`;
+
+  const action = admin ? '' : signedUp
+    ? '<button class="lgl-act lgl-act--out" data-withdraw>Withdraw</button>'
+    : league.full ? '<span class="lgl-act-note">No spots left</span>'
+      : league.deadline_passed ? '<span class="lgl-act-note">Schedule coming soon</span>'
+        : '<button class="lgl-act lgl-act--in" data-signup>Sign up</button>';
+
+  const footLeft = admin
+    ? (league.deadline_passed || league.full
+      ? '<span class="lgl-chip lgl-chip--amber">Ready to build</span>'
+      : `<span class="lgl-weeks">Announced ${formatShortDate(league.created_at)}</span>`)
+    : '<span class="lgl-view lgl-view--left">Details <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>';
+  const footRight = admin
+    ? `<span class="lgl-view">${n < 2 ? 'View signups' : 'Build league'} <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>`
+    : action;
+
+  return `
+    <div class="lgl-card lgl-card--upcoming${_newCls(league)}" data-id="${league.id}">
+      <div class="lgl-body">
+        <div class="lgl-card-head">
+          <h3 class="lgl-name">${_newDot(league)}${esc(league.name)}</h3>
+          <span class="lgl-badges">
+            ${_isDoubles(league) ? '<span class="lgl-fmt">Doubles</span>' : ''}
+            <span class="lgl-status lgl-status--${pillCls}">${pillText}</span>
+          </span>
+        </div>
+        <div class="lgl-meta">
+          <span class="lgl-meta-row">${CAL_ICON}${dateLine}</span>
+          <span class="lgl-meta-row">${PEOPLE_ICON}${_upcomingStructure(league, admin)}</span>
+        </div>
+        <div class="lgl-signup">
+          ${avatars}
+          <span class="lgl-signup-line">
+            <span class="lgl-signup-n${n ? ' lgl-signup-n--on' : ''}">${countText}</span>
+            <span class="lgl-signup-when${league.deadline_passed ? ' lgl-signup-when--closed' : ''}">${rightText}</span>
+          </span>
+          ${bar}
+        </div>
+        ${admin ? '' : `<div class="lgl-act-mobile">${action}</div>`}
+      </div>
+      <div class="lgl-foot">${footLeft}${footRight}</div>
+    </div>`;
+}
+
 function leagueCardHTML(league) {
+  if (league.status === 'upcoming') return _upcomingCardHTML(league);
   const done = league.status === 'completed';
   const playerId = state.currentUser?.playerId;
   const mine = !isAdmin() && playerId != null && (league.player_ids || []).includes(playerId);
@@ -182,10 +455,10 @@ function leagueCardHTML(league) {
   }
 
   return `
-    <div class="lgl-card${done ? ' lgl-card--done' : ''}" data-id="${league.id}">
+    <div class="lgl-card${done ? ' lgl-card--done' : ''}${_newCls(league)}" data-id="${league.id}">
       <div class="lgl-body">
         <div class="lgl-card-head">
-          <h3 class="lgl-name">${esc(league.name)}</h3>
+          <h3 class="lgl-name">${_newDot(league)}${esc(league.name)}</h3>
           <span class="lgl-badges">
             ${_isDoubles(league) ? '<span class="lgl-fmt">Doubles</span>' : ''}
             <span class="lgl-status lgl-status--${done ? 'done' : 'active'}">${done ? 'Completed' : 'Active'}</span>
@@ -251,8 +524,59 @@ function _wireFilters() {
 
 // The whole card is the click target; there are no buttons inside it.
 function _wireCards() {
-  document.getElementById('lglGroups')?.querySelectorAll('.lgl-card[data-id]').forEach((card) => {
+  const holder = document.getElementById('lglGroups');
+  holder?.querySelectorAll('.lgl-card[data-id]').forEach((card) => {
     card.addEventListener('click', () => openLeague(Number(card.dataset.id)));
+  });
+  // The first buttons to live inside a league card: they act on the signup
+  // rather than opening the league, so they stop the card's own click.
+  holder?.querySelectorAll('[data-signup], [data-withdraw]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = Number(btn.closest('.lgl-card').dataset.id);
+      const league = state.leagues.find((l) => l.id === id);
+      if (btn.hasAttribute('data-signup')) return signUp(id, league?.name);
+      confirmWithdraw(id, league?.name);
+    });
+  });
+}
+
+/** Refresh the list in place after a signup changes, keeping the scroll. */
+async function _reloadCards() {
+  state.leagues = await window.api.getLeagues();
+  const holder = document.getElementById('lglGroups');
+  if (!holder) return;
+  holder.innerHTML = _groupsHTML();
+  _wireCards();
+}
+
+export async function signUp(id, name) {
+  try {
+    await window.api.signUpForLeague(id);
+    await _reloadCards();
+    toast(name ? `Signed up for ${name}` : 'Signed up', 'success');
+  } catch (e) {
+    toast(e.message || 'Could not sign up.', 'error');
+  }
+}
+
+export function confirmWithdraw(id, name) {
+  modal.open('Withdraw', `
+    <p class="lgl-confirm-body">Withdraw from ${esc(name || 'this league')}? Your spot goes back to the club.</p>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="wdKeep">Keep my spot</button>
+      <button class="btn btn-danger" id="wdGo">Withdraw</button>
+    </div>`);
+  document.getElementById('wdKeep').addEventListener('click', modal.close);
+  document.getElementById('wdGo').addEventListener('click', async () => {
+    modal.close();
+    try {
+      await window.api.withdrawFromLeague(id);
+      await _reloadCards();
+      toast('Withdrawn', 'success');
+    } catch (e) {
+      toast(e.message || 'Could not withdraw.', 'error');
+    }
   });
 }
 

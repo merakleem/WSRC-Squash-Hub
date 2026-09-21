@@ -73,6 +73,23 @@ router.delete('/events/:id/signup', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// The admin adds a member. Mirrors POST /leagues/:id/signups, and leans on the
+// same model write the member's own signup uses, so the cap and the
+// members-only rule cannot drift apart between the two ways onto a list.
+router.post('/events/:id/signups', requireAdmin, wrap(async (req, res) => {
+  const playerId = Number(req.body?.playerId);
+  if (!Number.isInteger(playerId)) return res.status(400).json({ error: 'A player is required.' });
+  try {
+    res.json(eventModel.addAttendee(Number(req.params.id), playerId, clubToday()));
+  } catch (err) {
+    // The only 409 an admin can still meet is the cap - they are allowed past
+    // the date, not past the limit - and they are not the one being apologised
+    // to for it.
+    if (err.status === 409) throw Object.assign(new Error('This event just filled up.'), { status: 409 });
+    throw err;
+  }
+}));
+
 router.delete('/events/:id/signups/:playerId', requireAdmin, wrap(async (req, res) => {
   eventModel.removeAttendee(Number(req.params.id), Number(req.params.playerId));
   res.json({ ok: true });

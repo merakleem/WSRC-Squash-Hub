@@ -85,7 +85,7 @@ type($('#wDate'), '2026-09-14');
 click($$('.wz-format')[1]);
 await settle();
 ok('picking No teams selects it', $('.wz-format--on')?.dataset.type === 'modern');
-ok('format cell follows', $$('.wz-sum-val')[2]?.textContent === 'Divisions only');
+ok('format cell follows', $$('.wz-sum-val')[2]?.textContent === 'Box league');
 ok('the typed name survived the re-render', $('#wName')?.value === 'Fall 2026 League');
 click($$('.wz-format')[0]);
 await settle();
@@ -221,7 +221,8 @@ await settle();
 const created = calls.find((c) => c[0] === 'createLeague')?.[1];
 ok('create posts the payload', !!created);
 ok('with the traditional shape intact', created && JSON.stringify(Object.keys(created).sort()) ===
-  JSON.stringify(['blackoutDates','courtIds','matchBuffer','matchDuration','matchStartTime','name','numDivisions','numRounds','numTeams','playDays','rankedPlayers','setup_type','startDate','teamNames'].sort()));
+  JSON.stringify(['blackoutDates','courtIds','leagueId','matchBuffer','matchDuration','matchStartTime','name','numDivisions','numRounds','numTeams','playDays','rankedPlayers','setup_type','startDate','teamNames'].sort()));
+ok('and no announcement to build into, this one being made outright', created && created.leagueId === null);
 ok('a Teams league sends only the start weekday as its play day', created && JSON.stringify(created.playDays) === '[1]', JSON.stringify(created?.playDays));
 ok('name, date and counts are right', created && created.name === 'Fall 2026 League' && created.startDate === '2026-09-14'
   && created.numTeams === 4 && created.numDivisions === 3 && created.numRounds === 1
@@ -273,7 +274,7 @@ await settle();
 const made = calls.find((c) => c[0] === 'createLeague')?.[1];
 ok('modern payload posts', !!made && made.setup_type === 'modern');
 ok('with the modern shape intact', made && JSON.stringify(Object.keys(made).sort()) ===
-  JSON.stringify(['blackoutDates','courtIds','divisions','matchBuffer','matchDuration','matchStartTime','name','numRounds','playDays','setup_type','startDate'].sort()));
+  JSON.stringify(['blackoutDates','courtIds','divisions','leagueId','matchBuffer','matchDuration','matchStartTime','name','numRounds','playDays','setup_type','startDate'].sort()));
 ok('three divisions of four', made && made.divisions.length === 3 && made.divisions.every((d) => d.length === 4));
 ok('ranks encode division and slot', made && made.divisions[1][0].rank === 1001 && made.divisions[2][3].rank === 2004);
 
@@ -329,7 +330,33 @@ click($('#wCreate')); await settle();
 const dbl = calls.find((c) => c[0] === 'createLeague')?.[1];
 ok('the doubles payload posts pairs per division', dbl && dbl.setup_type === 'doubles' && dbl.divisions.length === 2 && dbl.divisions.every((d) => d.length === 3 && d.every((pr) => pr.playerIds.length === 2)), JSON.stringify(dbl?.divisions));
 ok('ranks encode division and slot, seeds first', dbl && dbl.divisions[0][0].rank === 1 && dbl.divisions[1][2].rank === 1003 && dbl.divisions[0][0].playerIds.join() === '1,2');
-ok('with the shared fields intact', dbl && JSON.stringify(Object.keys(dbl).sort()) === JSON.stringify(['blackoutDates','courtIds','divisions','matchBuffer','matchDuration','matchStartTime','name','numRounds','playDays','setup_type','startDate'].sort()));
+ok('with the shared fields intact', dbl && JSON.stringify(Object.keys(dbl).sort()) === JSON.stringify(['blackoutDates','courtIds','divisions','leagueId','matchBuffer','matchDuration','matchStartTime','name','numRounds','playDays','setup_type','startDate'].sort()));
+
+log.textContent += '\nBUILDING AN ANNOUNCED LEAGUE\n';
+// The three formats hold their players differently. Teams and a box league
+// read rankedPlayers; the pair builder reads pairs, and a doubles league
+// opened with nobody in it until the signups were put there too.
+const signups = PLAYERS.slice(0, 6).map((p) => ({ player_id: p.id, name: p.name, photo_path: null }));
+for (const [type, label] of [['modern', 'a box league'], ['traditional', 'a Teams league'], ['doubles', 'a doubles league']]) {
+  mod.startCreateLeague({ fromUpcoming: { id: 77, name: 'Announced League', start_date: '2026-10-05', setup_type: type, signups } });
+  await settle();
+  ok(`${label} opens on its announced format`, $('.wz-format--on')?.dataset.type === type, $('.wz-format--on')?.dataset.type);
+  ok('with the name and date carried in', $('#wName')?.value === 'Announced League' && $('#wDate')?.value === '2026-10-05');
+  ok('and the other formats held, not offered', $$('.wz-format--locked').length === 2);
+  click($$('.wz-format')[0]);
+  await settle();
+  ok('so a click on another does nothing', $('.wz-format--on')?.dataset.type === type);
+  click($('#wNext'));
+  await settle(120);
+  if (type === 'doubles') {
+    ok('the six signups are loaded as three pairs', state.wizard.pairs.length === 3 && state.wizard.pairs.every((pr) => pr[0] && pr[1]), JSON.stringify(state.wizard.pairs));
+    ok('and the chip counts them', $('#wzSelChip').textContent === '3 pairs · 6 players', $('#wzSelChip').textContent);
+    ok('as does the summary strip, drawn before they were seeded', /3/.test($$('.wz-sum-val')[4]?.textContent || ''), $$('.wz-sum-val')[4]?.textContent);
+  } else {
+    ok('the six signups are already in the league', state.wizard.rankedPlayers.length === 6, String(state.wizard.rankedPlayers.length));
+    ok('and the chip counts them', $('#wzSelChip').textContent === '6 selected', $('#wzSelChip').textContent);
+  }
+}
 
 document.title = failed ? `FAIL ${failed}` : 'PASS';
 log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
