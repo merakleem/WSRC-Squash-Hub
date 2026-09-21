@@ -358,6 +358,62 @@ for (const [type, label] of [['modern', 'a box league'], ['traditional', 'a Team
   }
 }
 
+log.textContent += '\nSIGNUPS ARRIVE IN THE ORDER PEOPLE JOINED, NOT THE LADDER\'S\n';
+// The case above signed players 1-6 up in ladder order, so it could never see
+// this: the list is the seeding, and it was being left in signup order. A new
+// member who is not on the ladder yet signed up first of all.
+const byName = (n) => PLAYERS.find((p) => p.name === n);
+const joined = [
+  { player_id: 99, name: 'Brand New', photo_path: null },
+  ...['Nadia Haddad', 'James Whitfield', 'Yuki Tanaka', 'Marcus Lang', 'Owen Price', 'Sofia Duarte']
+    .map((n) => ({ player_id: byName(n).id, name: n, photo_path: null })),
+];
+const ladderIds = [1, 2, 3, 10, 11, 12];   // James, Sofia, Marcus, Yuki, Nadia, Owen
+const order = () => state.wizard.rankedPlayers.map((p) => p.id);
+
+state.ladder = [];   // as it is when the wizard is reached straight from an announcement
+await mod.startCreateLeague({ fromUpcoming: { id: 78, name: 'Autumn Box', start_date: '2026-10-05', setup_type: 'modern', signups: joined } });
+await settle();
+ok('the list is in ladder order the moment the wizard opens', order().join() === [...ladderIds, 99].join(), order().join());
+ok('with someone not on the ladder last, not first', order()[order().length - 1] === 99);
+
+click($('#wNext'));
+await settle(120);
+const seeds = $$('#rankedList .wz-prow--sel').map((r) => r.querySelector('.wz-pname').textContent);
+ok('step 2 shows them seeded by the ladder', seeds.join('|') === 'James Whitfield|Sofia Duarte|Marcus Lang|Yuki Tanaka|Nadia Haddad|Owen Price|Brand New', seeds.join('|'));
+ok('the top seed is the best player, not the first to sign up', $('#rankedList .wz-seed')?.textContent === '1' && seeds[0] === 'James Whitfield');
+
+// The step bar is clickable, so a league can go from step 1 to the structure
+// without step 2 ever being drawn. That path has to be sorted too.
+state.ladder = [];
+await mod.startCreateLeague({ fromUpcoming: { id: 79, name: 'Autumn Box', start_date: '2026-10-05', setup_type: 'modern', signups: joined } });
+await settle();
+click($('.wz-step[data-step="3"]'));
+await settle(120);
+ok('jumping straight to the structure step is sorted as well', order().join() === [...ladderIds, 99].join(), order().join());
+
+// Sorted once, as it opens - and never again. The team editor on the last
+// step rearranges players by hand, and a re-sort would quietly undo it.
+state.wizard.rankedPlayers = [...state.wizard.rankedPlayers].reverse();
+const handMade = order().join();
+click($('.wz-step[data-step="2"]'));
+await settle(120);
+click($('.wz-step[data-step="3"]'));
+await settle(120);
+ok('an order set by hand survives going back and forth', order().join() === handMade, order().join());
+
+// If the ladder cannot be read as the wizard opens, step 2 sorts on arrival.
+const realLadder = window.api.getLadder;
+window.api.getLadder = async () => { throw new Error('offline'); };
+state.ladder = [];
+await mod.startCreateLeague({ fromUpcoming: { id: 80, name: 'Autumn Box', start_date: '2026-10-05', setup_type: 'modern', signups: joined } });
+await settle();
+ok('the wizard still opens when the ladder cannot be read', state.wizard.buildingLeagueId === 80 && state.wizard.seedSorted === false);
+window.api.getLadder = realLadder;
+click($('#wNext'));
+await settle(120);
+ok('and step 2 puts them in ladder order when it arrives', order().join() === [...ladderIds, 99].join(), order().join());
+
 document.title = failed ? `FAIL ${failed}` : 'PASS';
 log.textContent += failed ? `\n${failed} FAILED\n` : '\nALL PASSED\n';
 </script>
