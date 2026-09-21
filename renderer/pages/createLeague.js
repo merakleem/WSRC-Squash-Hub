@@ -14,8 +14,20 @@ import { esc, toast, modal, avatarHTML } from '../utils.js';
  * league row rather than inserting a new one - so the league someone joined is
  * the league that runs.
  */
-export function startCreateLeague({ fromUpcoming = null } = {}) {
-  const signups = (fromUpcoming?.signups || []).map((s) => ({ id: s.player_id, name: s.name, photo_path: s.photo_path || null }));
+export async function startCreateLeague({ fromUpcoming = null } = {}) {
+  let signups = (fromUpcoming?.signups || []).map((s) => ({ id: s.player_id, name: s.name, photo_path: s.photo_path || null }));
+  // Signups arrive in the order people joined, and the order of this list is
+  // the seeding - it decides the divisions. So it is put in ladder order here,
+  // once, as the wizard opens: never again later, because the team editor on
+  // the last step rearranges it by hand and a re-sort would undo that.
+  let seedSorted = !signups.length;
+  if (signups.length) {
+    try {
+      if (!state.ladder.length) state.ladder = await window.api.getLadder();
+      signups = byLadder(signups, state.ladder);
+      seedSorted = true;
+    } catch (_) { /* step 2 sorts it on arrival instead */ }
+  }
   state.wizard = {
     step: 1,
     buildingLeagueId: fromUpcoming?.id ?? null,
@@ -23,6 +35,7 @@ export function startCreateLeague({ fromUpcoming = null } = {}) {
     leagueName: fromUpcoming?.name || '',
     startDate: fromUpcoming?.start_date || defaultStartDate(),
     rankedPlayers: signups,
+    seedSorted,
     // Traditional
     numTeams: 3,
     numDivisions: 1,
@@ -45,6 +58,13 @@ export function startCreateLeague({ fromUpcoming = null } = {}) {
     matchBuffer: 15,
   };
   window.navigate('createLeague');
+}
+
+// Players in ladder order; anyone not on the ladder goes after, in the order
+// they came in. The one rule for seeding, wherever the list is sorted.
+function byLadder(players, ladder) {
+  const pos = new Map(ladder.map((p, i) => [p.id, i]));
+  return [...players].sort((a, b) => (pos.get(a.id) ?? Infinity) - (pos.get(b.id) ?? Infinity));
 }
 
 // YYYY-MM-DD of a Date in the browser's own zone. toISOString() is UTC, and
@@ -489,12 +509,14 @@ async function renderStep2() {
   }
 
   const ladderSort = () => {
-    state.wizard.rankedPlayers.sort((a, b) => {
-      const ai = ladderOrder.indexOf(a.id);
-      const bi = ladderOrder.indexOf(b.id);
-      return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
-    });
+    state.wizard.rankedPlayers = byLadder(state.wizard.rankedPlayers, state.ladder);
   };
+  // Signups brought in from an announcement whose ladder could not be read as
+  // the wizard opened: sort them the first time they are shown.
+  if (!state.wizard.seedSorted) {
+    ladderSort();
+    state.wizard.seedSorted = true;
+  }
 
   const query = () => document.getElementById('playerSearch')?.value || '';
   const filteredAvailable = () => {
