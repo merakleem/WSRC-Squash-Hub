@@ -3801,6 +3801,9 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 
 .photo-modal { text-align: center; }
+/* Centred under the round preview, rather than the right-aligned default the
+   form modals use. */
+.photo-modal .form-actions { justify-content: center; }
 .photo-preview {
   width: 140px;
   height: 140px;

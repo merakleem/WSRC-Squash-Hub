@@ -129,7 +129,9 @@ const file = new File([blob], 'photo.png', { type: 'image/png' });
 click($('#btnEditPhoto'));
 await settle();
 ok('the photo modal opens', !!document.getElementById('fPhotoFile'));
-ok('and says the photo will be shrunk', /shrunk before they are saved/.test($('.photo-modal .form-hint').textContent));
+// The hint names the formats and nothing else: the size limit and the square
+// crop are the app's business, not the member's.
+ok('and the hint is only the formats', $('.photo-modal .form-hint').textContent === 'JPEG, PNG, WebP or GIF.', $('.photo-modal .form-hint').textContent);
 const dt = new DataTransfer();
 dt.items.add(file);
 const input = document.getElementById('fPhotoFile');
