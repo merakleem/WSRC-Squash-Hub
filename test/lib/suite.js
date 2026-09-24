@@ -51,4 +51,19 @@ function scratchDb(t, label = 'test') {
   return file;
 }
 
-module.exports = { suite, scratchDb };
+/**
+ * A date n days from the club's *today*, as 'YYYY-MM-DD'.
+ *
+ * Not the machine's today: the server judges deadlines and whether an event
+ * has happened in club time, and CI runs on UTC. From early evening at the
+ * club those are different days, so a fixture dated "yesterday" the machine's
+ * way was still today at the club and the rule under test did not fire. Read
+ * lazily, so the club's own timezone setting is picked up once a database is
+ * open.
+ */
+function clubDay(n = 0) {
+  const [y, m, d] = require('../../lib/clock').clubToday().split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+module.exports = { suite, scratchDb, clubDay };

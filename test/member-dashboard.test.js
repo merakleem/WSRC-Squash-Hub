@@ -4,17 +4,13 @@
 // players a ladder move went past.
 // Run: node --test test/member-dashboard.test.js
 const bcrypt = require('bcryptjs');
-const { suite, scratchDb } = require('./lib/suite');
+const { suite, scratchDb, clubDay: iso } = require('./lib/suite');
 const { boot, client } = require('./lib/client');
 
 const ADMIN_PW = process.env.SITE_PASSWORD;
 
 // Dates are written relative to the club's today, since the routes read the
 // club's clock and a fixed date would rot.
-const iso = (n) => {
-  const d = new Date(Date.now() + n * 864e5);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
 
 suite('the member dashboard\'s server side', async ({ ok, t }) => {
   const app = boot(scratchDb(t, 'member-dashboard'), ({ run }) => {

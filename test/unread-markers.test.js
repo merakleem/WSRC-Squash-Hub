@@ -2,14 +2,10 @@
 // each visit replaces, and who is told nothing at all.
 // Run: node --test test/unread-markers.test.js
 const bcrypt = require('bcryptjs');
-const { suite, scratchDb } = require('./lib/suite');
+const { suite, scratchDb, clubDay: iso } = require('./lib/suite');
 const { boot, client } = require('./lib/client');
 
 const ADMIN_PW = process.env.SITE_PASSWORD;
-const iso = (n) => {
-  const d = new Date(Date.now() + n * 864e5);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
 
 suite('a member is told which tabs have something new', async ({ ok, t }) => {
   const app = boot(scratchDb(t, 'unread-markers'), ({ run }) => {

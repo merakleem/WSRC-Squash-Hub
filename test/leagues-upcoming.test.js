@@ -3,14 +3,10 @@
 // joined stay joined.
 // Run: node --test test/leagues-upcoming.test.js
 const bcrypt = require('bcryptjs');
-const { suite, scratchDb } = require('./lib/suite');
+const { suite, scratchDb, clubDay: iso } = require('./lib/suite');
 const { boot, client } = require('./lib/client');
 
 const ADMIN_PW = process.env.SITE_PASSWORD;
-const iso = (n) => {
-  const d = new Date(Date.now() + n * 864e5);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
 
 suite('leagues can be announced before they are built', async ({ ok, t }) => {
   const app = boot(scratchDb(t, 'leagues-upcoming'), ({ run }) => {

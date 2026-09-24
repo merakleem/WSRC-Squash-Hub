@@ -2,14 +2,10 @@
 // meets, except that the date no longer closes the list.
 // Run: node --test test/event-add-member.test.js
 const bcrypt = require('bcryptjs');
-const { suite, scratchDb } = require('./lib/suite');
+const { suite, scratchDb, clubDay: iso } = require('./lib/suite');
 const { boot, client } = require('./lib/client');
 
 const ADMIN_PW = process.env.SITE_PASSWORD;
-const iso = (n) => {
-  const d = new Date(Date.now() + n * 864e5);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
 
 suite('the admin adds a member to an event', async ({ ok, t }) => {
   const app = boot(scratchDb(t, 'event-add-member'), ({ run }) => {
