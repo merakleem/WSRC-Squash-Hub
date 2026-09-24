@@ -68,6 +68,10 @@ try {
   click($('#plPhotoUpload')); await settle();
   const input = $('#fPhotoFile');
   ok('the photo modal opens with a file input', !!input && /Choose Image/.test($('#fPhotoChoose')?.textContent));
+  // The hint names the formats and stops there: the size and the cropping are
+  // the app's business, not something to explain on the way in.
+  ok('the hint is only the formats', $('.photo-modal .form-hint')?.textContent === 'JPEG, PNG, WebP or GIF.', $('.photo-modal .form-hint')?.textContent);
+  ok('and carries no em dash', !/\u2014/.test($('.photo-modal')?.textContent || ''));
 
   const dt = new DataTransfer(); dt.items.add(file);
   input.files = dt.files;
@@ -90,6 +94,33 @@ try {
   input2.dispatchEvent(new Event('change', { bubbles: true })); await settle(300);
   ok('an undecodable file says the format is not accepted', /^That file format is not accepted\.$/.test($('.toast:last-child, #toastContainer > :last-child')?.textContent?.trim() || ''), $('#toastContainer')?.textContent);
   ok('and nothing is sent', !calls.some((c) => c[0] === 'photo'));
+
+  // A phone photo is routinely bigger than the 5 MB this used to allow, and it
+  // was being refused before the step that would have shrunk it to ~50 KB.
+  // Padding after IEND keeps the file a decodable PNG at any size.
+  const padded = (mb) => new File([blob, new Uint8Array(mb * 1024 * 1024)], 'phone.png', { type: 'image/png' });
+  calls.length = 0;
+  $('#toastContainer').innerHTML = '';
+  mod.openEditPlayerModal(PLAYERS[0]); await settle();
+  click($('#plPhotoUpload')); await settle();
+  const big = new DataTransfer(); big.items.add(padded(8));
+  const input3 = $('#fPhotoFile'); input3.files = big.files;
+  ok('the test file really is over the old limit', big.files[0].size > 5 * 1024 * 1024, String(big.files[0].size));
+  input3.dispatchEvent(new Event('change', { bubbles: true })); await settle(900);
+  const sentBig = calls.find((c) => c[0] === 'photo');
+  ok('an 8 MB photo is accepted now', !!sentBig, $('#toastContainer')?.textContent);
+  ok('and what is sent is a small JPEG, not the 8 MB file', /^data:image\/jpeg;base64,/.test(sentBig?.[2] || '') && sentBig[2].length < 200 * 1024, String((sentBig?.[2] || '').length));
+
+  // Still a ceiling, so nothing pathological locks up a phone mid-decode.
+  calls.length = 0;
+  $('#toastContainer').innerHTML = '';
+  mod.openEditPlayerModal(PLAYERS[0]); await settle();
+  click($('#plPhotoUpload')); await settle();
+  const huge = new DataTransfer(); huge.items.add(padded(26));
+  const input4 = $('#fPhotoFile'); input4.files = huge.files;
+  input4.dispatchEvent(new Event('change', { bubbles: true })); await settle(300);
+  ok('past 25 MB it says so plainly', /^Image is too large\. Maximum size is 25 MB\.$/.test($('#toastContainer > :last-child')?.textContent?.trim() || ''), $('#toastContainer')?.textContent);
+  ok('and nothing is sent for it', !calls.some((c) => c[0] === 'photo'));
 } catch (e) {
   failed++;
   log.textContent += 'THREW ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n') + '\n';
