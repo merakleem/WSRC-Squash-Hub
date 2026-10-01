@@ -52,11 +52,10 @@ async function boot(role) {
 log.textContent += '\nA PLAYER WHO IS NOT A MEMBER\n';
 const guest = await boot('guest');
 ok('sees the everyday pages',
-  ['Dashboard', 'Ladder', 'Leagues', 'Events', 'Players', 'Club Activity'].every((n) => guest.visibleNav().includes(n)),
+  ['Dashboard', 'Ladder', 'Leagues', 'Tournaments', 'Events', 'Players', 'Club Activity'].every((n) => guest.visibleNav().includes(n)),
   guest.visibleNav().join(', '));
 ok('is not shown Court Schedule', !guest.visibleNav().includes('Court Schedule'), guest.visibleNav().join(', '));
 ok('is not shown Club Settings', !guest.visibleNav().includes('Club Settings'), guest.visibleNav().join(', '));
-ok('is not shown Tournaments', !guest.visibleNav().includes('Tournaments'), guest.visibleNav().join(', '));
 ok('never sees the word Admin in the nav', !guest.visibleLabels().includes('Admin'), guest.visibleLabels().join(', '));
 ok('sees only the Play and Club headings', guest.visibleLabels().join('|') === 'Play|Club', guest.visibleLabels().join('|'));
 ok('and no Book a Court, being no member', !guest.visibleNav().includes('Book a Court'), guest.visibleNav().join(', '));
@@ -65,7 +64,7 @@ log.textContent += '\nA PLAYER WHO IS A MEMBER\n';
 const member = await boot('member');
 ok('gets Book a Court', member.visibleNav().includes('Book a Court'), member.visibleNav().join(', '));
 ok('but still no admin pages',
-  !member.visibleNav().some((n) => ['Court Schedule', 'Club Settings', 'Tournaments'].includes(n)),
+  !member.visibleNav().some((n) => ['Court Schedule', 'Club Settings'].includes(n)),
   member.visibleNav().join(', '));
 ok('and still no Admin heading', !member.visibleLabels().includes('Admin'), member.visibleLabels().join(', '));
 

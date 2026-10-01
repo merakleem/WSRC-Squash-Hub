@@ -1,7 +1,9 @@
 import { state, isAdmin } from '../state.js';
-import { esc, formatShortDate, toast, modal, avatarHTML, playDayNamesLong, playDatesFor, formatWeekRange, DAY_LONG } from '../utils.js';
+import { esc, formatShortDate, toast, modal, playDayNamesLong, playDatesFor, formatWeekRange, DAY_LONG } from '../utils.js';
 import { startCreateLeague } from './createLeague.js';
 import { isNew, visitPainted } from '../unread.js';
+import { CAL_ICON, PEOPLE_ICON, CHEVRON, openBuildChoice, confirmWithdraw as confirmWithdrawShared, upcomingCardHTML, cardActionHTML, shortDay } from '../upcoming.js';
+import { openMessagePlayersModal as openMessageModal, openBulkInviteModal as openInviteModal } from '../playerMail.js';
 
 // ===== LEAGUES PAGE =====
 
@@ -11,12 +13,6 @@ import { isNew, visitPainted } from '../unread.js';
 let _filter = 'all';
 // Singles / Doubles, alongside the status filter. Same rule: not persisted.
 let _format = 'all';
-
-const CAL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-  <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
-const PEOPLE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-  <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
 
 export async function renderLeagues() {
   document.getElementById('topbarActions').innerHTML = isAdmin() ? `
@@ -153,35 +149,13 @@ function _monthDay(dateStr) {
 // New League no longer drops straight into the wizard: a league can be built
 // now, or announced and left open for members to sign themselves up.
 
-const ANNOUNCE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1Z"/><path d="M16 9a3 3 0 0 1 0 6"/><path d="M19 6a7 7 0 0 1 0 12"/></svg>';
-const BUILD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10M15 10v10"/></svg>';
-
 export function openNewLeagueChoice() {
-  modal.open('New league', `
-    <div class="lgl-choice">
-      <button class="lgl-choice-row" data-choice="announce">
-        <span class="lgl-choice-ic lgl-choice-ic--blue">${ANNOUNCE_ICON}</span>
-        <span class="lgl-choice-text">
-          <b>Announce it for signups</b>
-          <i>Members sign up themselves. You build the divisions and fixtures later, from whoever joined.</i>
-        </span>
-        <svg class="lgl-choice-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
-      </button>
-      <button class="lgl-choice-row" data-choice="build">
-        <span class="lgl-choice-ic">${BUILD_ICON}</span>
-        <span class="lgl-choice-text">
-          <b>Build it now</b>
-          <i>Pick the players yourself and set up divisions, weeks and fixtures in five steps.</i>
-        </span>
-        <svg class="lgl-choice-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
-      </button>
-    </div>`);
-  document.getElementById('modalBody').querySelectorAll('[data-choice]').forEach((b) => {
-    b.addEventListener('click', () => {
-      modal.close();
-      if (b.dataset.choice === 'build') startCreateLeague();
-      else openAnnounceModal();
-    });
+  openBuildChoice({
+    title: 'New league',
+    announceText: 'Members sign up themselves. You build the divisions and fixtures later, from whoever joined.',
+    buildText: 'Pick the players yourself and set up divisions, weeks and fixtures in five steps.',
+    onAnnounce: () => openAnnounceModal(),
+    onBuild: () => startCreateLeague(),
   });
 }
 
@@ -301,12 +275,6 @@ export function openAnnounceModal(league = null) {
 
 const FORMAT_LABEL = { traditional: 'Teams', modern: 'Box league', doubles: 'Doubles' };
 
-/** "Mon 5 Oct" */
-function _shortDay(dateStr) {
-  const d = _atNoon(dateStr);
-  return d ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
-}
-
 /** What the format line says, which differs by who is reading it. */
 function _upcomingStructure(league, admin) {
   const fmt = FORMAT_LABEL[league.setup_type] || 'Box league';
@@ -320,15 +288,7 @@ function _upcomingStructure(league, admin) {
   return `${fmt} &middot; ${spots}`;
 }
 
-/** The status pill: what a reader most needs to know about this signup. */
-function _upcomingPill(league, signedUp) {
-  if (signedUp) return ['green', 'Signed up'];
-  if (league.full) return ['grey', 'Full'];
-  if (league.deadline_passed) return ['amber', 'Signups closed'];
-  return ['blue', 'Signups open'];
-}
-
-const _fmtDeadline = (d) => `Sign up by ${_shortDay(d)}`;
+const _fmtDeadline = (d) => `Sign up by ${shortDay(d)}`;
 
 // A league posted since the member last opened this tab is tinted and carries
 // a dot before its name, for this visit only. An announcement that has since
@@ -338,70 +298,33 @@ const _newDot = (league) => (isNew('leagues', league.created_at) ? '<span class=
 
 function _upcomingCardHTML(league) {
   const admin = isAdmin();
-  const signedUp = !!league.i_signed_up;
-  const [pillCls, pillText] = _upcomingPill(league, signedUp);
   const n = league.signup_count || 0;
   const cap = league.signup_cap ?? null;
-
   const weekday = _weekdayName(league.start_date);
   // No time: an announced league has not chosen one, and the column's default
   // would tell every member seven in the evening.
-  const dateLine = `Starts ${_shortDay(league.start_date)}${weekday ? ` &middot; ${weekday}` : ''}`;
-
-  const faces = (league.signup_preview || []).slice(0, 4);
-  const avatars = faces.length
-    ? `<span class="lgl-faces">${faces.map((f) => avatarHTML(f, 'lgl-face')).join('')}</span>` : '';
-  const countText = cap == null
-    ? (n === 0 ? 'No one signed up yet' : `${n} signed up`)
-    : (n === 0 ? `No one signed up yet` : `${n} of ${cap} signed up`);
-  const rightText = league.deadline_passed ? 'Signups closed'
-    : league.signup_deadline ? _fmtDeadline(league.signup_deadline)
-    : 'No deadline';
-
-  const bar = cap == null ? '' : `
-    <span class="lgl-sbar"><span class="lgl-sbar-fill${league.full ? ' lgl-sbar-fill--full' : ''}" style="width:${Math.min(100, Math.round((n / cap) * 100))}%"></span></span>`;
-
-  const action = admin ? '' : signedUp
-    ? '<button class="lgl-act lgl-act--out" data-withdraw>Withdraw</button>'
-    : league.full ? '<span class="lgl-act-note">No spots left</span>'
-      : league.deadline_passed ? '<span class="lgl-act-note">Schedule coming soon</span>'
-        : '<button class="lgl-act lgl-act--in" data-signup>Sign up</button>';
-
-  const footLeft = admin
-    ? (league.deadline_passed || league.full
+  const dateLine = `Starts ${shortDay(league.start_date)}${weekday ? ` &middot; ${weekday}` : ''}`;
+  return upcomingCardHTML({
+    ...league,
+    admin,
+    count: n,
+    cap,
+    isNew: isNew('leagues', league.created_at),
+    badges: _isDoubles(league) ? '<span class="lgl-fmt">Doubles</span>' : '',
+    meta: [`${CAL_ICON}${dateLine}`, `${PEOPLE_ICON}${_upcomingStructure(league, admin)}`],
+    faces: (league.signup_preview || []).slice(0, 4),
+    countText: cap == null
+      ? (n === 0 ? 'No one signed up yet' : `${n} signed up`)
+      : (n === 0 ? 'No one signed up yet' : `${n} of ${cap} signed up`),
+    rightText: league.deadline_passed ? 'Signups closed'
+      : league.signup_deadline ? _fmtDeadline(league.signup_deadline)
+      : 'No deadline',
+    action: cardActionHTML(league, 'Schedule coming soon'),
+    footLeft: league.deadline_passed || league.full
       ? '<span class="lgl-chip lgl-chip--amber">Ready to build</span>'
-      : `<span class="lgl-weeks">Announced ${formatShortDate(league.created_at)}</span>`)
-    : '<span class="lgl-view lgl-view--left">Details <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>';
-  const footRight = admin
-    ? `<span class="lgl-view">${n < 2 ? 'View signups' : 'Build league'} <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>`
-    : action;
-
-  return `
-    <div class="lgl-card lgl-card--upcoming${_newCls(league)}" data-id="${league.id}">
-      <div class="lgl-body">
-        <div class="lgl-card-head">
-          <h3 class="lgl-name">${_newDot(league)}${esc(league.name)}</h3>
-          <span class="lgl-badges">
-            ${_isDoubles(league) ? '<span class="lgl-fmt">Doubles</span>' : ''}
-            <span class="lgl-status lgl-status--${pillCls}">${pillText}</span>
-          </span>
-        </div>
-        <div class="lgl-meta">
-          <span class="lgl-meta-row">${CAL_ICON}${dateLine}</span>
-          <span class="lgl-meta-row">${PEOPLE_ICON}${_upcomingStructure(league, admin)}</span>
-        </div>
-        <div class="lgl-signup">
-          ${avatars}
-          <span class="lgl-signup-line">
-            <span class="lgl-signup-n${n ? ' lgl-signup-n--on' : ''}">${countText}</span>
-            <span class="lgl-signup-when${league.deadline_passed ? ' lgl-signup-when--closed' : ''}">${rightText}</span>
-          </span>
-          ${bar}
-        </div>
-        ${admin ? '' : `<div class="lgl-act-mobile">${action}</div>`}
-      </div>
-      <div class="lgl-foot">${footLeft}${footRight}</div>
-    </div>`;
+      : `<span class="lgl-weeks">Announced ${formatShortDate(league.created_at)}</span>`,
+    footRight: `<span class="lgl-view">${n < 2 ? 'View signups' : 'Build league'} ${CHEVRON}</span>`,
+  });
 }
 
 function leagueCardHTML(league) {
@@ -561,15 +484,7 @@ export async function signUp(id, name) {
 }
 
 export function confirmWithdraw(id, name) {
-  modal.open('Withdraw', `
-    <p class="lgl-confirm-body">Withdraw from ${esc(name || 'this league')}? Your spot goes back to the club.</p>
-    <div class="form-actions">
-      <button class="btn btn-outline" id="wdKeep">Keep my spot</button>
-      <button class="btn btn-danger" id="wdGo">Withdraw</button>
-    </div>`);
-  document.getElementById('wdKeep').addEventListener('click', modal.close);
-  document.getElementById('wdGo').addEventListener('click', async () => {
-    modal.close();
+  confirmWithdrawShared(name || 'this league', async () => {
     try {
       await window.api.withdrawFromLeague(id);
       await _reloadCards();
@@ -577,7 +492,7 @@ export function confirmWithdraw(id, name) {
     } catch (e) {
       toast(e.message || 'Could not withdraw.', 'error');
     }
-  });
+  }, { bodyClass: 'lgl-confirm-body' });
 }
 
 async function openLeague(id) {
@@ -830,211 +745,14 @@ export function printBoxes(league) {
 }
 
 export function openMessagePlayersModal(league) {
-  const players = (league.players || []).filter((p) => p.player_email);
-  const noEmailPlayers = (league.players || []).filter((p) => !p.player_email);
-  const attachments = [];
-  let quill = null;
-
-  const fmtSize = (bytes) => {
-    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${bytes} B`;
-  };
-
-  const hasDraft = () =>
-    !!(document.getElementById('fMsgSubject')?.value.trim() || quill?.getText().trim() || attachments.length);
-
-  // The confirmation is a layer inside the modal, not a second modal.open —
-  // that would tear down the editor and lose the draft it is guarding.
-  function showDiscardConfirm() {
-    if (document.getElementById('mpDiscard')) return;
-    const layer = document.createElement('div');
-    layer.id = 'mpDiscard';
-    layer.className = 'mp-discard';
-    layer.innerHTML = `
-      <div class="mp-discard-card">
-        <div class="mp-discard-title">Discard this message?</div>
-        <div class="mp-discard-body">Your subject, message and attachments will be lost.</div>
-        <div class="mp-discard-btns">
-          <button class="btn btn-outline" id="mpKeep">Keep editing</button>
-          <button class="btn btn-danger" id="mpDiscardBtn">Discard</button>
-        </div>
-      </div>`;
-    document.getElementById('modal').appendChild(layer);
-    document.getElementById('mpKeep').addEventListener('click', () => layer.remove());
-    document.getElementById('mpDiscardBtn').addEventListener('click', () => { layer.remove(); modal.close(); });
-  }
-
-  modal.open('Message players', `
-    <p class="mp-recipients">
-      Sending to <strong>${players.length} player${players.length !== 1 ? 's' : ''}</strong> with an email on file.
-      ${noEmailPlayers.length ? `<span class="mp-skip">${noEmailPlayers.length} player${noEmailPlayers.length !== 1 ? 's have' : ' has'} no email and will be skipped.</span>` : ''}
-    </p>
-    <div class="form-group">
-      <label class="mp-label">Subject</label>
-      <input class="form-control mp-subject" id="fMsgSubject" type="text" placeholder="e.g. League night this week">
-    </div>
-    <div class="form-group">
-      <label class="mp-label">Message</label>
-      <div class="mp-editor">
-        <div id="fMsgEditor"></div>
-        <div class="mp-editor-foot">
-          <span>Formatting is kept in the email.</span>
-          <span id="mpWords" hidden></span>
-        </div>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="mp-label">Attachments <span class="mp-label-opt">(optional)</span></label>
-      <div class="mp-attach" id="fAttachmentList"></div>
-      <input id="fMsgFile" type="file" hidden>
-    </div>
-    <div class="mp-foot">
-      <div class="mp-foot-left">
-        <span id="fMsgError" class="form-error mp-err"></span>
-        <span id="mpDraftNote" class="mp-draftnote" hidden>Draft in progress</span>
-      </div>
-      <div class="mp-foot-btns">
-        <button class="btn btn-outline" id="fCancel">Cancel</button>
-        <button class="btn btn-primary" id="fSend">Send email</button>
-      </div>
-    </div>`, {
-    medium: true,
-    sticky: true,
-    onRequestClose: () => {
-      if (!hasDraft()) return modal.close();
-      showDiscardConfirm();
-    },
-  });
-
-  quill = new Quill('#fMsgEditor', {
-    theme: 'snow',
-    placeholder: 'Write your message here…',
-    modules: { toolbar: [
-      [{ header: [false, 2, 3] }],
-      ['bold', 'italic', 'underline'],
-      [{ list: 'ordered' }, { list: 'bullet' }],
-      ['link'],
-      ['clean'],
-    ] },
-  });
-
-  function updateDraftBits() {
-    const words = quill.getText().trim().split(/\s+/).filter(Boolean).length;
-    const wordsEl = document.getElementById('mpWords');
-    if (wordsEl) {
-      wordsEl.hidden = words === 0;
-      wordsEl.textContent = `${words} word${words !== 1 ? 's' : ''}`;
-    }
-    const note = document.getElementById('mpDraftNote');
-    if (note) note.hidden = !hasDraft() || !!document.getElementById('fMsgError')?.textContent;
-  }
-  quill.on('text-change', updateDraftBits);
-  document.getElementById('fMsgSubject').addEventListener('input', updateDraftBits);
-
-  function renderAttachmentList() {
-    const list = document.getElementById('fAttachmentList');
-    list.innerHTML = attachments.map((a, i) => `
-      <span class="mp-chip">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-        <span class="mp-chip-name">${esc(a.filename)}</span>
-        <span class="mp-chip-size">${fmtSize(a.size)}</span>
-        <button class="mp-chip-x" data-remove="${i}" aria-label="Remove">&times;</button>
-      </span>`).join('') + `
-      <button class="mp-addfile" id="fAddFile" type="button">+ Add file</button>`;
-
-    list.querySelectorAll('[data-remove]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        attachments.splice(Number(btn.dataset.remove), 1);
-        renderAttachmentList();
-        updateDraftBits();
-      });
-    });
-    document.getElementById('fAddFile').addEventListener('click', () => {
-      document.getElementById('fMsgFile').click();
-    });
-  }
-  renderAttachmentList();
-
-  document.getElementById('fMsgFile').addEventListener('change', async () => {
-    const fileInput = document.getElementById('fMsgFile');
-    if (!fileInput.files.length) return;
-    const file = fileInput.files[0];
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    attachments.push({ filename: file.name, content: base64, size: file.size });
-    fileInput.value = '';
-    renderAttachmentList();
-    updateDraftBits();
-  });
-
-  document.getElementById('fCancel').addEventListener('click', () => modal.requestClose());
-  document.getElementById('fSend').addEventListener('click', async () => {
-    const subject = document.getElementById('fMsgSubject').value.trim();
-    const text = quill.getText().trim();
-    const errEl = document.getElementById('fMsgError');
-    if (!subject) { errEl.textContent = 'Subject is required.'; updateDraftBits(); return; }
-    if (!text) { errEl.textContent = 'Message is required.'; updateDraftBits(); return; }
-    errEl.textContent = '';
-    document.getElementById('fSend').disabled = true;
-    document.getElementById('fSend').textContent = 'Sending…';
-    try {
-      const data = await window.api.messageLeaguePlayers(league.id, {
-        subject,
-        body: text,
-        bodyHtml: quill.getSemanticHTML(),
-        attachments: attachments.map(({ filename, content }) => ({ filename, content })),
-      });
-      modal.close();
-      toast(`Email sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}`, 'success');
-    } catch (e) {
-      errEl.textContent = e.message;
-      document.getElementById('fSend').disabled = false;
-      document.getElementById('fSend').textContent = 'Send email';
-    }
+  openMessageModal({
+    recipients: league.players || [],
+    send: (payload) => window.api.messageLeaguePlayers(league.id, payload),
   });
 }
 
-// ===== BULK INVITE =====
 export function openBulkInviteModal(league) {
-  modal.open('Send Account Invites', `
-    <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px">
-      This will send a personalized account activation email to every player in this league
-      who has an email on file and has not yet activated their account.
-    </p>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">
-      Players who already have an account will be skipped automatically.
-    </p>
-    <div id="fBulkError" style="color:var(--danger);font-size:13px;margin-bottom:8px"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost" id="fBulkCancel">Cancel</button>
-      <button class="btn btn-primary" id="fBulkSend">Send Invites</button>
-    </div>
-  `);
-  document.getElementById('fBulkCancel').addEventListener('click', () => modal.close());
-  document.getElementById('fBulkSend').addEventListener('click', async () => {
-    const errEl = document.getElementById('fBulkError');
-    const btn = document.getElementById('fBulkSend');
-    btn.disabled = true;
-    btn.textContent = 'Sending…';
-    try {
-      const data = await window.api.bulkInviteLeague(league.id);
-      modal.close();
-      if (data.sent === 0) {
-        toast('All players already have accounts. No invites sent.', 'info');
-      } else {
-        toast(`Invites sent to ${data.sent} player${data.sent !== 1 ? 's' : ''}.`, 'success');
-      }
-    } catch (e) {
-      errEl.textContent = e.message || 'Failed to send invites.';
-      btn.disabled = false;
-      btn.textContent = 'Send Invites';
-    }
-  });
+  openInviteModal({ what: 'this league', send: () => window.api.bulkInviteLeague(league.id) });
 }
 
 // ===== PRINT SCHEDULE (Modern leagues) =====

@@ -1,6 +1,7 @@
 import { state, isAdmin, isMember } from '../state.js';
 import { esc, toast, modal, formatShortDate, abbrevName, avatarInner, clubNow, clubTodayStr } from '../utils.js';
 import { openMessagePlayerModal } from './players.js';
+import { ROUND_NAMES } from '../knockout.js';
 
 // ===== DASHBOARD HELPERS =====
 function timeAgo(utcStr) {
@@ -17,7 +18,7 @@ function timeAgo(utcStr) {
   return new Date(utcStr.replace(' ', 'T') + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-const _roundLabels = { group: 'Group Stage', quarterfinal: 'Quarterfinals', semifinal: 'Semifinals', final: 'Final' };
+const _roundLabels = ROUND_NAMES;
 
 // A side of a result, shortened. A doubles side is two people, and the feed
 // carries their names already joined - abbreviating that string as if it were

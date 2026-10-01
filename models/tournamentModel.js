@@ -1,474 +1,464 @@
-const { all, getDB } = require('../database/db');
+// ===== KNOCKOUT TOURNAMENTS =====
+// A tournament is announced ('upcoming'), members sign up, and the admin
+// builds the draw ('active'); it is 'completed' once the final has a winner.
+// The draw itself - who meets whom, where a winner goes next - is the shared
+// bracket module's, so this file and the page that draws the bracket can never
+// disagree about it.
+//
+// Matches live in the shared matches table (type 'tournament'), one row per
+// match that will actually be played: a first-round bye has no row, its player
+// is placed straight into their second-round match. bracket_slot is "r-i".
+//
+// A walkover - an opponent withdrew - is a match with a winner, no score and
+// skipped = 1. Skipped keeps it out of records and the ladder, the same as a
+// skipped league match.
+const { getDB } = require('../database/db');
+const { clubToday } = require('../lib/clock');
+const K = require('../renderer/knockout.js');
 
-// ===== HELPERS =====
+const TOURNAMENT_COLUMNS = `t.*`;
 
-function _addDays(dateStr, n) {
-  const [y, mo, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, mo - 1, d + n));
-  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
-}
-
-function _minutesToTime(mins) {
-  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
-}
-
-// Round-robin pairs for 4-player group → 3 rounds of 2 pairs
-function _rrPairs() {
-  return [[[0,1],[2,3]], [[0,2],[1,3]], [[0,3],[1,2]]];
-}
-
-// Snake-seed 16 players (sorted best→worst by ladder rank) into groups A,B,C,D.
-// Seed 1 (best) gets group A with seeds 8,9,16 — weakest possible opponents.
-function _snakeSeed(players) {
-  const order = ['A','B','C','D','D','C','B','A','A','B','C','D','D','C','B','A'];
-  const groups = { A: [], B: [], C: [], D: [] };
-  players.forEach((p, i) => groups[order[i]].push(p));
-  return groups;
-}
-
-function _hasLeagueConflict(db, courtId, date, startTime, durationMinutes) {
-  const [h, m] = startTime.split(':').map(Number);
-  const startMin = h * 60 + m;
-  const endMin = startMin + durationMinutes;
-  const matches = db.prepare(`
-    SELECT m.scheduled_time AS start_time, l.match_duration
-    FROM matches m
-    JOIN leagues l ON l.id = m.league_id
-    WHERE m.type = 'league' AND m.court_id = ? AND m.scheduled_date = ?
-      AND m.scheduled_time IS NOT NULL AND (m.skipped = 0 OR m.skipped IS NULL)
-  `).all(courtId, date);
-  return matches.some((lm) => {
-    const [bh, bm] = lm.start_time.split(':').map(Number);
-    const bs = bh * 60 + bm;
-    return startMin < bs + (lm.match_duration || 45) && bs < endMin;
-  });
-}
-
-// Assign time slots to a list of match shells, filling courts greedily.
-// Returns array of { ...match, match_date, match_time, court_id }.
-// maxParallel caps how many matches share the same time slot (default: all courts).
-// Court index resets each slot so perSlot=1 always uses court[0].
-function _scheduleMatches(matches, courts, duration, buffer, date, startHour, maxParallel) {
-  const perSlot = Math.min(courts.length, maxParallel || courts.length);
-  let slotMinutes = startHour * 60;
-  let inSlot = 0;
-  return matches.map((match) => {
-    const scheduled = { ...match, match_date: date, match_time: _minutesToTime(slotMinutes), court_id: courts[inSlot].id };
-    inSlot++;
-    if (inSlot >= perSlot) { inSlot = 0; slotMinutes += duration + buffer; }
-    return scheduled;
-  });
-}
-
-// Check all proposed time slots for a given day for league conflicts.
-// Returns the date string if any conflict found, null otherwise.
-function _checkDayConflicts(db, date, numMatches, courts, duration, buffer, startHour, maxParallel) {
-  const perSlot = Math.min(courts.length, maxParallel || courts.length);
-  let slotMinutes = startHour * 60;
-  let inSlot = 0;
-  for (let i = 0; i < numMatches; i++) {
-    if (_hasLeagueConflict(db, courts[inSlot].id, date, _minutesToTime(slotMinutes), duration)) return date;
-    inSlot++;
-    if (inSlot >= perSlot) { inSlot = 0; slotMinutes += duration + buffer; }
-  }
-  return null;
-}
-
-// Delete regular bookings that overlap with a tournament time slot.
-function _deleteConflictingBookings(db, courtId, date, startTime, durationMinutes) {
-  const [h, m] = startTime.split(':').map(Number);
-  const startMin = h * 60 + m;
-  const endMin = startMin + durationMinutes;
-  const rows = db.prepare('SELECT id, group_id, start_time, duration_minutes FROM bookings WHERE court_id = ? AND date = ?').all(courtId, date);
-  const groupsToDelete = new Set();
-  const singlesToDelete = new Set();
-  for (const row of rows) {
-    const [bh, bm] = row.start_time.split(':').map(Number);
-    const bs = bh * 60 + bm;
-    if (startMin < bs + row.duration_minutes && bs < endMin) {
-      if (row.group_id) groupsToDelete.add(row.group_id);
-      else singlesToDelete.add(row.id);
-    }
-  }
-  groupsToDelete.forEach((gid) => db.prepare('DELETE FROM bookings WHERE group_id = ?').run(gid));
-  singlesToDelete.forEach((bid) => db.prepare('DELETE FROM bookings WHERE id = ?').run(bid));
-}
-
-// ===== PUBLIC API =====
-
-function getTournaments() {
-  return all('SELECT * FROM tournaments ORDER BY championship_date DESC, created_at DESC');
-}
-
-function getTournament(id) {
-  const db = getDB();
-  const tournament = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(Number(id));
-  if (!tournament) return null;
-
-  const courts = db.prepare(`
-    SELECT c.* FROM tournament_courts tc
+function _courts(db, id) {
+  return db.prepare(`
+    SELECT c.id, c.name FROM tournament_courts tc
     JOIN courts c ON c.id = tc.court_id
     WHERE tc.tournament_id = ? ORDER BY c.sort_order, c.id
-  `).all(Number(id));
+  `).all(id);
+}
 
-  const groups = db.prepare('SELECT * FROM tournament_groups WHERE tournament_id = ? ORDER BY name').all(Number(id));
+function _rounds(db, id) {
+  return db.prepare('SELECT round_index, round_date, start_time FROM tournament_rounds WHERE tournament_id = ? ORDER BY round_index')
+    .all(id).map((r) => ({ date: r.round_date, time: r.start_time }));
+}
 
-  const players = db.prepare(`
-    SELECT tp.*, p.name AS player_name, l.position AS ladder_position
+function _players(db, id) {
+  return db.prepare(`
+    SELECT tp.player_id, tp.seed, tp.ladder_rank, tp.withdrawn,
+           p.name, p.photo_path, p.email, p.member_number
     FROM tournament_players tp
     JOIN players p ON p.id = tp.player_id
-    LEFT JOIN ladder l ON l.player_id = tp.player_id
     WHERE tp.tournament_id = ? ORDER BY tp.seed ASC
-  `).all(Number(id));
-
-  const matches = db.prepare(`
-    SELECT tm.*, p1.name AS p1_name, p2.name AS p2_name, c.name AS court_name
-    FROM matches tm
-    LEFT JOIN players p1 ON p1.id = tm.player1_id
-    LEFT JOIN players p2 ON p2.id = tm.player2_id
-    LEFT JOIN courts c ON c.id = tm.court_id
-    WHERE tm.tournament_id = ? ORDER BY tm.scheduled_date, tm.scheduled_time
-  `).all(Number(id));
-
-  return { ...tournament, courts, groups, players, matches };
+  `).all(id);
 }
 
-// Returns { conflicts: [dateStr, ...] } — league match conflicts for proposed week.
-function checkTournamentDate({ championshipDate, courtIds, matchDurationMinutes, bufferMinutes }) {
+function _matches(db, id) {
+  return db.prepare(`
+    SELECT m.id, m.round, m.bracket_slot, m.player1_id, m.player2_id, m.winner_id,
+           m.player1_score, m.player2_score, m.skipped, m.status,
+           m.scheduled_date, m.scheduled_time, m.court_id, c.name AS court_name, m.played_at
+    FROM matches m
+    LEFT JOIN courts c ON c.id = m.court_id
+    WHERE m.type = 'tournament' AND m.tournament_id = ?
+  `).all(id);
+}
+
+function getTournamentRow(id) {
+  return getDB().prepare('SELECT * FROM tournaments WHERE id = ?').get(Number(id)) || null;
+}
+
+/** Everything about one tournament the page needs, as stored. */
+function getTournament(id) {
   const db = getDB();
-  const duration = Number(matchDurationMinutes) || 60;
-  const buffer = Number(bufferMinutes) || 0;
-
-  const courts = db.prepare(
-    `SELECT * FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`,
-  ).all(...courtIds.map(Number));
-  if (courts.length === 0) return { conflicts: [] };
-
-  const conflicts = [];
-  const groupDays = [
-    _addDays(championshipDate, -6), // Mon
-    _addDays(championshipDate, -5), // Tue
-    _addDays(championshipDate, -4), // Wed
-    _addDays(championshipDate, -3), // Thu
-  ];
-
-  for (const day of groupDays) {
-    const c = _checkDayConflicts(db, day, 6, courts, duration, buffer, 17);
-    if (c) conflicts.push(c);
-  }
-  const qfConflict = _checkDayConflicts(db, _addDays(championshipDate, -1), 4, courts, duration, buffer, 12, 1);
-  if (qfConflict) conflicts.push(qfConflict);
-  const sfConflict = _checkDayConflicts(db, championshipDate, 3, courts, duration, buffer, 12, 1);
-  if (sfConflict) conflicts.push(sfConflict);
-
-  return { conflicts };
-}
-
-// Create tournament with auto-generated schedule. groups: { A:[pid,...], B:[...], C:[...], D:[...] }
-function createTournament({ name, groups: groupAssignments, championshipDate, courtIds, matchDurationMinutes, bufferMinutes }) {
-  const db = getDB();
-  const duration = Number(matchDurationMinutes) || 60;
-  const buffer = Number(bufferMinutes) || 0;
-
-  const courts = db.prepare(
-    `SELECT * FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`,
-  ).all(...courtIds.map(Number));
-  if (courts.length === 0) throw new Error('No valid courts selected.');
-
-  const groupDays = [
-    _addDays(championshipDate, -6),
-    _addDays(championshipDate, -5),
-    _addDays(championshipDate, -4),
-    _addDays(championshipDate, -3),
-  ];
-  const satDate = _addDays(championshipDate, -1);
-
-  // Check league conflicts
-  const conflicts = [];
-  for (const day of groupDays) {
-    const c = _checkDayConflicts(db, day, 6, courts, duration, buffer, 17);
-    if (c) conflicts.push(c);
-  }
-  if (_checkDayConflicts(db, satDate, 4, courts, duration, buffer, 12, 1)) conflicts.push(satDate);
-  if (_checkDayConflicts(db, championshipDate, 3, courts, duration, buffer, 12, 1)) conflicts.push(championshipDate);
-  if (conflicts.length > 0) throw Object.assign(new Error('League match conflicts detected.'), { leagueConflicts: conflicts });
-
-  const txn = db.transaction(() => {
-    const tr = db.prepare(
-      `INSERT INTO tournaments (name, type, status, championship_date, match_duration_minutes, buffer_minutes) VALUES (?, 'groups_16', 'group_stage', ?, ?, ?)`,
-    ).run(name, championshipDate, duration, buffer);
-    const tournamentId = tr.lastInsertRowid;
-
-    for (const courtId of courtIds.map(Number)) {
-      db.prepare('INSERT OR IGNORE INTO tournament_courts (tournament_id, court_id) VALUES (?, ?)').run(tournamentId, courtId);
-    }
-
-    const groupNames = ['A', 'B', 'C', 'D'];
-    const groupIdMap = {};
-    for (const gName of groupNames) {
-      const gr = db.prepare('INSERT INTO tournament_groups (tournament_id, name) VALUES (?, ?)').run(tournamentId, gName);
-      groupIdMap[gName] = gr.lastInsertRowid;
-    }
-
-    let seed = 1;
-    for (const gName of groupNames) {
-      for (const playerId of (groupAssignments[gName] || [])) {
-        db.prepare('INSERT INTO tournament_players (tournament_id, player_id, group_id, seed) VALUES (?, ?, ?, ?)').run(tournamentId, Number(playerId), groupIdMap[gName], seed++);
-      }
-    }
-
-    // Generate group stage matches: 3 rounds × 4 groups × 2 matches = 24 total
-    const allGroupMatches = [];
-    for (const [pair1, pair2] of _rrPairs()) {
-      for (const gName of groupNames) {
-        const gPlayers = groupAssignments[gName] || [];
-        const gId = groupIdMap[gName];
-        for (const [i, j] of [pair1, pair2]) {
-          allGroupMatches.push({ tournament_id: tournamentId, round: 'group', group_id: gId, player1_id: Number(gPlayers[i]), player2_id: Number(gPlayers[j]) });
-        }
-      }
-    }
-
-    // Assign group matches across Mon–Thu (6 per day)
-    for (let dayIdx = 0; dayIdx < 4; dayIdx++) {
-      const dayMatches = allGroupMatches.slice(dayIdx * 6, (dayIdx + 1) * 6);
-      const scheduled = _scheduleMatches(dayMatches, courts, duration, buffer, groupDays[dayIdx], 17);
-      for (const m of scheduled) {
-        _deleteConflictingBookings(db, m.court_id, m.match_date, m.match_time, duration);
-        db.prepare(`INSERT INTO matches (type, status, tournament_id, round, tournament_group_id, player1_id, player2_id, court_id, scheduled_date, scheduled_time)
-           VALUES ('tournament', 'scheduled', ?, ?, ?, ?, ?, ?, ?, ?)`).run(m.tournament_id, m.round, m.group_id, m.player1_id, m.player2_id, m.court_id, m.match_date, m.match_time);
-      }
-    }
-
-    // Quarterfinals (players TBD until group stage complete)
-    const qfShells = ['QF1','QF2','QF3','QF4'].map((slot) => ({ tournament_id: tournamentId, round: 'quarterfinal', bracket_slot: slot }));
-    for (const m of _scheduleMatches(qfShells, courts, duration, buffer, satDate, 12, 1)) {
-      _deleteConflictingBookings(db, m.court_id, m.match_date, m.match_time, duration);
-      db.prepare(`INSERT INTO matches (type, status, tournament_id, round, bracket_slot, court_id, scheduled_date, scheduled_time)
-         VALUES ('tournament', 'scheduled', ?, ?, ?, ?, ?, ?)`).run(m.tournament_id, m.round, m.bracket_slot, m.court_id, m.match_date, m.match_time);
-    }
-
-    // Semifinals + Final (players TBD)
-    const koShells = [
-      { tournament_id: tournamentId, round: 'semifinal', bracket_slot: 'SF1' },
-      { tournament_id: tournamentId, round: 'semifinal', bracket_slot: 'SF2' },
-      { tournament_id: tournamentId, round: 'final', bracket_slot: 'F' },
-    ];
-    for (const m of _scheduleMatches(koShells, courts, duration, buffer, championshipDate, 12, 1)) {
-      _deleteConflictingBookings(db, m.court_id, m.match_date, m.match_time, duration);
-      db.prepare(`INSERT INTO matches (type, status, tournament_id, round, bracket_slot, court_id, scheduled_date, scheduled_time)
-         VALUES ('tournament', 'scheduled', ?, ?, ?, ?, ?, ?)`).run(m.tournament_id, m.round, m.bracket_slot, m.court_id, m.match_date, m.match_time);
-    }
-
-    return tournamentId;
-  });
-
-  return txn();
-}
-
-// Auto-seed players by ladder rank and return proposed group assignments.
-function getSuggestedGroups(playerIds) {
-  const db = getDB();
-  const players = playerIds.map((id) => {
-    const row = db.prepare('SELECT p.id, p.name, l.position FROM players p LEFT JOIN ladder l ON l.player_id = p.id WHERE p.id = ?').get(Number(id));
-    return row || { id: Number(id), name: 'Unknown', position: null };
-  });
-  // Sort: ladder players first (by position asc), then unranked alphabetically
-  players.sort((a, b) => {
-    if (a.position && b.position) return a.position - b.position;
-    if (a.position) return -1;
-    if (b.position) return 1;
-    return (a.name || '').localeCompare(b.name || '');
-  });
-  return _snakeSeed(players.map((p) => p.id));
-}
-
-// Calculate current group standings for a tournament.
-function getGroupStandings(tournamentId) {
-  const db = getDB();
-  const groups = db.prepare('SELECT * FROM tournament_groups WHERE tournament_id = ? ORDER BY name').all(Number(tournamentId));
-  const players = db.prepare(`
-    SELECT tp.*, p.name AS player_name, l.position AS ladder_position
-    FROM tournament_players tp JOIN players p ON p.id = tp.player_id
-    LEFT JOIN ladder l ON l.player_id = tp.player_id
-    WHERE tp.tournament_id = ?
-  `).all(Number(tournamentId));
-  const matches = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND tournament_id = ? AND round = ?`).all(Number(tournamentId), 'group');
-
-  const standings = {};
-  for (const g of groups) {
-    const gPlayers = players.filter((p) => p.group_id === g.id);
-    const gMatches = matches.filter((m) => m.group_id === g.id);
-    const stats = {};
-    for (const p of gPlayers) {
-      stats[p.player_id] = { player_id: p.player_id, player_name: p.player_name, ladder_position: p.ladder_position, wins: 0, losses: 0, games_won: 0, games_lost: 0 };
-    }
-    for (const m of gMatches) {
-      if (!m.winner_id || !stats[m.player1_id] || !stats[m.player2_id]) continue;
-      const sc = m.scores ? JSON.parse(m.scores) : null;
-      const p1g = sc ? (sc.p1 || 0) : 0;
-      const p2g = sc ? (sc.p2 || 0) : 0;
-      stats[m.player1_id].games_won += p1g; stats[m.player1_id].games_lost += p2g;
-      stats[m.player2_id].games_won += p2g; stats[m.player2_id].games_lost += p1g;
-      if (m.winner_id === m.player1_id) { stats[m.player1_id].wins++; stats[m.player2_id].losses++; } else { stats[m.player2_id].wins++; stats[m.player1_id].losses++; }
-    }
-    standings[g.name] = Object.values(stats).sort((a, b) => {
-      if (b.wins !== a.wins) return b.wins - a.wins;
-      const aDiff = a.games_won - a.games_lost, bDiff = b.games_won - b.games_lost;
-      if (bDiff !== aDiff) return bDiff - aDiff;
-      return (a.ladder_position || 9999) - (b.ladder_position || 9999);
-    }).map((s, i) => ({ ...s, rank: i + 1 }));
-  }
-  return standings;
-}
-
-// Populate QF matchups from group standings and advance tournament to knockout.
-function advanceToKnockout(db, tournamentId) {
-  const standings = getGroupStandings(tournamentId);
-  // QF1: 1A vs 2B, QF2: 1B vs 2A, QF3: 1C vs 2D, QF4: 1D vs 2C
-  const qfPairs = {
-    QF1: [standings.A?.[0], standings.B?.[1]],
-    QF2: [standings.B?.[0], standings.A?.[1]],
-    QF3: [standings.C?.[0], standings.D?.[1]],
-    QF4: [standings.D?.[0], standings.C?.[1]],
+  const t = db.prepare(`SELECT ${TOURNAMENT_COLUMNS} FROM tournaments t WHERE t.id = ?`).get(Number(id));
+  if (!t) return null;
+  return {
+    ...t,
+    courts: _courts(db, t.id),
+    rounds: _rounds(db, t.id),
+    players: _players(db, t.id),
+    matches: _matches(db, t.id),
   };
-  for (const [slot, [p1, p2]] of Object.entries(qfPairs)) {
-    if (p1 && p2) {
-      db.prepare('UPDATE matches SET player1_id = ?, player2_id = ? WHERE tournament_id = ? AND bracket_slot = ?').run(p1.player_id, p2.player_id, tournamentId, slot);
-    }
-  }
-  db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ?").run(tournamentId);
 }
 
-// Record match score and auto-advance bracket.
-function updateTournamentMatchScore(matchId, scores, winnerId) {
+/** The tournament a match belongs to, in full. */
+function getTournamentForMatch(matchId) {
+  const row = getDB().prepare(`SELECT tournament_id FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
+  return row ? getTournament(row.tournament_id) : null;
+}
+
+/** The live bracket for a stored tournament (null while it is only announced). */
+function bracketOf(t) {
+  if (!t || t.status === 'upcoming' || !t.draw_size) return null;
+  const entrants = t.players.map((p) => ({
+    id: p.player_id, name: p.name, photo_path: p.photo_path || null,
+    rank: p.ladder_rank ?? null, withdrawn: !!p.withdrawn,
+  }));
+  return K.buildBracket({ draw: t.draw_size, entrants, rounds: t.rounds.map((r) => ({ date: r.date, time: K.toMin(r.time) })), rows: t.matches });
+}
+
+function getTournaments() {
+  return getDB().prepare('SELECT * FROM tournaments ORDER BY COALESCE(first_round_date, championship_date) DESC, created_at DESC').all();
+}
+
+// ===== ANNOUNCING =====
+
+function createAnnouncement({ name, drawCap, firstRoundDate, signupDeadline = null, description = '' }) {
+  const r = getDB().prepare(`
+    INSERT INTO tournaments (name, type, status, championship_date, first_round_date, draw_cap, signup_deadline, description)
+    VALUES (?, 'knockout', 'upcoming', ?, ?, ?, ?, ?)
+  `).run(name, firstRoundDate, firstRoundDate, drawCap, signupDeadline, description);
+  return Number(r.lastInsertRowid);
+}
+
+function updateAnnouncement(id, { name, drawCap, firstRoundDate, signupDeadline = null, description = '' }) {
+  getDB().prepare(`
+    UPDATE tournaments SET name = ?, draw_cap = ?, first_round_date = ?, championship_date = ?,
+      signup_deadline = ?, description = ?
+    WHERE id = ? AND status = 'upcoming'
+  `).run(name, drawCap, firstRoundDate, firstRoundDate, signupDeadline, description, Number(id));
+  return getTournamentRow(id);
+}
+
+/** Everyone signed up, in the order they joined. */
+function getSignups(tournamentId) {
+  return getDB().prepare(`
+    SELECT s.player_id, s.created_at, p.name, p.email, p.photo_path, p.member_number
+    FROM tournament_signups s
+    JOIN players p ON p.id = s.player_id
+    WHERE s.tournament_id = ?
+    ORDER BY s.created_at ASC, s.id ASC
+  `).all(Number(tournamentId));
+}
+
+function getSignupCounts() {
+  const out = {};
+  for (const r of getDB().prepare('SELECT tournament_id, COUNT(*) AS n FROM tournament_signups GROUP BY tournament_id').all()) out[r.tournament_id] = r.n;
+  return out;
+}
+
+function getSignupsForPlayer(playerId) {
+  return getDB().prepare('SELECT tournament_id FROM tournament_signups WHERE player_id = ?').all(Number(playerId)).map((r) => r.tournament_id);
+}
+
+function addSignup(tournamentId, playerId) {
+  return getDB().prepare('INSERT OR IGNORE INTO tournament_signups (tournament_id, player_id) VALUES (?, ?)').run(Number(tournamentId), Number(playerId)).changes > 0;
+}
+
+function removeSignup(tournamentId, playerId) {
+  return getDB().prepare('DELETE FROM tournament_signups WHERE tournament_id = ? AND player_id = ?').run(Number(tournamentId), Number(playerId)).changes > 0;
+}
+
+// ===== BUILDING THE DRAW =====
+
+/** Problems with a draw before it is built, or [] when it can be. */
+function checkDraw({ name, drawCap, entrants, rounds, courtIds, len, buffer }) {
+  const errs = [];
+  if (!name || !String(name).trim()) errs.push('Tournament name is required.');
+  if (!K.DRAW_SIZES.includes(drawCap)) errs.push('The draw must be 8 or 16 players.');
+  if (!Array.isArray(entrants) || entrants.length < K.MIN_ENTRANTS) errs.push(`A knockout needs at least ${K.MIN_ENTRANTS} players.`);
+  else if (entrants.length > drawCap) errs.push(`The draw is full at ${drawCap}.`);
+  else if (new Set(entrants).size !== entrants.length) errs.push('A player is in the draw twice.');
+  const draw = K.drawFor((entrants || []).length, drawCap);
+  if (!Array.isArray(rounds) || rounds.length !== K.roundCount(draw)) errs.push(`A ${draw}-draw has ${K.roundCount(draw)} rounds to schedule.`);
+  else if (rounds.some((r) => !/^\d{4}-\d{2}-\d{2}$/.test(r.date || '') || !/^\d{2}:\d{2}$/.test(r.time || ''))) errs.push('Every round needs a date and a start time.');
+  if (!Array.isArray(courtIds) || courtIds.length === 0) errs.push('Pick at least one court.');
+  if (!(Number(len) > 0)) errs.push('Match length must be at least a minute.');
+  if (!(Number(buffer) >= 0)) errs.push('Buffer cannot be negative.');
+  return errs;
+}
+
+/**
+ * Create the draw: the tournament row (inserted, or the announcement filled
+ * in), its courts, rounds, seeded players and every match that will be played,
+ * each with its date, time and court. First-round byes have no match; their
+ * players go straight into the second round.
+ */
+function createKnockout({ tournamentId = null, name, drawCap, entrants, seeding, rounds, courtIds, len, buffer, ladderRanks = {} }) {
   const db = getDB();
-  const match = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
-  if (!match) throw new Error('Match not found');
+  const draw = K.drawFor(entrants.length, drawCap);
+  const courts = db.prepare(`SELECT id, name FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`).all(...courtIds.map(Number));
+  if (!courts.length) throw Object.assign(new Error('Pick at least one court.'), { status: 400 });
+  const finalDate = rounds[rounds.length - 1].date;
 
-  db.prepare('UPDATE matches SET scores = ?, winner_id = ?, confirmed_at = datetime(\'now\') WHERE id = ?').run(JSON.stringify(scores), Number(winnerId), Number(matchId));
-
-  const tid = match.tournament_id;
-
-  if (match.round === 'group') {
-    const allGroup = db.prepare(`SELECT winner_id FROM matches WHERE type = 'tournament' AND tournament_id = ? AND round = 'group'`).all(tid);
-    if (allGroup.every((m) => m.winner_id !== null)) advanceToKnockout(db, tid);
-  } else if (match.round === 'quarterfinal') {
-    // QF1→SF1 player1, QF2→SF2 player1, QF3→SF1 player2, QF4→SF2 player2
-    const sfMap = { QF1: ['SF1', 'player1_id'], QF2: ['SF2', 'player1_id'], QF3: ['SF1', 'player2_id'], QF4: ['SF2', 'player2_id'] };
-    const [sfSlot, col] = sfMap[match.bracket_slot] || [];
-    if (sfSlot) db.prepare(`UPDATE matches SET ${col} = ? WHERE tournament_id = ? AND bracket_slot = ?`).run(Number(winnerId), tid, sfSlot);
-  } else if (match.round === 'semifinal') {
-    const col = match.bracket_slot === 'SF1' ? 'player1_id' : 'player2_id';
-    db.prepare(`UPDATE matches SET ${col} = ? WHERE tournament_id = ? AND bracket_slot = 'F'`).run(Number(winnerId), tid);
-  } else if (match.round === 'final') {
-    db.prepare("UPDATE tournaments SET status = 'completed' WHERE id = ?").run(tid);
-  }
-
-  return db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
-}
-
-// Clear a match score and undo any bracket advancement it caused.
-function clearTournamentMatchScore(matchId) {
-  const db = getDB();
-  const match = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
-  if (!match || !match.winner_id) return;
-
-  const tid = match.tournament_id;
-
-  db.prepare(`UPDATE matches SET scores = NULL, winner_id = NULL, confirmed_at = NULL, played_at = NULL, status = CASE WHEN court_id IS NOT NULL AND scheduled_time IS NOT NULL THEN 'scheduled' ELSE 'unscheduled' END WHERE id = ?`).run(Number(matchId));
-
-  if (match.round === 'group') {
-    // Revert to group_stage status if it was knockout
-    db.prepare("UPDATE tournaments SET status = 'group_stage' WHERE id = ? AND status = 'knockout'").run(tid);
-    // Clear all QF player slots (group result is now uncertain)
-    db.prepare("UPDATE matches SET player1_id = NULL, player2_id = NULL WHERE tournament_id = ? AND round = 'quarterfinal'").run(tid);
-  } else if (match.round === 'quarterfinal') {
-    const sfMap = { QF1: ['SF1', 'player1_id'], QF2: ['SF2', 'player1_id'], QF3: ['SF1', 'player2_id'], QF4: ['SF2', 'player2_id'] };
-    const [sfSlot, col] = sfMap[match.bracket_slot] || [];
-    if (sfSlot) {
-      db.prepare(`UPDATE matches SET ${col} = NULL WHERE tournament_id = ? AND bracket_slot = ?`).run(tid, sfSlot);
-      // Also clear that SF's result and cascade to Final
-      const sfMatch = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND tournament_id = ? AND bracket_slot = ?`).get(tid, sfSlot);
-      if (sfMatch && sfMatch.winner_id) {
-        db.prepare(`UPDATE matches SET scores = NULL, winner_id = NULL, played_at = NULL, status = CASE WHEN court_id IS NOT NULL AND scheduled_time IS NOT NULL THEN 'scheduled' ELSE 'unscheduled' END WHERE id = ?`).run(sfMatch.id);
-        const fCol = sfSlot === 'SF1' ? 'player1_id' : 'player2_id';
-        db.prepare(`UPDATE matches SET ${fCol} = NULL, scores = NULL, winner_id = NULL, played_at = NULL WHERE tournament_id = ? AND bracket_slot = 'F'`).run(tid);
-        db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ? AND status = 'completed'").run(tid);
-      }
+  return db.transaction(() => {
+    let id = tournamentId ? Number(tournamentId) : null;
+    if (id) {
+      db.prepare(`
+        UPDATE tournaments SET name = ?, type = 'knockout', status = 'active', draw_cap = ?, draw_size = ?,
+          seeding = ?, championship_date = ?, first_round_date = ?, match_duration_minutes = ?, buffer_minutes = ?
+        WHERE id = ? AND status = 'upcoming'
+      `).run(name, drawCap, draw, seeding, finalDate, rounds[0].date, len, buffer, id);
+    } else {
+      id = Number(db.prepare(`
+        INSERT INTO tournaments (name, type, status, draw_cap, draw_size, seeding, championship_date, first_round_date, match_duration_minutes, buffer_minutes)
+        VALUES (?, 'knockout', 'active', ?, ?, ?, ?, ?, ?, ?)
+      `).run(name, drawCap, draw, seeding, finalDate, rounds[0].date, len, buffer).lastInsertRowid);
     }
-  } else if (match.round === 'semifinal') {
-    const fCol = match.bracket_slot === 'SF1' ? 'player1_id' : 'player2_id';
-    db.prepare(`UPDATE matches SET ${fCol} = NULL, scores = NULL, winner_id = NULL, played_at = NULL WHERE tournament_id = ? AND bracket_slot = 'F'`).run(tid);
-    db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ? AND status = 'completed'").run(tid);
-  } else if (match.round === 'final') {
-    db.prepare("UPDATE tournaments SET status = 'knockout' WHERE id = ?").run(tid);
-  }
+
+    for (const c of courts) db.prepare('INSERT OR IGNORE INTO tournament_courts (tournament_id, court_id) VALUES (?, ?)').run(id, c.id);
+    rounds.forEach((r, k) => {
+      db.prepare('INSERT OR REPLACE INTO tournament_rounds (tournament_id, round_index, round_date, start_time) VALUES (?, ?, ?, ?)').run(id, k, r.date, r.time);
+    });
+    entrants.forEach((pid, k) => {
+      db.prepare('INSERT INTO tournament_players (tournament_id, player_id, seed, ladder_rank) VALUES (?, ?, ?, ?)')
+        .run(id, Number(pid), k + 1, ladderRanks[pid] ?? null);
+    });
+
+    // The preview bracket decides every slot, time and court; the rows are a
+    // copy of it.
+    const b = K.buildBracket({
+      draw,
+      entrants: entrants.map((pid) => ({ id: Number(pid) })),
+      rounds: rounds.map((r) => ({ date: r.date, time: K.toMin(r.time) })),
+      courts, len: Number(len), buffer: Number(buffer),
+    });
+    const insert = db.prepare(`
+      INSERT INTO matches (type, status, format, tournament_id, round, bracket_slot, player1_id, player2_id, court_id, scheduled_date, scheduled_time)
+      VALUES ('tournament', 'scheduled', 'singles', ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const m of b.rounds.flat()) {
+      if (m.bye) continue;
+      insert.run(id, m.roundKey, m.key, m.p1?.id ?? null, m.p2?.id ?? null, m.court?.id ?? null, m.date, K.toHHMM(m.time));
+    }
+    return id;
+  })();
 }
 
-// Scored tournament matches for a player (for match history display).
+/**
+ * Move every match that has not been played onto a new schedule: new round
+ * dates and times, courts, match length and buffer. Played matches keep the
+ * slot they were played in.
+ */
+function updateSchedule(id, { rounds, courtIds, len, buffer }) {
+  const db = getDB();
+  const t = getTournament(id);
+  if (!t || t.status === 'upcoming') throw Object.assign(new Error('Tournament not found.'), { status: 404 });
+  if (rounds.length !== K.roundCount(t.draw_size)) throw Object.assign(new Error('Every round needs a date and a start time.'), { status: 400 });
+  const courts = db.prepare(`SELECT id, name FROM courts WHERE id IN (${courtIds.map(() => '?').join(',')}) ORDER BY sort_order, id`).all(...courtIds.map(Number));
+  if (!courts.length) throw Object.assign(new Error('Pick at least one court.'), { status: 400 });
+
+  db.transaction(() => {
+    db.prepare('UPDATE tournaments SET match_duration_minutes = ?, buffer_minutes = ?, championship_date = ?, first_round_date = ? WHERE id = ?')
+      .run(len, buffer, rounds[rounds.length - 1].date, rounds[0].date, t.id);
+    db.prepare('DELETE FROM tournament_courts WHERE tournament_id = ?').run(t.id);
+    for (const c of courts) db.prepare('INSERT INTO tournament_courts (tournament_id, court_id) VALUES (?, ?)').run(t.id, c.id);
+    rounds.forEach((r, k) => {
+      db.prepare('INSERT OR REPLACE INTO tournament_rounds (tournament_id, round_index, round_date, start_time) VALUES (?, ?, ?, ?)').run(t.id, k, r.date, r.time);
+    });
+    // Same slotting as creation: the k-th real match of a round, in bracket
+    // order, takes the k-th place in that round's waves.
+    const bySlot = new Map(t.matches.map((m) => [m.bracket_slot, m]));
+    const upd = db.prepare('UPDATE matches SET scheduled_date = ?, scheduled_time = ?, court_id = ? WHERE id = ?');
+    for (let r = 0; r < rounds.length; r++) {
+      const inRound = [...bySlot.values()].filter((m) => K.parseSlot(m.bracket_slot)?.r === r)
+        .sort((a, b) => K.parseSlot(a.bracket_slot).i - K.parseSlot(b.bracket_slot).i);
+      inRound.forEach((m, k) => {
+        if (m.winner_id != null) return;
+        const s = K.slotTime(k, { start: K.toMin(rounds[r].time), courtCount: courts.length, len: Number(len), buffer: Number(buffer) });
+        upd.run(rounds[r].date, K.toHHMM(s.time), courts[s.courtIndex].id, m.id);
+      });
+    }
+  })();
+  return getTournament(t.id);
+}
+
+// ===== RESULTS =====
+
+function _row(db, tournamentId, slot) {
+  return db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND tournament_id = ? AND bracket_slot = ?`).get(tournamentId, slot);
+}
+
+const _isWithdrawn = (db, tournamentId, playerId) => playerId != null
+  && !!db.prepare('SELECT withdrawn FROM tournament_players WHERE tournament_id = ? AND player_id = ?').get(tournamentId, playerId)?.withdrawn;
+
+function _unscore(db, id) {
+  db.prepare(`UPDATE matches SET winner_id = NULL, player1_score = NULL, player2_score = NULL, scores = NULL,
+    skipped = 0, played_at = NULL, confirmed_at = NULL, submitted_by_player_id = NULL,
+    status = CASE WHEN court_id IS NOT NULL AND scheduled_time IS NOT NULL THEN 'scheduled' ELSE 'unscheduled' END
+    WHERE id = ?`).run(id);
+}
+
+/**
+ * Put `playerId` (or nobody) on one side of the match after `slot`, undoing
+ * anything that match had already decided if the player there changes.
+ */
+function _setNext(db, t, slot, playerId) {
+  const pos = K.parseSlot(slot);
+  const nx = K.nextSlot(pos.r, pos.i, t.draw_size);
+  if (!nx) return;
+  const row = _row(db, t.id, K.slotKey(nx.r, nx.i));
+  if (!row) return;
+  const col = nx.side === 1 ? 'player1_id' : 'player2_id';
+  if (row[col] === playerId) return;
+  if (row.winner_id != null) {
+    _unscore(db, row.id);
+    _setNext(db, t, row.bracket_slot, null);
+  }
+  db.prepare(`UPDATE matches SET ${col} = ? WHERE id = ?`).run(playerId, row.id);
+  _walkoverIfDue(db, t, row.bracket_slot);
+}
+
+/** A match with one withdrawn player and one real one goes to the real one. */
+function _walkoverIfDue(db, t, slot) {
+  const row = _row(db, t.id, slot);
+  if (!row || row.winner_id != null || row.player1_id == null || row.player2_id == null) return;
+  const w1 = _isWithdrawn(db, t.id, row.player1_id);
+  const w2 = _isWithdrawn(db, t.id, row.player2_id);
+  if (w1 === w2) return; // both in, or (oddly) both out: nothing to decide
+  const winner = w1 ? row.player2_id : row.player1_id;
+  db.prepare(`UPDATE matches SET winner_id = ?, skipped = 1, status = 'played', played_at = COALESCE(scheduled_date, ?) WHERE id = ?`)
+    .run(winner, clubToday(), row.id);
+  _setNext(db, t, slot, winner);
+  _settleStatus(db, t.id);
+}
+
+function _settleStatus(db, tournamentId) {
+  const t = db.prepare('SELECT draw_size FROM tournaments WHERE id = ?').get(tournamentId);
+  const final = _row(db, tournamentId, K.slotKey(K.roundCount(t.draw_size) - 1, 0));
+  db.prepare(`UPDATE tournaments SET status = ? WHERE id = ? AND status != 'upcoming'`)
+    .run(final && final.winner_id != null ? 'completed' : 'active', tournamentId);
+}
+
+/** Validate a best-of-five result: one side won three games, the other fewer. */
+function validScore(p1, p2) {
+  return Number.isInteger(p1) && Number.isInteger(p2) && p1 >= 0 && p2 >= 0 && p1 <= 3 && p2 <= 3
+    && (p1 === 3 || p2 === 3) && p1 !== p2;
+}
+
+/**
+ * Record (or correct) a result and carry the winner into their next match.
+ * A correction that changes the winner undoes whatever the old winner had
+ * already played further on.
+ */
+function recordScore(matchId, { p1, p2 }, { submittedBy = null } = {}) {
+  const db = getDB();
+  const row = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
+  if (!row) throw Object.assign(new Error('Match not found.'), { status: 404 });
+  if (row.player1_id == null || row.player2_id == null) throw Object.assign(new Error('Both players need to be known before a score goes in.'), { status: 409 });
+  if (!validScore(p1, p2)) throw Object.assign(new Error('One player must win three games, e.g. 3–1.'), { status: 400 });
+  const t = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(row.tournament_id);
+  const winner = p1 > p2 ? row.player1_id : row.player2_id;
+  db.transaction(() => {
+    db.prepare(`UPDATE matches SET player1_score = ?, player2_score = ?, scores = ?, winner_id = ?, skipped = 0,
+        status = 'played', played_at = COALESCE(played_at, scheduled_date, ?), confirmed_at = datetime('now'),
+        submitted_by_player_id = ?
+      WHERE id = ?`).run(p1, p2, JSON.stringify({ p1, p2 }), winner, clubToday(), submittedBy, row.id);
+    _setNext(db, t, row.bracket_slot, winner);
+    _settleStatus(db, t.id);
+  })();
+  return db.prepare('SELECT * FROM matches WHERE id = ?').get(row.id);
+}
+
+/** Clear a result, and with it everything the winner went on to play. */
+function clearScore(matchId) {
+  const db = getDB();
+  const row = db.prepare(`SELECT * FROM matches WHERE type = 'tournament' AND id = ?`).get(Number(matchId));
+  if (!row || row.winner_id == null) return;
+  const t = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(row.tournament_id);
+  db.transaction(() => {
+    _unscore(db, row.id);
+    _setNext(db, t, row.bracket_slot, null);
+    _settleStatus(db, t.id);
+  })();
+}
+
+// ===== CHANGING THE ENTRANTS =====
+
+/** Has this player played a real match in the tournament (a walkover does not count)? */
+function hasPlayed(tournamentId, playerId) {
+  return !!getDB().prepare(`
+    SELECT 1 FROM matches WHERE type = 'tournament' AND tournament_id = ? AND winner_id IS NOT NULL
+      AND (skipped = 0 OR skipped IS NULL) AND (player1_id = ? OR player2_id = ?)
+  `).get(Number(tournamentId), Number(playerId), Number(playerId));
+}
+
+/**
+ * Swap a player out before they have played: the new player takes their seed,
+ * their line in the draw and every match still ahead of them.
+ */
+function replacePlayer(tournamentId, oldId, newId, { ladderRank = null } = {}) {
+  const db = getDB();
+  const tid = Number(tournamentId);
+  if (hasPlayed(tid, oldId)) throw Object.assign(new Error('They have already played a match.'), { status: 409 });
+  if (db.prepare('SELECT 1 FROM tournament_players WHERE tournament_id = ? AND player_id = ?').get(tid, Number(newId))) {
+    throw Object.assign(new Error('That player is already in the draw.'), { status: 409 });
+  }
+  db.transaction(() => {
+    db.prepare('UPDATE tournament_players SET player_id = ?, ladder_rank = ?, withdrawn = 0 WHERE tournament_id = ? AND player_id = ?')
+      .run(Number(newId), ladderRank, tid, Number(oldId));
+    db.prepare(`UPDATE matches SET player1_id = ? WHERE type = 'tournament' AND tournament_id = ? AND player1_id = ? AND winner_id IS NULL`).run(Number(newId), tid, Number(oldId));
+    db.prepare(`UPDATE matches SET player2_id = ? WHERE type = 'tournament' AND tournament_id = ? AND player2_id = ? AND winner_id IS NULL`).run(Number(newId), tid, Number(oldId));
+  })();
+}
+
+/**
+ * Withdraw a player before they have played. They keep their line in the
+ * draw; their next opponent gets a walkover as soon as there is one.
+ */
+function withdrawPlayer(tournamentId, playerId) {
+  const db = getDB();
+  const tid = Number(tournamentId);
+  if (hasPlayed(tid, playerId)) throw Object.assign(new Error('They have already played a match.'), { status: 409 });
+  const t = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(tid);
+  db.transaction(() => {
+    db.prepare('UPDATE tournament_players SET withdrawn = 1 WHERE tournament_id = ? AND player_id = ?').run(tid, Number(playerId));
+    const rows = db.prepare(`SELECT bracket_slot FROM matches WHERE type = 'tournament' AND tournament_id = ? AND winner_id IS NULL AND (player1_id = ? OR player2_id = ?)`).all(tid, Number(playerId), Number(playerId));
+    for (const r of rows) _walkoverIfDue(db, t, r.bracket_slot);
+  })();
+}
+
+function deleteTournament(id) {
+  // ON DELETE CASCADE on every child table does the rest.
+  getDB().prepare('DELETE FROM tournaments WHERE id = ?').run(Number(id));
+}
+
+// ===== FOR OTHER PAGES =====
+
+const _roundLabel = (round) => K.ROUND_SINGULAR[round] || round;
+
+/** Played tournament matches for a player, for their match history. Walkovers are left out. */
 function getPlayerTournamentHistory(playerId) {
-  const db = getDB();
-  const rows = db.prepare(`
-    SELECT tm.id, tm.player1_id, tm.player2_id, tm.winner_id, tm.scores,
-      COALESCE(tm.confirmed_at, tm.scheduled_date) AS confirmed_at,
-      tm.round, tm.bracket_slot,
-      t.id AS tournament_id, t.name AS tournament_name,
+  const rows = getDB().prepare(`
+    SELECT tm.id, tm.player1_id, tm.player2_id, tm.winner_id, tm.player1_score, tm.player2_score,
+      COALESCE(tm.played_at, tm.scheduled_date) AS played_on,
+      tm.round, t.id AS tournament_id, t.name AS tournament_name,
       p1.name AS p1_name, p2.name AS p2_name
     FROM matches tm
     JOIN tournaments t ON t.id = tm.tournament_id
     LEFT JOIN players p1 ON p1.id = tm.player1_id
     LEFT JOIN players p2 ON p2.id = tm.player2_id
-    WHERE tm.winner_id IS NOT NULL
+    WHERE tm.type = 'tournament' AND tm.winner_id IS NOT NULL AND (tm.skipped = 0 OR tm.skipped IS NULL)
       AND (tm.player1_id = ? OR tm.player2_id = ?)
-    ORDER BY confirmed_at DESC, tm.scheduled_time DESC
+    ORDER BY played_on DESC, tm.scheduled_time DESC
   `).all(Number(playerId), Number(playerId));
 
   return rows.map((m) => {
     const isP1 = m.player1_id === Number(playerId);
-    const sc = m.scores ? JSON.parse(m.scores) : null;
-    const mySets   = sc ? (isP1 ? sc.p1 : sc.p2) : 0;
-    const theirSets= sc ? (isP1 ? sc.p2 : sc.p1) : 0;
-    const roundLabel = { group:'Group Stage', quarterfinal:'Quarterfinal', semifinal:'Semifinal', final:'Final' }[m.round] || m.round;
     return {
       id: `t_${m.id}`,
       source: 'tournament',
       result: m.winner_id === Number(playerId) ? 'W' : 'L',
       opponent_name: isP1 ? m.p2_name : m.p1_name,
       opponent_id: isP1 ? m.player2_id : m.player1_id,
-      week_date: (m.confirmed_at || '').slice(0, 10),
+      week_date: String(m.played_on || '').slice(0, 10),
       league_name: m.tournament_name,
-      my_score: mySets,
-      their_score: theirSets,
+      my_score: isP1 ? m.player1_score : m.player2_score,
+      their_score: isP1 ? m.player2_score : m.player1_score,
       tournament_id: m.tournament_id,
-      round_label: roundLabel,
+      round_label: _roundLabel(m.round),
     };
   });
 }
 
-// Upcoming unscored tournament matches for a player.
+/** A player's tournament matches still to play. */
 function getPlayerTournamentUpcoming(playerId) {
-  const db = getDB();
-  const today = new Date().toISOString().slice(0, 10);
-  const rows = db.prepare(`
+  const rows = getDB().prepare(`
     SELECT tm.id, tm.player1_id, tm.player2_id, tm.scheduled_date, tm.scheduled_time,
       tm.round, t.id AS tournament_id, t.name AS tournament_name,
-      c.name AS court_name,
-      p1.name AS p1_name, p2.name AS p2_name
+      c.name AS court_name, p1.name AS p1_name, p2.name AS p2_name
     FROM matches tm
     JOIN tournaments t ON t.id = tm.tournament_id
     LEFT JOIN courts c ON c.id = tm.court_id
     LEFT JOIN players p1 ON p1.id = tm.player1_id
     LEFT JOIN players p2 ON p2.id = tm.player2_id
-    WHERE tm.winner_id IS NULL
+    WHERE tm.type = 'tournament' AND tm.winner_id IS NULL
       AND (tm.player1_id = ? OR tm.player2_id = ?)
       AND tm.scheduled_date >= ?
     ORDER BY tm.scheduled_date ASC, tm.scheduled_time ASC
-  `).all(Number(playerId), Number(playerId), today);
+  `).all(Number(playerId), Number(playerId), clubToday());
 
   return rows.map((m) => {
     const isP1 = m.player1_id === Number(playerId);
-    const roundLabel = { group:'Group Stage', quarterfinal:'Quarterfinal', semifinal:'Semifinal', final:'Final' }[m.round] || m.round;
     return {
       id: `t_${m.id}`,
       source: 'tournament',
@@ -478,28 +468,35 @@ function getPlayerTournamentUpcoming(playerId) {
       opponent_id: isP1 ? m.player2_id : m.player1_id,
       match_time: m.scheduled_time,
       court_name: m.court_name,
-      round_label: roundLabel,
+      round_label: _roundLabel(m.round),
       tournament_id: m.tournament_id,
     };
   });
 }
 
-function deleteTournament(id) {
-  const db = getDB();
-  // ON DELETE CASCADE on all child tables handles the rest
-  db.prepare('DELETE FROM tournaments WHERE id = ?').run(Number(id));
-}
-
 module.exports = {
   getTournaments,
   getTournament,
-  checkTournamentDate,
-  createTournament,
-  getSuggestedGroups,
-  getGroupStandings,
-  updateTournamentMatchScore,
-  clearTournamentMatchScore,
+  getTournamentRow,
+  getTournamentForMatch,
+  bracketOf,
+  createAnnouncement,
+  updateAnnouncement,
+  getSignups,
+  getSignupCounts,
+  getSignupsForPlayer,
+  addSignup,
+  removeSignup,
+  checkDraw,
+  createKnockout,
+  updateSchedule,
+  validScore,
+  recordScore,
+  clearScore,
+  hasPlayed,
+  replacePlayer,
+  withdrawPlayer,
+  deleteTournament,
   getPlayerTournamentHistory,
   getPlayerTournamentUpcoming,
-  deleteTournament,
 };

@@ -1,4 +1,5 @@
 import { esc, toast, modal, avatarHTML } from './utils.js';
+import { ROUND_SINGULAR } from './knockout.js';
 
 // ===== MATCH CARD =====
 // One modal, opened from anywhere a match is drawn - the dashboard, a profile,
@@ -37,7 +38,7 @@ const _first = (name) => String(name || '').split(/\s+/)[0];
 function _kicker(c) {
   if (c.format === 'doubles' && c.type === 'ladder') return 'Doubles ladder match';
   if (c.type === 'tournament') {
-    const round = { group: 'Group Stage', quarterfinal: 'Quarterfinal', semifinal: 'Semifinal', final: 'Final' }[c.round] || c.round;
+    const round = ROUND_SINGULAR[c.round] || c.round;
     return [c.tournament_name, round].filter(Boolean).join(' · ');
   }
   if (c.type === 'ladder') return 'Ladder match';
@@ -329,6 +330,12 @@ export async function openMatchCard(matchId) {
   });
 
   document.getElementById('mcSubmit')?.addEventListener('click', () => {
+    // A tournament result is a best-of-five pick in the bracket's own score
+    // modal, which replaces this one.
+    if (card.type === 'tournament' && window.openTournamentScore) {
+      window.openTournamentScore(card.id);
+      return;
+    }
     modal.close();
     // The score form lives on the Report Score page, so the card hands over
     // rather than carrying a second copy of it.

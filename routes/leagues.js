@@ -1,13 +1,13 @@
 const express = require('express');
-const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
 const { wrap, requireAdmin, emailLimiter } = require('../middleware');
-const { sendBatch, isConfigured: emailConfigured, appUrl, sendMany, inviteEmail } = require('../lib/email');
+const { isConfigured: emailConfigured } = require('../lib/email');
 const { clubToday } = require('../lib/clock');
-const sanitizeHtml = require('sanitize-html');
+const { signupState: _signupState } = require('../lib/signups');
+const { sanitizeMessageHtml, messagePlayers, invitePlayers } = require('../lib/playerMail');
 
 const { playDates } = require('../services/leagueService');
 
@@ -159,16 +159,7 @@ const SETUP_TYPES = ['traditional', 'modern', 'doubles'];
 
 /** What a league's signups mean right now, for both the list and the page. */
 function signupState(league, count, today) {
-  const cap = league.signup_cap ?? null;
-  const full = cap != null && count >= cap;
-  const pastDeadline = !!league.signup_deadline && league.signup_deadline < today;
-  return {
-    signup_count: count,
-    spots_left: cap == null ? null : Math.max(0, cap - count),
-    full,
-    signups_closed: full || pastDeadline,
-    deadline_passed: pastDeadline,
-  };
+  return _signupState({ cap: league.signup_cap ?? null, deadline: league.signup_deadline || null }, count, today);
 }
 
 /** Validate the announced fields. Returns an error string, or ''. */
@@ -319,17 +310,6 @@ router.put('/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) => 
   res.json({ ok: true, count });
 }));
 
-// The body arrives as editor HTML (bodyHtml) with a plain-text copy (body).
-// Admin-authored, but it lands in players' inboxes, so it goes through a
-// strict allowlist matching exactly what the editor can produce.
-function sanitizeMessageHtml(bodyHtml) {
-  return sanitizeHtml(bodyHtml, {
-    allowedTags: ['p', 'br', 'strong', 'em', 'u', 'b', 'i', 'ol', 'ul', 'li', 'a', 'h2', 'h3'],
-    allowedAttributes: { a: ['href', 'target', 'rel'] },
-    allowedSchemes: ['http', 'https', 'mailto'],
-    transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener' }) },
-  });
-}
 router.sanitizeMessageHtml = sanitizeMessageHtml;
 
 router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
@@ -345,63 +325,15 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
   const players = league?.status === 'upcoming'
     ? leagueModel.getSignups(leagueId).map((r) => ({ ...r, player_email: r.email }))
     : await leagueModel.getLeaguePlayers(leagueId);
-  const recipients = players.filter((p) => p.player_email);
-  if (recipients.length === 0) return res.json({ sent: 0 });
-
-  const html = bodyHtml
-    ? sanitizeMessageHtml(bodyHtml)
-    : `<p>${body
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/\n/g, '<br>')}</p>`;
-
-  // Only the two fields Resend reads; anything else the client sent is dropped.
-  const files = (Array.isArray(attachments) ? attachments : [])
-    .filter((a) => a && typeof a.filename === 'string' && typeof a.content === 'string')
-    .map((a) => ({ filename: a.filename, content: a.content }));
-
-  const { sent, failed } = await sendMany(recipients.map((player) => ({
-    to: [player.player_email],
-    subject,
-    html,
-    ...(body ? { text: body } : {}),
-    ...(files.length ? { attachments: files } : {}),
-  })));
-
+  const { sent, failed } = await messagePlayers(players, { subject, body, bodyHtml, attachments });
   res.json({ sent, failed });
 }));
 
 router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
-  const db = getDB();
   const players = await leagueModel.getLeaguePlayers(Number(req.params.id));
-
-  const eligible = players.filter((p) => {
-    if (!p.player_email) return false;
-    const account = db.prepare('SELECT password_hash FROM user_accounts WHERE player_id = ?').get(p.player_id);
-    return !account?.password_hash;
-  });
-
-  if (eligible.length === 0) return res.json({ sent: 0 });
-
-  const baseUrl = appUrl(req);
-  const expires = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
-
-  const batch = eligible.map((p) => {
-    const token = crypto.randomBytes(32).toString('hex');
-    db.prepare(`
-      INSERT INTO user_accounts (player_id, invite_token, invite_expires)
-      VALUES (?, ?, ?)
-      ON CONFLICT (player_id) DO UPDATE SET invite_token = excluded.invite_token, invite_expires = excluded.invite_expires
-    `).run(p.player_id, token, expires);
-    return {
-      to: [p.player_email],
-      ...inviteEmail(p.player_name, `${baseUrl}/invite/${token}`),
-    };
-  });
-
-  const { sent, failed } = await sendBatch(batch);
-
+  const { sent, failed } = await invitePlayers(req, players);
   res.json({ sent, failed });
 }));
 

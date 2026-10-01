@@ -11712,3 +11712,281 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   .nav-item .um-dot,
   .hamburger-btn .um-dot { transition: none; }
 }
+
+/* ===== KNOCKOUT TOURNAMENTS (ko-) =====
+   design_handoff_knockout_tournaments. The list, the upcoming page, the
+   wizard frame and the page frame reuse the league classes (lgl-, lgu-, wz-,
+   lg-); what is here is only what a knockout adds: the bracket tree, the
+   champion and next-match strips, the seeding list and the schedule rounds. */
+
+/* --- Bracket tree --- */
+.ko-tree-scroll { overflow-x: auto; padding: 4px 0 12px; }
+/* On the tournament page the tree runs edge to edge, so a wide draw scrolls
+   under the page padding rather than inside a box. */
+.ko-tree-scroll--bleed {
+  margin: 0 calc(-1 * var(--page-pad));
+  padding-left: var(--page-pad);
+  padding-right: var(--page-pad);
+}
+.ko-tree { position: relative; flex: none; }
+.ko-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.ko-lines path { fill: none; stroke: var(--border); stroke-width: 1.5; stroke-linejoin: round; }
+.ko-col-head { position: absolute; top: 0; display: flex; flex-direction: column; gap: 2px; }
+.ko-col-name {
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+/* One line, cut short rather than running into the next round's column; the
+   full text is the element's title. */
+.ko-col-sub { font-size: 11px; color: #93a2b5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ko-card {
+  position: absolute;
+  height: 90px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: opacity .15s, border-color .15s, box-shadow .15s;
+}
+.ko-card--live { cursor: pointer; }
+.ko-card--bye { opacity: .8; }
+.ko-card-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 0 10px; height: 24px; }
+.ko-card-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+.ko-card-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ko-card-time { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ko-score-btn {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--you);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ko-slot { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; transition: background .15s; }
+.ko-slot + .ko-slot { border-top: 1px solid var(--divider); }
+.ko-seed { width: 16px; flex: none; font-family: 'Barlow', sans-serif; font-size: 11px; font-weight: 700; color: #93a2b5; text-align: center; }
+.ko-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; color: var(--text); }
+.ko-slot--won .ko-name { font-weight: 700; color: var(--primary); }
+.ko-slot--lost .ko-name { color: var(--text-muted); }
+.ko-slot--empty .ko-name { font-weight: 400; font-style: italic; color: #93a2b5; }
+.ko-slot--me .ko-name { color: var(--you); }
+.ko-you { flex: none; padding: 2px 5px; border-radius: 4px; background: var(--you); color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .06em; }
+.ko-games { font-family: 'Barlow', sans-serif; font-size: 14px; font-weight: 700; color: #93a2b5; min-width: 10px; text-align: right; }
+.ko-slot--won .ko-games { color: var(--primary); }
+
+.ko-champ {
+  position: absolute;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ko-champ-label { font-family: 'Barlow', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #93a2b5; }
+.ko-champ-name { font-family: 'Barlow', sans-serif; font-size: 17px; font-weight: 700; color: #93a2b5; line-height: 1.1; }
+.ko-champ-sub { font-size: 11px; color: var(--text-muted); }
+.ko-champ--won { border-color: var(--gold); background: #fdf6dd; }
+.ko-champ--won .ko-champ-label { color: #8a6d1f; }
+.ko-champ--won .ko-champ-name { color: var(--primary); }
+
+/* --- Tournament page hero --- */
+.lg-status.ko-status--done { background: rgba(201,162,39,.25); color: #f2d675; }
+.ko-champion {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(201,162,39,.55);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  min-width: 390px;
+}
+.ko-champion-av {
+  width: 44px; height: 44px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--gold);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+}
+.ko-champion-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ko-champion-label { font-family: 'Barlow', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #f2d675; }
+.ko-champion-name { font-family: 'Barlow', sans-serif; font-size: 22px; font-weight: 700; line-height: 1; color: #fff; }
+.ko-champion-sub { font-size: 12px; color: rgba(255,255,255,.7); }
+
+/* --- List cards: the strip under the meta lines --- */
+.ko-strip {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+}
+.ko-strip-av {
+  width: 32px; height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ko-strip-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ko-strip-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.ko-strip-line { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ko-strip--next { background: #eaf2fb; border-color: #c3d0ff; }
+.ko-strip--next .ko-strip-label { color: var(--you); }
+.ko-strip--champ { background: #fdf6dd; border-color: var(--gold); }
+.ko-strip--champ .ko-strip-av { background: var(--gold); color: var(--primary); font-weight: 800; }
+.ko-strip--champ .ko-strip-label { color: #8a6d1f; }
+.lgl-badges { flex-wrap: wrap; justify-content: flex-end; }
+
+/* --- Upcoming page roster --- */
+.ko-roster-sub { margin: -4px 0 6px; padding: 0 18px; font-size: 12px; color: var(--text-muted); }
+.lgu-row.ko-lgu-row { grid-template-columns: 34px minmax(0,1fr) 70px auto; }
+.ko-rank { font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 700; color: var(--primary); }
+.ko-rank--none { color: #a8710f; }
+.lgu-full-note { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
+
+/* --- Wizard: players and seeding --- */
+.ko-drawline {
+  margin: 0 20px 4px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: #eaf2fb;
+  border: 1px solid var(--you);
+}
+.ko-drawline svg { width: 18px; height: 18px; flex: none; color: var(--primary); }
+.ko-drawline--low { background: var(--warning-light); border-color: var(--warning); }
+.ko-drawline--low svg { color: #a8710f; }
+.ko-drawline--full { background: var(--surface-2); border-color: var(--border); }
+.ko-drawline-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ko-drawline-main { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.ko-drawline-sub { font-size: 12px; color: var(--text-muted); }
+.wz-colhead.ko-selhead { height: auto; flex-direction: column; align-items: stretch; gap: 10px; }
+.wz-prow.ko-erow { display: flex; align-items: center; gap: 8px; }
+.ko-erow .wz-pname { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ko-erow-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ko-erow-rank { font-size: 11px; font-weight: 500; color: #93a2b5; }
+.ko-erow-rank--none { color: #a8710f; }
+.ko-erow .pill { flex: none; }
+.ko-moves { display: inline-flex; flex-direction: column; gap: 2px; flex: none; }
+.ko-moves .wz-pbtn { height: 16px; line-height: 1; font-size: 11px; }
+.ko-drag { cursor: grab; color: #b9c4d4; display: inline-flex; width: 16px; justify-content: center; flex: none; }
+.ko-drag:active { cursor: grabbing; }
+.ko-prow--over { box-shadow: inset 0 2px 0 var(--you); background: #eaf2fb; }
+.wz-prow--dim { opacity: .5; }
+
+/* --- Wizard: schedule --- */
+.ko-schedcols { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); }
+.ko-schedcol { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ko-schedcol + .ko-schedcol { gap: 14px; border-left: 1px solid var(--border-soft); }
+.ko-roundcard {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  min-width: 0;
+}
+.ko-roundcard--warn { border-color: var(--warning); }
+.ko-roundcard-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ko-roundcard-name { font-family: 'Barlow', sans-serif; font-size: 15px; font-weight: 700; color: var(--text); }
+.ko-readout { font-size: 12.5px; color: var(--text-muted); }
+.ko-roundcard .wz-night { margin: 0; }
+.ko-shared-label { color: var(--text-muted); }
+
+/* --- Wizard: preview --- */
+.ko-treepad { padding: 16px 20px 20px; overflow-x: auto; }
+.ko-schedbody { display: flex; flex-direction: column; padding: 4px 20px 12px; }
+.ko-prevrow { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 12px; padding: 12px 0; border-top: 1px solid var(--divider); align-items: baseline; }
+.ko-prevrow:first-child { border-top: 0; }
+.ko-prevrow-name { font-family: 'Barlow', sans-serif; font-size: 14px; font-weight: 700; color: var(--text); }
+.ko-prevrow-line { font-size: 13px; color: #4a5568; }
+
+/* --- Entrants tab --- */
+.ko-entrants .lg-std-cols,
+.ko-entrants .lg-std-row { grid-template-columns: 44px minmax(0,1fr) 120px 170px; }
+/* Every row keeps the actions column, buttons or not, so the columns line up. */
+.ko-entrants--admin .lg-std-cols,
+.ko-entrants--admin .lg-std-row { grid-template-columns: 44px minmax(0,1fr) 120px 170px 186px; }
+.ko-entrants .lg-std-cols span:nth-child(n+3) { text-align: center; }
+.ko-entrants .lg-std-cols span:last-child { text-align: right; }
+.ko-eav {
+  width: 30px; height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(30,39,88,.1);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+}
+.ko-eav--champ { background: var(--gold); color: #fff; }
+.ko-eav--me { background: var(--you); color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--you); }
+.ko-eav img { width: 100%; height: 100%; object-fit: cover; }
+.ko-erank { font-size: 13px; color: var(--text-muted); text-align: center; }
+.ko-estatus { display: flex; flex-direction: column; gap: 2px; align-items: center; text-align: center; }
+.ko-estatus-sub { font-size: 11px; color: #93a2b5; }
+.ko-eacts { display: flex; gap: 6px; justify-content: flex-end; }
+.ko-pick-list { margin-top: 10px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.ko-pick-list .wz-prow { width: 100%; border: 0; background: transparent; font: inherit; text-align: left; }
+.ko-pick-list .wz-prow--picked { background: #eaf2fb; }
+.ko-modal-copy { font-size: 13.5px; color: var(--text-muted); line-height: 1.55; margin: 0 0 14px; }
+
+@media (max-width: 768px) {
+  .ko-drag { display: none; }
+  .ko-desk { display: none !important; }
+  .lgu-row.ko-lgu-row { grid-template-columns: 34px minmax(0,1fr) auto; }
+  .ko-schedcols { grid-template-columns: minmax(0,1fr); }
+  .ko-schedcol { padding: 14px 12px; }
+  .ko-schedcol + .ko-schedcol { border-left: 0; border-top: 1px solid var(--border-soft); }
+  .ko-roundcard { padding: 12px; }
+  .ko-prevrow { grid-template-columns: minmax(0,1fr); gap: 2px; }
+  .ko-schedbody { padding: 0 14px 6px; }
+  .ko-treepad { padding: 12px 12px 16px; }
+  .ko-champion { min-width: 0; flex: 1 1 100%; }
+  .ko-entrants .lg-std-cols,
+  .ko-entrants .lg-std-row,
+  .ko-entrants--admin .lg-std-cols,
+  .ko-entrants--admin .lg-std-row { grid-template-columns: 28px minmax(0,1fr) auto; }
+  .ko-entrants .ko-desk-col { display: none; }
+  /* Replace / Withdraw drop to a line of their own under the name. */
+  .ko-entrants .ko-eacts { grid-column: 2 / -1; justify-content: flex-start; }
+  .ko-entrants .ko-eacts:empty { display: none; }
+}

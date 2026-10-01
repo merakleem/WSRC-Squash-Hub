@@ -1,4 +1,4 @@
-// Unread markers for Leagues and Events.
+// Unread markers for Leagues, Events and Tournaments.
 //
 // A dot on the nav item says only "something is posted here you have not
 // seen"; the marked cards do the pointing once the member arrives. Opening the
@@ -9,7 +9,7 @@
 // a beat so the eye can land on it before it goes.
 import { state } from './state.js';
 
-const TABS = ['leagues', 'events'];
+const TABS = ['leagues', 'events', 'tournaments'];
 const HOLD_MS = 600;
 const FADE_MS = 240;
 

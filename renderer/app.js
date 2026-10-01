@@ -14,7 +14,8 @@ import { renderLadder, resetLadderSeason } from './pages/ladder.js';
 import { renderLeagues } from './pages/leagues.js';
 import { renderLeagueDetail, resetLeagueEditMode } from './pages/leagueDetail.js';
 import { renderCreateLeague } from './pages/createLeague.js';
-import { renderTournaments, renderTournamentDetail, renderCreateTournament } from './pages/tournaments.js';
+import { renderTournaments, renderTournamentDetail } from './pages/tournaments.js';
+import { renderCreateTournament } from './pages/createTournament.js';
 import { renderEvents } from './pages/events.js';
 import { renderCourtBooking } from './pages/courtBooking.js';
 import { beginVisit, paintNav } from './unread.js';
@@ -50,7 +51,7 @@ function navigate(page, params = {}, { pushHistory = true } = {}) {
     el.classList.toggle('active', el.dataset.page === navPage);
   });
 
-  // Opening the Leagues or Events list is what clears its unread marker, and
+  // Opening the Leagues, Events or Tournaments list is what clears its unread marker, and
   // any navigation ends the visit that marks the cards.
   beginVisit(page);
 
@@ -273,9 +274,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('navCourtBooking').style.display = '';
   }
 
+  // Tournaments are for everyone: members sign up from there.
+  document.getElementById('navTournaments').style.display = '';
+
   // Show admin-only nav items, and the group heading that labels them.
   if (isAdmin()) {
-    document.getElementById('navTournaments').style.display = '';
     document.getElementById('navSchedule').style.display = '';
     document.getElementById('navClubSettings').style.display = '';
     document.getElementById('sbGroupAdmin').style.display = '';

@@ -1,735 +1,745 @@
 import { state, isAdmin } from '../state.js';
-import { esc, toast, modal } from '../utils.js';
+import { esc, toast, modal, avatarHTML, avatarInner } from '../utils.js';
+import * as K from '../knockout.js';
+import {
+  CAL_ICON, PEOPLE_ICON, CHEVRON, openBuildChoice, confirmModal, confirmWithdraw, upcomingCardHTML, cardActionHTML,
+  daysTo, lguHeroHTML, lguFactsHTML, lguActionHTML, lguRosterHTML, lguAvatar, lguAddHTML, wireLguAdd,
+  lguBuildHTML, lguBannerHTML, lguPageHTML, exportCSV,
+} from '../upcoming.js';
+import { heroHTML, progressHTML, optionsMenuHTML, wireOptionsMenu } from '../competitionPage.js';
+import { openMessagePlayersModal, openBulkInviteModal } from '../playerMail.js';
+import { bracketTreeHTML, wireBracketTree } from '../bracketTree.js';
+import { startCreateTournament, startEditSchedule } from './createTournament.js';
+import { openMatchCard } from '../matchCard.js';
+import { isNew, visitPainted } from '../unread.js';
 
-// ===== TOURNAMENTS =====
+// ===== KNOCKOUT TOURNAMENTS =====
+// The list, an announced tournament's page, and a built tournament's page with
+// its Bracket and Entrants tabs. Announcing and signing up are the league
+// flow's own pieces (upcoming.js); the bracket is bracketTree.js; the draw's
+// arithmetic is knockout.js, shared with the server.
 
-function _trFmtDate(dateStr) {
-  if (!dateStr) return '';
-  const [y, mo, d] = dateStr.split('-').map(Number);
-  return new Date(y, mo - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-}
-function _trFmtShort(dateStr) {
-  if (!dateStr) return '';
-  const [y, mo, d] = dateStr.split('-').map(Number);
-  return new Date(y, mo - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-function _trFmtTime(timeStr) {
-  if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
-  const suf = h >= 12 ? 'pm' : 'am';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return m === 0 ? `${h12}${suf}` : `${h12}:${String(m).padStart(2,'0')}${suf}`;
-}
-function _trRoundLabel(round) {
-  return { group:'Group Stage', quarterfinal:'Quarterfinal', semifinal:'Semifinal', final:'Final' }[round] || round;
-}
-function _trStatusLabel(status) {
-  if (status === 'group_stage') return { label: 'Group Stage', cls: 'tr-badge--active' };
-  if (status === 'knockout')    return { label: 'Knockout', cls: 'tr-badge--active' };
-  if (status === 'completed')   return { label: 'Completed', cls: 'tr-badge--done' };
-  return { label: status, cls: '' };
-}
-function _trScObj(m) {
-  return m.scores ? JSON.parse(m.scores) : null;
-}
-function _trSatDate(champDate) {
-  if (!champDate) return '';
-  const [y, mo, d] = champDate.split('-').map(Number);
-  const sat = new Date(Date.UTC(y, mo - 1, d - 1));
-  return `${sat.getUTCFullYear()}-${String(sat.getUTCMonth()+1).padStart(2,'0')}-${String(sat.getUTCDate()).padStart(2,'0')}`;
-}
+const _phone = () => window.matchMedia('(max-width: 768px)').matches;
+const _plural = (n, word) => `${n} ${word}${n === 1 ? '' : word.endsWith('ch') ? 'es' : 's'}`;
+const _courtList = (courts) => courts.map((c) => String(c.name).replace(/^Court\s*/i, '')).join(', ');
 
-// ─── Tournament List ───────────────────────────────────────────────────────────
+// ----- the list -----
+
+let _list = [];
 
 export async function renderTournaments() {
+  const admin = isAdmin();
   document.getElementById('pageTitle').textContent = 'Tournaments';
-  document.getElementById('topbarActions').innerHTML = isAdmin()
-    ? `<button class="btn btn-primary" id="btnNewTournament">+ New Tournament</button>` : '';
+  document.getElementById('topbarActions').innerHTML = admin ? `
+    <button class="btn btn-primary" id="btnNewTournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+      <span class="lgl-new-long">New Tournament</span><span class="lgl-new-short">New</span>
+    </button>` : '';
+  document.getElementById('btnNewTournament')?.addEventListener('click', openNewTournamentChoice);
 
   const content = document.getElementById('mainContent');
-  content.innerHTML = `<div class="tr-page-loading">Loading…</div>`;
-
-  const tournaments = await window.api.getTournaments();
-
-  if (isAdmin()) {
-    document.getElementById('btnNewTournament')?.addEventListener('click', () => window.navigate('createTournament'));
-  }
-
-  if (!tournaments.length) {
-    content.innerHTML = `<div class="table-card"><div class="empty-state"><strong>No tournaments yet</strong><p>${isAdmin() ? 'Create your first tournament to get started.' : 'No tournaments have been created yet.'}</p></div></div>`;
+  _list = await window.api.getTournaments();
+  if (!_list.length) {
+    content.innerHTML = `
+      <div class="table-card"><div class="empty-state">
+        <strong>No tournaments yet</strong>
+        <p>${admin ? 'Announce one for signups or build it now with New Tournament.' : 'No tournaments have been announced yet.'}</p>
+      </div></div>`;
+    visitPainted('tournaments');
     return;
   }
+  content.innerHTML = `<div class="lgl-page"><div class="lgl-groups" id="koGroups">${_groupsHTML()}</div></div>`;
+  _wireCards();
+  visitPainted('tournaments');
+}
 
-  const active = tournaments.filter((t) => t.status !== 'completed');
-  const past   = tournaments.filter((t) => t.status === 'completed');
-
-  function cardHTML(t) {
-    const { label, cls } = _trStatusLabel(t.status);
-    const badgeCls = cls === 'tr-badge--active' ? 'badge-active' : 'badge-completed';
-    return `<div class="league-card" data-id="${t.id}">
-      <div class="league-card-header">
-        <h3>${esc(t.name)}</h3>
-        <span class="badge ${badgeCls}">${label}</span>
+function _groupsHTML() {
+  const groups = [
+    ['Open for signups', _list.filter((t) => t.status === 'upcoming'), _upcomingCard],
+    ['In progress', _list.filter((t) => t.status === 'active'), _activeCard],
+    ['Completed', _list.filter((t) => t.status === 'completed'), _doneCard],
+  ].filter(([, items]) => items.length);
+  return groups.map(([label, items, card]) => `
+    <section class="lgl-group">
+      <div class="lgl-group-head">
+        <span class="lgl-group-label">${label}</span>
+        <span class="lgl-group-count">${items.length}</span>
+        <span class="lgl-group-rule"></span>
       </div>
-      <div class="league-card-meta">
-        <div class="meta-row">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-          </svg>
-          Championship: ${_trFmtDate(t.championship_date)}
-        </div>
-      </div>
-      <div class="league-card-footer">
-        <button class="btn btn-primary btn-sm" data-action="view" data-id="${t.id}">View Tournament</button>
-      </div>
-    </div>`;
-  }
+      <div class="lgl-grid">${items.map(card).join('')}</div>
+    </section>`).join('');
+}
 
-  let html = '';
-  if (active.length) html += `<div class="leagues-section-label">Active</div><div class="league-grid">${active.map(cardHTML).join('')}</div>`;
-  if (past.length)   html += `<div class="leagues-section-label${active.length ? ' leagues-section-label--gap' : ''}">Past</div><div class="league-grid">${past.map(cardHTML).join('')}</div>`;
-  content.innerHTML = html;
+const _fmtBadge = '<span class="lgl-fmt">Knockout</span>';
 
-  content.querySelectorAll('.league-card').forEach((el) => {
-    el.addEventListener('click', () => window.navigate('tournamentDetail', { tournamentId: Number(el.dataset.id) }));
+function _upcomingCard(t) {
+  const admin = isAdmin();
+  const n = t.signup_count || 0;
+  const cap = t.draw_cap;
+  return upcomingCardHTML({
+    ...t,
+    admin,
+    count: n,
+    cap,
+    isNew: isNew('tournaments', t.created_at),
+    badges: _fmtBadge,
+    meta: [`${CAL_ICON}First round ${K.fmtDate(t.first_round_date)}`, `${PEOPLE_ICON}${cap}-draw · single elimination · best of five`],
+    faces: t.signup_preview || [],
+    countText: n === 0 ? 'No one signed up yet' : `${n} of ${cap} signed up`,
+    rightText: t.deadline_passed ? 'Signups closed' : t.signup_deadline ? `Sign up by ${K.fmtDate(t.signup_deadline)}` : 'No deadline',
+    action: cardActionHTML(t, 'Draw coming soon'),
+    footLeft: t.deadline_passed || t.full
+      ? '<span class="lgl-chip lgl-chip--amber">Ready to build</span>'
+      : `<span class="lgl-weeks">Announced ${K.fmtMD(t.created_at)}</span>`,
+    footRight: `<span class="lgl-view">Build tournament ${CHEVRON}</span>`,
   });
 }
 
-// ─── Tournament Detail ─────────────────────────────────────────────────────────
+function _stripHTML(kind, av, label, line) {
+  return `
+    <div class="ko-strip${kind ? ` ko-strip--${kind}` : ''}">
+      <span class="ko-strip-av">${esc(av)}</span>
+      <span class="ko-strip-text"><span class="ko-strip-label">${label}</span><span class="ko-strip-line">${esc(line)}</span></span>
+    </div>`;
+}
+
+function _builtCard(t, { done, badge, meta, strip, footLeft }) {
+  const fresh = isNew('tournaments', t.created_at);
+  return `
+    <div class="lgl-card${done ? ' lgl-card--done' : ''}${fresh ? ' um-new' : ''}" data-id="${t.id}">
+      <div class="lgl-body">
+        <div class="lgl-card-head">
+          <h3 class="lgl-name">${fresh ? '<span class="um-mark" role="img" aria-label="New"></span>' : ''}${esc(t.name)}</h3>
+          <span class="lgl-badges">${_fmtBadge}${badge}</span>
+        </div>
+        <div class="lgl-meta">
+          <span class="lgl-meta-row">${CAL_ICON}${meta[0]}</span>
+          <span class="lgl-meta-row">${PEOPLE_ICON}${meta[1]}</span>
+        </div>
+        ${strip}
+      </div>
+      <div class="lgl-foot"><span class="lgl-weeks">${footLeft}</span><span class="lgl-view">Bracket ${CHEVRON}</span></div>
+    </div>`;
+}
+
+function _activeCard(t) {
+  const round = K.ROUND_NAMES[t.current_round] || '';
+  let strip;
+  if (t.my_next) {
+    const n = t.my_next;
+    const line = [`${n.label} · vs ${n.opponent}`, n.date ? K.fmtDate(n.date) : '', n.time ? K.fmtTime(K.toMin(n.time)) : '', n.court || ''].filter(Boolean).join(' · ');
+    strip = _stripHTML('next', /^winner of/.test(n.opponent) ? '?' : K.initials(n.opponent), 'Your next match', line);
+  } else if (t.my_out) {
+    strip = _stripHTML('', K.initials(t.my_out.winner), "You're out", `Lost ${t.my_out.label} to ${t.my_out.winner}${t.my_out.sub && t.my_out.sub !== 'Walkover' ? ` ${t.my_out.sub.split(' v ')[0]}` : ''}`);
+  } else {
+    strip = _stripHTML('', K.ROUND_ABBR[t.current_round] || '', 'Up next', `${_plural(t.left_in_round, 'match')} still to play · ${K.fmtDate(t.current_round_date)}`);
+  }
+  return _builtCard(t, {
+    done: false,
+    badge: `<span class="lgl-status lgl-status--blue">${round}</span>`,
+    meta: [`${round} · ${K.fmtDate(t.current_round_date)}`, `${t.draw_size}-draw · ${_plural(t.entrant_count, 'player')}`],
+    strip,
+    footLeft: `${t.played} of ${t.total} matches played`,
+  });
+}
+
+function _doneCard(t) {
+  const c = t.champion;
+  return _builtCard(t, {
+    done: true,
+    badge: '<span class="lgl-status lgl-status--grey">Completed</span>',
+    meta: [`${K.fmtMD(t.first_round_date)} – ${K.fmtMD(t.final_date)}`, `${t.draw_size}-draw · ${_plural(t.entrant_count, 'player')}`],
+    strip: c ? _stripHTML('champ', K.initials(c.name), 'Champion', `${c.name}${t.runner_up ? ` · def. ${t.runner_up.name}${t.final_score ? ` ${t.final_score}` : ''}` : ''}`) : '',
+    footLeft: `Final played ${K.fmtMD(t.final_date)}`,
+  });
+}
+
+function _wireCards() {
+  const holder = document.getElementById('koGroups');
+  holder.querySelectorAll('.lgl-card[data-id]').forEach((card) => {
+    card.addEventListener('click', () => window.navigate('tournamentDetail', { tournamentId: Number(card.dataset.id) }));
+  });
+  holder.querySelectorAll('[data-signup], [data-withdraw]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const t = _list.find((x) => x.id === Number(btn.closest('.lgl-card').dataset.id));
+      if (btn.hasAttribute('data-signup')) _signUp(t, _reloadCards);
+      else _withdraw(t, _reloadCards);
+    });
+  });
+}
+
+async function _reloadCards() {
+  _list = await window.api.getTournaments();
+  const holder = document.getElementById('koGroups');
+  if (!holder) return;
+  holder.innerHTML = _groupsHTML();
+  _wireCards();
+}
+
+async function _signUp(t, then) {
+  try {
+    await window.api.signUpForTournament(t.id);
+    await then();
+    toast(`Signed up for ${t.name}`, 'success');
+  } catch (e) { toast(e.message || 'Could not sign up.', 'error'); }
+}
+
+function _withdraw(t, then) {
+  confirmWithdraw(t.name, async () => {
+    try {
+      await window.api.withdrawFromTournament(t.id);
+      await then();
+      toast('Withdrawn', 'success');
+    } catch (e) { toast(e.message || 'Could not withdraw.', 'error'); }
+  });
+}
+
+// ----- announcing -----
+
+export function openNewTournamentChoice() {
+  openBuildChoice({
+    title: 'New tournament',
+    announceText: 'Members sign up themselves. You seed the draw and set the rounds later, from whoever joined.',
+    buildText: 'Pick the players yourself, then seed, schedule and preview the bracket in four steps.',
+    onAnnounce: () => openTournamentAnnounceModal(),
+    onBuild: () => startCreateTournament(),
+  });
+}
+
+function _nextSaturday() {
+  const d = new Date();
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7 || 7));
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+const DRAW_HELP = {
+  8: 'Quarterfinals, semifinals and a final. Signups close at 8.',
+  16: 'A round of 16, then quarterfinals, semifinals and a final. Signups close at 16.',
+};
+
+/** The announcement form, for a new tournament or an edit of one. */
+export function openTournamentAnnounceModal(t = null) {
+  const editing = !!t;
+  const f = { draw: t?.draw_cap || 16 };
+  modal.open(editing ? 'Edit announcement' : 'Announce a tournament', `
+    <div class="lgl-form">
+      <label class="lgl-field"><span>Tournament name</span>
+        <input id="anName" value="${esc(t?.name || '')}" placeholder="October C/D Knockout" autocomplete="off">
+      </label>
+      <div class="lgl-field"><span>Draw size</span>
+        <div class="lgl-seg" id="anDraw" role="radiogroup" aria-label="Draw size">
+          <button type="button" class="lgl-seg-b" data-draw="8">8 players</button>
+          <button type="button" class="lgl-seg-b" data-draw="16">16 players</button>
+        </div>
+        <span class="lgl-help" id="anDrawHelp"></span>
+      </div>
+      <div class="lgl-row2">
+        <label class="lgl-field"><span>First round <i>tentative</i></span>
+          <input id="anStart" type="date" value="${esc(t?.first_round_date || _nextSaturday())}">
+        </label>
+        <label class="lgl-field"><span>Sign up by <i>optional</i></span>
+          <input id="anDeadline" type="date" value="${esc(t?.signup_deadline || '')}">
+        </label>
+      </div>
+      <label class="lgl-field"><span>Description <i>optional</i></span>
+        <textarea id="anDesc" rows="3" placeholder="Who it's for, how the rounds run, anything else worth knowing.">${esc(t?.description || '')}</textarea>
+      </label>
+      <div class="lgl-form-err" id="anErr"></div>
+      <div class="lgl-form-foot">
+        <span class="lgl-help">${editing ? '' : 'Listed under Open for signups as soon as you announce it.'}</span>
+        <button class="btn btn-outline" id="anCancel">Cancel</button>
+        <button class="btn btn-primary" id="anSave">${editing ? 'Save changes' : 'Announce tournament'}</button>
+      </div>
+    </div>`);
+  const paint = () => {
+    document.querySelectorAll('#anDraw [data-draw]').forEach((b) => b.classList.toggle('lgl-seg-b--on', Number(b.dataset.draw) === f.draw));
+    document.getElementById('anDrawHelp').textContent = DRAW_HELP[f.draw];
+  };
+  paint();
+  document.getElementById('anDraw').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-draw]');
+    if (b) { f.draw = Number(b.dataset.draw); paint(); }
+  });
+  document.getElementById('anCancel').addEventListener('click', modal.close);
+  document.getElementById('anSave').addEventListener('click', async () => {
+    const err = document.getElementById('anErr');
+    const body = {
+      name: document.getElementById('anName').value.trim(),
+      drawCap: f.draw,
+      firstRoundDate: document.getElementById('anStart').value,
+      signupDeadline: document.getElementById('anDeadline').value || null,
+      description: document.getElementById('anDesc').value.trim(),
+    };
+    if (!body.name) { err.textContent = 'Tournament name is required.'; return; }
+    err.textContent = '';
+    const btn = document.getElementById('anSave');
+    btn.disabled = true;
+    try {
+      if (editing) {
+        await window.api.editTournamentAnnouncement(t.id, body);
+        modal.close();
+        toast('Announcement updated', 'success');
+        window.navigate('tournamentDetail', { tournamentId: t.id });
+      } else {
+        const { id } = await window.api.announceTournament(body);
+        modal.close();
+        toast(`${body.name} announced`, 'success');
+        window.navigate('tournamentDetail', { tournamentId: id });
+      }
+    } catch (e) {
+      err.textContent = e.message || 'Could not save.';
+      btn.disabled = false;
+    }
+  });
+}
+
+// ----- a tournament's page -----
+
+let _t = null;       // the tournament as the API sent it
+let _b = null;       // its bracket, once built
+let _tab = 'bracket';
+let _tabFor = null;
 
 export async function renderTournamentDetail() {
   const id = state.currentTournamentId;
-  document.getElementById('pageTitle').textContent = 'Tournament';
-  document.getElementById('topbarActions').innerHTML = '';
-  const content = document.getElementById('mainContent');
-  content.innerHTML = `<div class="tr-page-loading">Loading…</div>`;
+  if (id == null) { window.navigate('tournaments'); return; }
+  try {
+    _t = await window.api.getTournament(id);
+  } catch (_) {
+    window.navigate('tournaments');
+    return;
+  }
+  if (_tabFor !== id) { _tabFor = id; _tab = 'bracket'; }
+  if (_t.status === 'upcoming') _renderUpcoming(_t);
+  else _renderBuilt(_t);
+}
 
-  const t = await window.api.getTournament(id);
+const _reload = () => renderTournamentDetail();
+
+// ----- announced -----
+
+function _ranks() {
+  return Object.fromEntries((state.ladder || []).map((r, i) => [r.id, r.position ?? i + 1]));
+}
+
+function _renderUpcoming(t) {
+  const admin = isAdmin();
+  const n = t.signup_count || 0;
+  const cap = t.draw_cap;
+  const closed = !!t.deadline_passed;
+  const draw = K.drawFor(n, cap);
+  const byes = K.byesFor(draw, n);
+  const left = cap - n;
   document.getElementById('pageTitle').textContent = t.name;
+  document.getElementById('topbarActions').innerHTML = admin ? `
+    <button class="btn btn-outline" id="lguEdit">Edit announcement</button>
+    <button class="btn btn-primary" id="lguBuildTop"${n >= K.MIN_ENTRANTS ? '' : ' disabled'}>Build this tournament</button>` : '';
 
-  if (isAdmin()) {
-    document.getElementById('topbarActions').innerHTML =
-      `<button class="btn btn-danger" id="btnDeleteTourn">Delete</button>`;
-    document.getElementById('btnDeleteTourn').addEventListener('click', async () => {
-      if (!confirm(`Delete "${t.name}"? This cannot be undone.`)) return;
-      await window.api.deleteTournament(id);
-      toast('Tournament deleted.', 'success');
-      window.navigate('tournaments');
-    });
-  }
-
-  const groupMatchesByGroupId = {};
-  const bracketMatches = {};
-  for (const m of t.matches) {
-    if (m.round === 'group') {
-      if (!groupMatchesByGroupId[m.group_id]) groupMatchesByGroupId[m.group_id] = [];
-      groupMatchesByGroupId[m.group_id].push(m);
-    } else {
-      bracketMatches[m.bracket_slot] = m;
-    }
-  }
-
-  // Local standings calc (uses new {p1,p2} score format)
-  function calcStandings(groupId) {
-    const gPlayers = t.players.filter((p) => p.group_id === groupId);
-    const gMatches = groupMatchesByGroupId[groupId] || [];
-    const stats = {};
-    for (const p of gPlayers) stats[p.player_id] = { ...p, wins: 0, losses: 0, sw: 0, sl: 0, played: 0 };
-    for (const m of gMatches) {
-      if (!m.winner_id) continue;
-      const sc = _trScObj(m);
-      const p1s = sc ? (sc.p1 || 0) : 0, p2s = sc ? (sc.p2 || 0) : 0;
-      if (stats[m.player1_id]) { stats[m.player1_id].sw += p1s; stats[m.player1_id].sl += p2s; stats[m.player1_id].played++; }
-      if (stats[m.player2_id]) { stats[m.player2_id].sw += p2s; stats[m.player2_id].sl += p1s; stats[m.player2_id].played++; }
-      if (m.winner_id === m.player1_id) { if (stats[m.player1_id]) stats[m.player1_id].wins++; if (stats[m.player2_id]) stats[m.player2_id].losses++; } else { if (stats[m.player2_id]) stats[m.player2_id].wins++; if (stats[m.player1_id]) stats[m.player1_id].losses++; }
-    }
-    return Object.values(stats).sort((a, b) => {
-      if (b.wins !== a.wins) return b.wins - a.wins;
-      if ((b.sw - b.sl) !== (a.sw - a.sl)) return (b.sw - b.sl) - (a.sw - a.sl);
-      return (a.ladder_position || 9999) - (b.ladder_position || 9999);
-    }).map((s, i) => ({ ...s, rank: i + 1 }));
-  }
-
-  // Group tab HTML
-  function groupCardHTML(g) {
-    const standings = calcStandings(g.id);
-    const gMatches = groupMatchesByGroupId[g.id] || [];
-    const played = gMatches.filter((m) => m.winner_id).length;
-    const total = gMatches.length;
-
-    const standingsHTML = standings.map((s, i) => {
-      const isAdvancing = i < 2;
-      return `<div class="tr-standing-row${isAdvancing ? ' tr-standing-advance' : ''}">
-        <span class="tr-standing-pos">${i + 1}</span>
-        <span class="tr-standing-name">${esc(s.player_name)}</span>
-        <span class="tr-standing-wl">${s.wins}–${s.losses}</span>
-        <span class="tr-standing-sets">${s.sw > 0 || s.sl > 0 ? `${s.sw}–${s.sl}` : '—'}</span>
-        ${isAdvancing ? '<span class="tr-advance-dot" title="Advances to knockout"></span>' : '<span></span>'}
-      </div>`;
-    }).join('');
-
-    const matchRowsHTML = gMatches.map((m) => {
-      const sc = _trScObj(m);
-      const p1s = sc ? sc.p1 : null, p2s = sc ? sc.p2 : null;
-      const hasScore = m.winner_id != null;
-      const p1win = m.winner_id === m.player1_id;
-      const scoreHTML = hasScore
-        ? `<span class="tr-match-score-pill tr-score-p1">${p1s}–${p2s}</span>`
-        : `<span class="tr-match-score-pill tr-score-pending">vs</span>`;
-      const timeStr = m.match_date ? `${_trFmtShort(m.match_date)}${m.match_time ? ' · '+_trFmtTime(m.match_time) : ''}` : '';
-      const myId = state.currentUser?.playerId;
-      const isMyMatch = myId && (m.player1_id === myId || m.player2_id === myId);
-      const canScore = m.player1_id && m.player2_id && (isAdmin() || (isMyMatch && !hasScore));
-      const scoreBtn = canScore
-        ? `<button class="tr-score-btn" data-match-id="${m.id}" aria-label="${isAdmin() && hasScore ? 'Edit' : 'Enter'} score, ${esc(m.p1_name || 'Player 1')} vs ${esc(m.p2_name || 'Player 2')}">${isAdmin() && hasScore ? 'Edit' : 'Score'}</button>` : '';
-      return `<div class="tr-match-row">
-        <div class="tr-match-names">
-          <span class="${p1win && hasScore ? 'tr-match-winner' : ''}">${esc(m.p1_name || '?')}</span>
-          ${scoreHTML}
-          <span class="${!p1win && hasScore ? 'tr-match-winner' : ''}">${esc(m.p2_name || '?')}</span>
-        </div>
-        <div class="tr-match-row-right">
-          ${timeStr ? `<span class="tr-match-time-info">${timeStr}</span>` : ''}
-          ${scoreBtn}
-        </div>
-      </div>`;
-    }).join('');
-
-    return `<div class="tr-group-card">
-      <div class="tr-group-header">
-        <span class="tr-group-name">Group ${esc(g.name)}</span>
-        <span class="tr-group-progress">${played}/${total} played</span>
-      </div>
-      <div class="tr-standings-table">
-        <div class="tr-standings-head">
-          <span class="tr-standing-pos"></span>
-          <span class="tr-standing-name">Player</span>
-          <span class="tr-standing-wl">W–L</span>
-          <span class="tr-standing-sets">Sets</span>
-          <span style="width:10px"></span>
-        </div>
-        ${standingsHTML}
-      </div>
-      <div class="tr-match-list">${matchRowsHTML}</div>
-    </div>`;
-  }
-
-  // Bracket match card HTML
-  function bracketCardHTML(slot, label) {
-    const m = bracketMatches[slot];
-    if (!m) return `<div class="tr-bracket-card tr-bracket-card--empty"><div class="tr-bc-label">${label}</div><div class="tr-bc-tbd">TBD</div></div>`;
-    const sc = _trScObj(m);
-    const p1s = sc ? sc.p1 : null, p2s = sc ? sc.p2 : null;
-    const hasScore = m.winner_id != null;
-    const p1win = m.winner_id === m.player1_id;
-    const p1Name = m.p1_name || 'TBD', p2Name = m.p2_name || 'TBD';
-    const known = !!(m.player1_id && m.player2_id);
-    const myId2 = state.currentUser?.playerId;
-    const isMyBracketMatch = myId2 && (m.player1_id === myId2 || m.player2_id === myId2);
-    const canScoreBracket = known && (isAdmin() || (isMyBracketMatch && !hasScore));
-    const scoreBtn = canScoreBracket
-      ? `<button class="tr-score-btn" data-match-id="${m.id}" aria-label="${isAdmin() && hasScore ? 'Edit' : 'Enter'} score, ${esc(m.p1_name || 'Player 1')} vs ${esc(m.p2_name || 'Player 2')}">${isAdmin() && hasScore ? 'Edit' : 'Score'}</button>` : '';
-    const timeStr = m.match_date ? `${_trFmtShort(m.match_date)}${m.match_time ? ' · ' + _trFmtTime(m.match_time) : ''}` : '';
-    return `<div class="tr-bracket-card${hasScore ? ' tr-bracket-card--scored' : ''}">
-      <div class="tr-bc-header">
-        <span class="tr-bc-label">${label}</span>
-        ${timeStr ? `<span class="tr-bc-time">${timeStr}</span>` : ''}
-      </div>
-      <div class="tr-bc-player ${p1win && hasScore ? 'tr-bc-winner' : ''}">
-        ${esc(p1Name)}${hasScore ? ` <span class="tr-bc-sets">${p1s}</span>` : ''}
-      </div>
-      <div class="tr-bc-divider"></div>
-      <div class="tr-bc-player ${!p1win && hasScore ? 'tr-bc-winner' : ''}">
-        ${esc(p2Name)}${hasScore ? ` <span class="tr-bc-sets">${p2s}</span>` : ''}
-      </div>
-      ${scoreBtn ? `<div class="tr-bc-footer">${scoreBtn}</div>` : ''}
-    </div>`;
-  }
-
-  const { label: statusLabel, cls: statusCls } = _trStatusLabel(t.status);
-  const groupsHTML = t.groups.map(groupCardHTML).join('');
-
-  // ── Results tab ──────────────────────────────────────────────────────────────
-  function buildResultsTiers() {
-    function ord(n) {
-      const s = ['th','st','nd','rd'];
-      const v = n % 100;
-      return n + (s[(v - 20) % 10] || s[v] || s[0]);
-    }
-    function matchWinner(m) { return m?.winner_id || null; }
-    function matchLoser(m) {
-      if (!m?.winner_id) return null;
-      return m.winner_id === m.player1_id ? m.player2_id : m.player1_id;
-    }
-
-    const placedIds = new Set();
-    const tiers = [];
-
-    function addBracketTier(label, ids) {
-      const valid = ids.filter(Boolean);
-      if (!valid.length) return;
-      tiers.push({ label, players: valid.map((id) => ({ id, name: (t.players.find((p) => p.player_id === id) || {}).player_name || '?' })) });
-      valid.forEach((id) => placedIds.add(id));
-    }
-
-    addBracketTier('1st',    [matchWinner(bracketMatches['F'])]);
-    addBracketTier('2nd',    [matchLoser(bracketMatches['F'])]);
-    addBracketTier('3rd–4th', [matchLoser(bracketMatches['SF1']), matchLoser(bracketMatches['SF2'])]);
-    addBracketTier('5th–8th', ['QF1','QF2','QF3','QF4'].map((s) => matchLoser(bracketMatches[s])));
-
-    // Group stage players who didn't reach the bracket
-    const remaining = t.players.map((p) => p.player_id).filter((id) => !placedIds.has(id));
-    const rec = {};
-    for (const id of remaining) rec[id] = { wins: 0, losses: 0, sd: 0 };
-    for (const m of t.matches) {
-      if (m.round !== 'group' || !m.winner_id) continue;
-      const sc = _trScObj(m);
-      const p1s = sc?.p1 || 0, p2s = sc?.p2 || 0;
-      if (rec[m.player1_id] !== undefined) { rec[m.player1_id].sd += p1s - p2s; if (m.winner_id === m.player1_id) rec[m.player1_id].wins++; else rec[m.player1_id].losses++; }
-      if (rec[m.player2_id] !== undefined) { rec[m.player2_id].sd += p2s - p1s; if (m.winner_id === m.player2_id) rec[m.player2_id].wins++; else rec[m.player2_id].losses++; }
-    }
-    remaining.sort((a, b) => rec[b].wins - rec[a].wins || rec[b].sd - rec[a].sd);
-
-    let pos = tiers.reduce((sum, tier) => sum + tier.players.length, 0) + 1;
-    let i = 0;
-    while (i < remaining.length) {
-      const curr = rec[remaining[i]];
-      let j = i + 1;
-      while (j < remaining.length && rec[remaining[j]].wins === curr.wins && rec[remaining[j]].sd === curr.sd) j++;
-      const group = remaining.slice(i, j);
-      const end = pos + group.length - 1;
-      const label = pos === end ? ord(pos) : `${ord(pos)}–${ord(end)}`;
-      tiers.push({ label, players: group.map((id) => ({ id, name: (t.players.find((p) => p.player_id === id) || {}).player_name || '?' })) });
-      pos += group.length;
-      i = j;
-    }
-    return tiers;
-  }
-
-  const isCompleted = t.status === 'completed';
-  const resultsHTML = isCompleted ? (() => {
-    const tiers = buildResultsTiers();
-    if (!tiers.length) return '<div class="tr-results-empty">No results yet.</div>';
-    return `<div class="tr-results-list">${tiers.map((tier) =>
-      tier.players.map((p) => `<div class="tr-results-row">
-        <span class="tr-results-pos">${tier.label}</span>
-        <span class="tr-results-name">${esc(p.name)}</span>
-      </div>`).join(''),
-    ).join('')}</div>`;
-  })() : '';
-
-  const bracketHTML = `<div class="tr-bracket">
-    <div class="tr-bracket-col">
-      <div class="tr-bracket-round-hd">Quarterfinals <span class="tr-bracket-round-date">${_trFmtShort(_trSatDate(t.championship_date))}</span></div>
-      <div class="tr-bracket-pair">
-        ${bracketCardHTML('QF1','QF 1')}
-        ${bracketCardHTML('QF3','QF 3')}
-      </div>
-      <div class="tr-bracket-pair-gap"></div>
-      <div class="tr-bracket-pair">
-        ${bracketCardHTML('QF2','QF 2')}
-        ${bracketCardHTML('QF4','QF 4')}
-      </div>
-    </div>
-    <div class="tr-bracket-col tr-bracket-col--sf">
-      <div class="tr-bracket-round-hd">Semifinals <span class="tr-bracket-round-date">${_trFmtShort(t.championship_date)}</span></div>
-      <div class="tr-bracket-sf-spacer"></div>
-      ${bracketCardHTML('SF1','SF 1')}
-      <div class="tr-bracket-sf-gap"></div>
-      ${bracketCardHTML('SF2','SF 2')}
-      <div class="tr-bracket-sf-spacer"></div>
-    </div>
-    <div class="tr-bracket-col tr-bracket-col--f">
-      <div class="tr-bracket-round-hd">Final <span class="tr-bracket-round-date">${_trFmtShort(t.championship_date)}</span></div>
-      <div class="tr-bracket-f-spacer"></div>
-      ${bracketCardHTML('F','Final')}
-      <div class="tr-bracket-f-spacer"></div>
-    </div>
-  </div>`;
-
-  content.innerHTML = `<div class="tr-detail">
-    <div class="tr-detail-meta">
-      <span class="tr-badge ${statusCls}">${statusLabel}</span>
-      <span class="tr-detail-champ-date">Championship: ${_trFmtDate(t.championship_date)}</span>
-    </div>
-    <div class="tr-tabs" role="tablist" aria-label="Tournament sections">
-      <button class="tr-tab active" role="tab" aria-selected="true" aria-controls="trPanelGroups" data-tab="groups">Groups</button>
-      <button class="tr-tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="trPanelBracket" data-tab="bracket">Bracket</button>
-      ${isCompleted ? `<button class="tr-tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="trPanelResults" data-tab="results">Results</button>` : ''}
-    </div>
-    <div id="trPanelGroups" class="tr-groups-grid" role="tabpanel">${groupsHTML}</div>
-    <div id="trPanelBracket" class="tr-bracket-panel" role="tabpanel" style="display:none">${bracketHTML}</div>
-    ${isCompleted ? `<div id="trPanelResults" class="tr-results-panel" role="tabpanel" style="display:none">${resultsHTML}</div>` : ''}
-  </div>`;
-
-  content.querySelectorAll('.tr-tab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      content.querySelectorAll('.tr-tab').forEach((b) => {
-        const on = b.dataset.tab === tab;
-        b.classList.toggle('active', on);
-        b.setAttribute('aria-selected', String(on));
-        b.tabIndex = on ? 0 : -1;
-      });
-      document.getElementById('trPanelGroups').style.display = tab === 'groups' ? '' : 'none';
-      document.getElementById('trPanelBracket').style.display = tab === 'bracket' ? '' : 'none';
-      if (isCompleted) document.getElementById('trPanelResults').style.display = tab === 'results' ? '' : 'none';
-    });
+  const when = `First round ${K.fmtLongY(t.first_round_date)} · ${closed ? `signups closed ${K.fmtDate(t.signup_deadline)}`
+    : t.signup_deadline ? `sign up by ${K.fmtDate(t.signup_deadline)}` : 'no deadline'}`;
+  const rankCell = (r) => (r.rank ? `#${r.rank}` : 'Unranked');
+  const roster = lguRosterHTML({
+    rows: t.signups || [],
+    admin,
+    head: admin ? `${n} of ${cap}` : `${_plural(n, 'player')}${!t.full ? ` · ${_plural(left, 'spot')} left` : ''}`,
+    sub: '<p class="ko-roster-sub">Listed by ladder rank, which is roughly how the draw will be seeded. Unranked players seed last.</p>',
+    emptyNote: 'Members see it on the Tournaments page. You can add people yourself below.',
+    cols: '<div class="lgu-row lgu-row--cols"><span></span><span>Member</span><span>No.</span><span>Ladder</span><span>Signed up</span><span></span></div>',
+    after: admin ? `${lguAddHTML({ disabled: t.full })}${t.full ? `<p class="lgu-full-note">The draw is full at ${cap}. Remove someone to add another player.</p>` : ''}` : '',
+    rowHTML: (r, mine) => (admin
+      ? `<div class="lgu-row lgu-row--admin" data-player="${r.player_id}">${lguAvatar(r, false)}
+          <span class="lgu-row-name">${esc(r.name)}</span>
+          <span class="lgu-row-num">${r.member_number ? esc(r.member_number) : '—'}</span>
+          <span class="lgu-row-rating ko-rank${r.rank ? '' : ' ko-rank--none'}">${rankCell(r)}</span>
+          <span class="lgu-row-when">${K.fmtMD(r.signed_up_at)}</span>
+          <button class="lgu-row-x" data-remove="${r.player_id}" aria-label="Remove ${esc(r.name)}">&#10005;</button>
+        </div>`
+      : `<div class="lgu-row ko-lgu-row${mine ? ' lgu-row--me' : ''}">${lguAvatar(r, mine)}
+          <span class="lgu-row-name">${mine ? 'You' : esc(r.name)}</span>
+          <span class="ko-rank ko-desk${r.rank ? '' : ' ko-rank--none'}">${rankCell(r)}</span>
+          <span class="lgu-row-when${mine ? ' lgu-row-when--me' : ''}">Signed up ${K.fmtMD(r.signed_up_at)}</span>
+        </div>`),
   });
 
-  content.querySelectorAll('.tr-score-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const match = t.matches.find((m) => m.id === Number(btn.dataset.matchId));
-      if (match) openTournamentScoreModal(match, t);
+  const dl = t.signup_deadline;
+  const dlLeft = dl && !closed ? daysTo(dl) : null;
+  const facts = lguFactsHTML({
+    count: n,
+    caption: t.i_signed_up ? 'players, including you' : n === 1 ? 'player' : 'players',
+    right: closed ? '<span class="lgu-facts-closed">Closed</span>' : t.full ? 'Full' : `${_plural(left, 'spot')} left of ${cap}`,
+    cap,
+    done: t.full || closed,
+    rows: [
+      ['First round', K.fmtDate(t.first_round_date)],
+      ['Draw', `${cap} players · single elimination`],
+      dl ? [closed ? 'Signups closed' : 'Sign up by', `${K.fmtDate(dl)}${dlLeft != null && dlLeft <= 14 ? ` · ${_plural(dlLeft, 'day')} left` : ''}`] : ['Sign up by', 'No deadline'],
+      ['Spots left', t.full ? `None · ${cap} of ${cap}` : `${left} of ${cap}`],
+      admin ? ['Announced', K.fmtMD(t.created_at)] : null,
+    ],
+  });
+
+  const side = admin
+    ? `${lguBuildHTML({
+      copy: `Opens the wizard with all ${n} entrants seeded by ladder rank. ${n} players make a ${draw}-draw${byes ? ` with ${_plural(byes, 'bye')}` : ''}.`,
+      label: 'Build this tournament',
+      enough: n >= K.MIN_ENTRANTS,
+      needNote: `Needs ${K.MIN_ENTRANTS - n} more player${K.MIN_ENTRANTS - n === 1 ? '' : 's'} for an 8-draw`,
+      reopen: closed,
+    })}
+      <button class="lgu-cancel" id="lguCancel">Cancel this tournament&hellip;</button>`
+    : lguActionHTML({
+      entity: t,
+      signedUpSub: closed ? 'Signups have closed — the draw is coming soon.' : "We'll tell you your seed and first match when the draw is built.",
+      fullText: 'Draw is full',
     });
+
+  document.getElementById('mainContent').innerHTML = lguPageHTML({
+    banner: admin && closed ? lguBannerHTML({
+      deadline: dl,
+      detail: `${n} players signed up — that's a ${draw}-draw with ${_plural(byes, 'bye')} for the top seeds. Build the tournament to seed the draw.`,
+      label: 'Build this tournament',
+    }) : '',
+    main: `${lguHeroHTML({ entity: t, fmt: `Knockout · ${cap}-draw`, when })}${roster}`,
+    side: `${facts}${side}`,
+  });
+
+  document.getElementById('lguSignUp')?.addEventListener('click', () => _signUp(t, _reload));
+  document.getElementById('lguWithdraw')?.addEventListener('click', () => _withdraw(t, _reload));
+  if (!admin) return;
+
+  document.getElementById('lguEdit').addEventListener('click', () => openTournamentAnnounceModal(t));
+  document.getElementById('lguReopen')?.addEventListener('click', () => openTournamentAnnounceModal(t));
+  const build = () => startCreateTournament({ fromUpcoming: t });
+  ['lguBuild', 'lguBuildTop', 'lguBannerBuild'].forEach((id) => document.getElementById(id)?.addEventListener('click', build));
+  document.getElementById('lguExport')?.addEventListener('click', () => exportCSV(t.name, [
+    ['Name', 'Member number', 'Ladder rank', 'Signed up'],
+    ...(t.signups || []).map((r) => [r.name, r.member_number || '', r.rank ?? '', String(r.signed_up_at || '').slice(0, 10)]),
+  ]));
+  document.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', () => {
+    const who = (t.signups || []).find((r) => r.player_id === Number(btn.dataset.remove));
+    confirmModal({
+      title: 'Remove', body: `Remove ${esc(who?.name || 'this player')} from ${esc(t.name)}?`, confirm: 'Remove',
+      onConfirm: async () => {
+        await window.api.removeTournamentSignup(t.id, who.player_id);
+        await _reload();
+        toast(`${who.name} removed`, 'success');
+      },
+    });
+  }));
+  document.getElementById('lguCancel').addEventListener('click', () => confirmModal({
+    title: 'Cancel tournament',
+    body: `Cancel ${esc(t.name)}? The announcement is removed and everyone signed up comes off the list.`,
+    cancel: 'Keep it', confirm: 'Cancel tournament',
+    onConfirm: async () => {
+      await window.api.deleteTournament(t.id);
+      toast(`${t.name} cancelled`, 'success');
+      window.navigate('tournaments');
+    },
+  }));
+  if (!state.ladder.length) window.api.getLadder().then((l) => { state.ladder = l; }).catch(() => {});
+  wireLguAdd({
+    exclude: (t.signups || []).map((r) => r.player_id),
+    hitExtra: (p) => {
+      const rank = _ranks()[p.id];
+      return `<i>${p.member_number ? `#${esc(p.member_number)} · ` : ''}${rank ? `#${rank}` : 'Unranked'}</i>`;
+    },
+    onAdd: async (pid) => {
+      try {
+        const r = await window.api.addTournamentSignup(t.id, pid);
+        await _reload();
+        const who = state.players.find((p) => p.id === pid);
+        toast(r?.full ? 'That fills the draw' : `${who?.name || 'Player'} added`, 'success');
+      } catch (e) { toast(e.message || 'Could not add them.', 'error'); }
+    },
   });
 }
 
-// ─── Score Modal ───────────────────────────────────────────────────────────────
+// ----- built -----
 
-function openTournamentScoreModal(match, tournament) {
-  const p1Name = match.p1_name || 'Player 1';
-  const p2Name = match.p2_name || 'Player 2';
-  const existingSc = match.scores ? JSON.parse(match.scores) : null;
+function _bracketOf(t) {
+  const entrants = t.players.map((p) => ({ id: p.player_id, name: p.name, photo_path: p.photo_path || null, rank: p.ladder_rank ?? null, withdrawn: !!p.withdrawn }));
+  return K.buildBracket({ draw: t.draw_size, entrants, rounds: t.rounds.map((r) => ({ date: r.date, time: K.toMin(r.time) })), rows: t.matches });
+}
 
-  // Valid match scores: one side must win 3 sets
-  const presets = [
-    { p1: 3, p2: 0 }, { p1: 3, p2: 1 }, { p1: 3, p2: 2 },
-    { p1: 0, p2: 3 }, { p1: 1, p2: 3 }, { p1: 2, p2: 3 },
-  ];
+function _renderBuilt(t) {
+  const admin = isAdmin();
+  const b = _b = _bracketOf(t);
+  const me = b.pById[state.currentUser?.playerId] || null;
+  document.getElementById('pageTitle').textContent = t.name;
+  document.getElementById('topbarActions').innerHTML = admin ? optionsMenuHTML([
+    { action: 'message', label: 'Message players' },
+    { action: 'invite', label: 'Send account invites' },
+    t.status !== 'completed' ? { action: 'schedule', label: 'Edit schedule' } : null,
+    { action: 'delete', label: 'Delete tournament', danger: true },
+  ], { label: 'Tournament options' }) : '';
+  if (admin) wireOptionsMenu((action) => _onOption(action, t));
 
-  let selected = existingSc
-    ? presets.find((pr) => pr.p1 === existingSc.p1 && pr.p2 === existingSc.p2) || null
-    : null;
+  const roundName = K.ROUND_NAMES[K.ROUND_KEYS[b.draw][b.cur]];
+  const first = t.rounds[0]?.date;
+  const last = b.final.date;
+  const dates = `${K.fmtMD(first)} – ${K.fmtMD(last)}`;
+  const status = b.stage === 'notStarted' ? 'Not started' : b.stage === 'done' ? 'Completed' : roundName;
+  let right;
+  if (b.stage === 'done') {
+    const loser = K.loserOf(b.final);
+    const score = b.final.score ? (b.final.winner === b.final.p1 ? `${b.final.score.p1}–${b.final.score.p2}` : `${b.final.score.p2}–${b.final.score.p1}`) : '';
+    right = `
+      <div class="ko-champion">
+        <span class="ko-champion-av">${esc(K.initials(b.champion.name))}</span>
+        <span class="ko-champion-text">
+          <span class="ko-champion-label">Champion</span>
+          <span class="ko-champion-name">${esc(b.champion.name)}</span>
+          <span class="ko-champion-sub">${loser ? `def. ${esc(loser.name)}${score ? ` ${score}` : ''} in the final` : 'Won the final'}</span>
+        </span>
+      </div>`;
+  } else {
+    right = progressHTML({
+      label: b.stage === 'notStarted' ? `Starts ${K.fmtDate(first)}` : roundName,
+      dates,
+      segs: b.rounds.map((_, r) => (r < b.cur ? 'done' : r === b.cur && b.stage !== 'notStarted' ? 'now' : '')),
+    });
+  }
+  const hero = heroHTML({
+    name: t.name,
+    status: status.toUpperCase(),
+    statusCls: b.stage === 'done' ? 'ko-status--done' : '',
+    meta: `${b.draw}-draw · ${_plural(b.ent, 'entrant')}${b.byes ? ` · ${_plural(b.byes, 'bye')}` : ''} · ${dates} · Court${t.courts.length === 1 ? '' : 's'} ${esc(_courtList(t.courts))}`,
+    right,
+  });
 
-  function renderModal() {
-    const btnsHTML = presets.map((pr) => {
-      const isSel = selected && selected.p1 === pr.p1 && selected.p2 === pr.p2;
+  document.getElementById('mainContent').innerHTML = `
+    <div class="lg-page ko-page">
+      ${hero}
+      <div class="lg-tabbar">
+        <div class="lg-tabs" id="koTabs" role="tablist" aria-label="Tournament sections">
+          <button class="lg-tab${_tab === 'bracket' ? ' active' : ''}" role="tab" aria-selected="${_tab === 'bracket'}" data-ko-tab="bracket">Bracket</button>
+          <button class="lg-tab${_tab === 'entrants' ? ' active' : ''}" role="tab" aria-selected="${_tab === 'entrants'}" data-ko-tab="entrants">Entrants</button>
+        </div>
+      </div>
+      <div id="koPanel"></div>
+    </div>`;
+  document.getElementById('koTabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-ko-tab]')?.dataset.koTab;
+    if (!tab || tab === _tab) return;
+    _tab = tab;
+    _renderBuilt(t);
+  });
+
+  const panel = document.getElementById('koPanel');
+  if (_tab === 'bracket') {
+    const phone = _phone();
+    const canScore = (m) => admin || (!!me && (m.p1 === me || m.p2 === me) && !m.winner);
+    panel.innerHTML = `<div class="ko-tree-scroll ko-tree-scroll--bleed">${bracketTreeHTML(b, { compact: phone, plainHeads: phone, live: true, me, canScore })}</div>`;
+    wireBracketTree(panel.querySelector('.ko-tree'), b, {
+      hover: !phone,
+      me,
+      onOpen: (m) => openMatchCard(m.id),
+      onScore: (m) => openScoreModal(m),
+    });
+  } else {
+    panel.innerHTML = _entrantsHTML(t, b, me, admin);
+    panel.querySelectorAll('[data-replace]').forEach((el) => el.addEventListener('click', () => _openReplace(t, b.pById[Number(el.dataset.replace)])));
+    panel.querySelectorAll('[data-withdraw-player]').forEach((el) => el.addEventListener('click', () => _openWithdraw(t, b.pById[Number(el.dataset.withdrawPlayer)])));
+  }
+}
+
+const STATUS_PILL = { in: 'green', out: 'grey', runner: 'blue', champion: 'amber', withdrawn: 'grey' };
+
+function _entrantsHTML(t, b, me, admin) {
+  const rows = b.players.map((p) => {
+    const st = K.standing(b, p);
+    const mine = me === p;
+    const editable = admin && b.stage !== 'done' && !p.withdrawn && !K.hasPlayed(b, p);
+    const av = `<span class="ko-eav${st.kind === 'champion' ? ' ko-eav--champ' : mine ? ' ko-eav--me' : ''}">${p.photo_path ? avatarInner(p) : esc(K.initials(p.name))}</span>`;
+    return `
+      <div class="lg-std-row${mine ? ' lg-me' : ''}">
+        <span class="lg-std-rank${p.seed === 1 ? ' lg-rank-first' : mine ? ' lg-rank-me' : ''}">${p.seed}</span>
+        <span class="lg-std-name">${av}<span class="nav-player-link${mine ? ' lg-name-me' : ''}" data-player-id="${p.id}">${esc(p.name)}</span>${mine ? '<span class="lg-you">YOU</span>' : ''}${st.bye ? '<span class="pill pill--grey">Bye</span>' : ''}</span>
+        <span class="ko-erank ko-desk-col">${p.rank ? `#${p.rank} at seeding` : 'Unranked'}</span>
+        <span class="ko-estatus"><span class="pill pill--${st.kind === 'in' && b.stage === 'notStarted' ? 'grey' : STATUS_PILL[st.kind]}">${st.text}</span>${st.sub ? `<span class="ko-estatus-sub">${esc(st.sub)}</span>` : ''}</span>
+        ${admin ? `<span class="ko-eacts">${editable ? `<button type="button" class="btn btn-outline btn-sm" data-replace="${p.id}">Replace</button><button type="button" class="btn btn-outline btn-sm" data-withdraw-player="${p.id}">Withdraw</button>` : ''}</span>` : ''}
+      </div>`;
+  }).join('');
+  return `
+    ${admin ? '<div class="lg-roster-hint"><span class="lg-roster-hint-text">Entrants in seed order. <strong>Replace</strong> or <strong>Withdraw</strong> is available until a player\'s first match is played.</span></div>' : ''}
+    <div class="lg-page ko-entrants${admin ? ' ko-entrants--admin' : ''}" style="gap:0"><div class="lg-std-card">
+      <div class="lg-std-cols"><span>Seed</span><span>Player</span><span class="ko-desk-col">Ladder</span><span>Status</span>${admin ? '<span></span>' : ''}</div>
+      ${rows}
+    </div></div>`;
+}
+
+function _onOption(action, t) {
+  if (action === 'message') {
+    openMessagePlayersModal({
+      recipients: t.players.filter((p) => !p.withdrawn).map((p) => ({ player_email: p.email })),
+      send: (payload) => window.api.messageTournamentPlayers(t.id, payload),
+    });
+  } else if (action === 'invite') {
+    openBulkInviteModal({ what: 'this tournament', send: () => window.api.bulkInviteTournament(t.id) });
+  } else if (action === 'schedule') {
+    startEditSchedule(t);
+  } else if (action === 'delete') {
+    confirmModal({
+      title: 'Delete tournament',
+      body: `Delete <strong>${esc(t.name)}</strong>? Its draw, schedule and results are removed and cannot be brought back.`,
+      confirm: 'Delete tournament',
+      bodyClass: '',
+      onConfirm: async () => {
+        await window.api.deleteTournament(t.id);
+        toast(`${t.name} deleted`);
+        window.navigate('tournaments');
+      },
+    });
+  }
+}
+
+function _openReplace(t, p) {
+  if (!p) return;
+  const inDraw = new Set(t.players.map((x) => x.player_id));
+  const ranks = _ranks();
+  let pick = null;
+  modal.open('Replace player', `
+    <p class="ko-modal-copy">The player you pick takes ${esc(p.name)}'s place as seed ${p.seed}, and their matches.</p>
+    <input class="form-control" id="koReplaceQ" placeholder="Search club members…" autocomplete="off">
+    <div class="ko-pick-list" id="koReplaceList"></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="koReplaceNo">Cancel</button>
+      <button class="btn btn-primary" id="koReplaceYes" disabled>Replace</button>
+    </div>`);
+  const club = (state.players || []).filter((x) => !inDraw.has(x.id))
+    .map((x, k) => ({ ...x, rank: ranks[x.id] ?? null, k }))
+    .sort((a, c) => (a.rank ?? Infinity) - (c.rank ?? Infinity) || a.k - c.k);
+  const paint = () => {
+    const q = document.getElementById('koReplaceQ').value.trim().toLowerCase();
+    document.getElementById('koReplaceList').innerHTML = club.filter((x) => !q || x.name.toLowerCase().includes(q)).slice(0, 8).map((x) => `
+      <button type="button" class="wz-prow${pick === x.id ? ' wz-prow--picked' : ''}" data-pick="${x.id}">
+        ${avatarHTML(x, 'wz-avatar')}<span class="wz-pname">${esc(x.name)}</span><span class="wz-prank">${x.rank ? `#${x.rank}` : ''}</span>
+      </button>`).join('') || '<div class="wz-lempty"><span class="wz-lempty-t">No one matches</span></div>';
+  };
+  paint();
+  document.getElementById('koReplaceQ').addEventListener('input', paint);
+  document.getElementById('koReplaceList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    pick = Number(b.dataset.pick);
+    document.getElementById('koReplaceYes').disabled = false;
+    paint();
+  });
+  document.getElementById('koReplaceNo').addEventListener('click', modal.close);
+  document.getElementById('koReplaceYes').addEventListener('click', async () => {
+    try {
+      await window.api.replaceTournamentPlayer(t.id, { oldPlayerId: p.id, newPlayerId: pick });
+      modal.close();
+      toast(`${club.find((x) => x.id === pick)?.name} replaces ${p.name}`, 'success');
+      await _reload();
+    } catch (e) { toast(e.message || 'Could not replace them.', 'error'); }
+  });
+  if (!state.ladder.length) window.api.getLadder().then((l) => { state.ladder = l; }).catch(() => {});
+}
+
+function _openWithdraw(t, p) {
+  if (!p) return;
+  confirmModal({
+    title: 'Withdraw player',
+    body: `Withdraw ${esc(p.name)} from ${esc(t.name)}? Their next opponent gets a walkover unless you replace them.`,
+    confirm: 'Withdraw',
+    onConfirm: async () => {
+      try {
+        await window.api.withdrawTournamentPlayer(t.id, p.id);
+        toast(`${p.name} withdrawn`, 'success');
+        await _reload();
+      } catch (e) { toast(e.message || 'Could not withdraw them.', 'error'); }
+    },
+  });
+}
+
+// ----- score entry -----
+
+const PRESETS = [{ p1: 3, p2: 0 }, { p1: 3, p2: 1 }, { p1: 3, p2: 2 }, { p1: 0, p2: 3 }, { p1: 1, p2: 3 }, { p1: 2, p2: 3 }];
+
+/**
+ * The best-of-five pick for one match. `m` needs id, p1/p2 names, the current
+ * score if any. Admins can correct or clear any result; a player enters their
+ * own, once.
+ */
+function _scoreModal({ id, p1Name, p2Name, value, onDone }) {
+  const admin = isAdmin();
+  let sel = value || null;
+  const first = (n) => String(n || '').split(' ')[0];
+  const paint = () => {
+    document.getElementById('koPresets').innerHTML = PRESETS.map((pr) => {
+      const on = sel && sel.p1 === pr.p1 && sel.p2 === pr.p2;
       const p1wins = pr.p1 > pr.p2;
-      const scoreDisplay = p1wins ? `${pr.p1}–${pr.p2}` : `${pr.p2}–${pr.p1}`;
-      return `<button class="tr-preset-btn${isSel ? ' tr-preset-btn--selected' : ''}" data-p1="${pr.p1}" data-p2="${pr.p2}">
-        <span class="tr-preset-score">${scoreDisplay}</span>
-        <span class="tr-preset-winner">${p1wins ? esc(p1Name.split(' ')[0]) : esc(p2Name.split(' ')[0])} wins</span>
+      return `<button type="button" class="tr-preset-btn${on ? ' tr-preset-btn--selected' : ''}" data-p1="${pr.p1}" data-p2="${pr.p2}">
+        <span class="tr-preset-score">${p1wins ? `${pr.p1}–${pr.p2}` : `${pr.p2}–${pr.p1}`}</span>
+        <span class="tr-preset-winner">${esc(first(p1wins ? p1Name : p2Name))} wins</span>
       </button>`;
     }).join('');
-
-    const clearBtn = existingSc && isAdmin()
-      ? `<button type="button" class="btn btn-ghost" id="trClearScore">Clear Score</button>` : '';
-
-    modal.open(`Score Entry`, `
-      <div class="tr-score-modal">
-        <div class="tr-score-matchup">
-          <span class="tr-score-p1name">${esc(p1Name)}</span>
-          <span class="tr-score-vs">vs</span>
-          <span class="tr-score-p2name">${esc(p2Name)}</span>
-        </div>
-        <div class="tr-preset-grid">${btnsHTML}</div>
-        <div class="tr-score-actions">
-          ${clearBtn}
-          <button type="button" class="btn btn-ghost" onclick="modal.close()">Cancel</button>
-          <button type="button" class="btn btn-primary" id="trSaveScore" ${selected ? '' : 'disabled'}>Save Score</button>
-        </div>
-      </div>`, { medium: true });
-
-    attachModalListeners();
-  }
-
-  function attachModalListeners() {
-    document.querySelectorAll('.tr-preset-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selected = { p1: Number(btn.dataset.p1), p2: Number(btn.dataset.p2) };
-        document.querySelectorAll('.tr-preset-btn').forEach((b) => b.classList.toggle('tr-preset-btn--selected',
-          Number(b.dataset.p1) === selected.p1 && Number(b.dataset.p2) === selected.p2));
-        document.getElementById('trSaveScore').disabled = false;
-      });
-    });
-
-    document.getElementById('trClearScore')?.addEventListener('click', async () => {
-      if (!confirm('Clear this match score?')) return;
-      await window.api.clearTournamentScore(match.id);
-      toast('Score cleared.', 'success');
+    document.getElementById('koSave').disabled = !sel;
+  };
+  modal.open('Score Entry', `
+    <div class="tr-score-modal">
+      <div class="tr-score-matchup">
+        <span class="tr-score-p1name">${esc(p1Name)}</span>
+        <span class="tr-score-vs">vs</span>
+        <span class="tr-score-p2name">${esc(p2Name)}</span>
+      </div>
+      <div class="tr-preset-grid" id="koPresets"></div>
+      <div class="tr-score-actions">
+        <span class="form-error" id="koScoreErr" style="margin-right:auto"></span>
+        ${admin && value ? '<button type="button" class="btn btn-ghost" id="koClear">Clear Score</button>' : ''}
+        <button type="button" class="btn btn-ghost" id="koCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="koSave" disabled>Save Score</button>
+      </div>
+    </div>`, { medium: true });
+  paint();
+  document.getElementById('koPresets').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-p1]');
+    if (!b) return;
+    sel = { p1: Number(b.dataset.p1), p2: Number(b.dataset.p2) };
+    paint();
+  });
+  document.getElementById('koCancel').addEventListener('click', modal.close);
+  document.getElementById('koClear')?.addEventListener('click', async () => {
+    await window.api.clearTournamentScore(id);
+    modal.close();
+    toast('Score cleared');
+    onDone?.();
+  });
+  document.getElementById('koSave').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      if (admin) await window.api.updateTournamentScore(id, sel);
+      else await window.api.reportTournamentPlayerScore(id, sel);
       modal.close();
-      window.navigate('tournamentDetail', { tournamentId: tournament.id });
-    });
-
-    document.getElementById('trSaveScore').addEventListener('click', async () => {
-      if (!selected) return;
-      try {
-        if (isAdmin()) {
-          const winnerId = selected.p1 > selected.p2 ? match.player1_id : match.player2_id;
-          await window.api.updateTournamentScore(match.id, { scores: selected, winnerId });
-        } else {
-          const myId = state.currentUser?.playerId;
-          const isP1 = match.player1_id === myId;
-          await window.api.reportTournamentPlayerScore(match.id, {
-            myScore:    isP1 ? selected.p1 : selected.p2,
-            theirScore: isP1 ? selected.p2 : selected.p1,
-          });
-        }
-        toast('Score saved!', 'success');
-        modal.close();
-        window.navigate('tournamentDetail', { tournamentId: tournament.id });
-      } catch (e) { toast(e.message || 'Failed to save.', 'error'); }
-    });
-  }
-
-  renderModal();
+      toast('Score saved', 'success');
+      onDone?.();
+    } catch (err) {
+      document.getElementById('koScoreErr').textContent = err.message || 'Could not save.';
+      e.target.disabled = false;
+    }
+  });
 }
 
-// ─── Create Tournament Wizard ──────────────────────────────────────────────────
-
-export async function renderCreateTournament() {
-  document.getElementById('pageTitle').textContent = 'New Tournament';
-  document.getElementById('topbarActions').innerHTML = '';
-  const content = document.getElementById('mainContent');
-
-  const wiz = { step: 1, selectedPlayers: [], groups: { A: [], B: [], C: [], D: [] }, swapTarget: null };
-  const allPlayers = state.players || [];
-
-  function render() {
-    if (wiz.step === 1) renderStep1();
-    else if (wiz.step === 2) renderStep2();
-    else renderStep3();
-  }
-
-  function wizSteps(active) {
-    const steps = ['Select Players', 'Arrange Groups', 'Settings'];
-    return `<div class="wizard-steps">
-      ${steps.map((label, i) => {
-        const n = i + 1;
-        const cls = n < active ? 'done' : n === active ? 'active' : '';
-        const connCls = n < active ? 'done' : '';
-        return `<div class="wizard-step ${cls}">
-          <div class="step-num">${n < active ? '&#10003;' : n}</div>
-          <span class="step-label">${label}</span>
-        </div>${i < steps.length - 1 ? `<div class="step-connector ${connCls}"></div>` : ''}`;
-      }).join('')}
-    </div>`;
-  }
-
-  // ── Step 1: Select 16 players ──────────────────────────────────────────────
-  function renderStep1() {
-    const count = wiz.selectedPlayers.length;
-    content.innerHTML = `<div class="wizard">
-      ${wizSteps(1)}
-      <div class="wizard-card">
-        <h3 style="font-size:16px;font-weight:600;margin-bottom:6px">
-          Select Players
-          <span id="trCount" style="font-size:13px;font-weight:600;margin-left:10px;color:${count===16?'var(--success)':'var(--text-muted)'}">${count}/16</span>
-        </h3>
-        <p class="text-muted" style="font-size:13px;margin-bottom:14px">Select exactly 16 players for the tournament.</p>
-        <input type="text" class="form-control" id="trSearch" placeholder="Search players…" autocomplete="off" style="margin-bottom:8px">
-        <div class="picker-list" id="trPlayerList" style="min-height:200px;max-height:380px"></div>
-        <div id="wError" class="form-error"></div>
-        <div class="wizard-footer">
-          <button class="btn btn-outline" onclick="navigate('tournaments')">Cancel</button>
-          <button class="btn btn-primary" id="trNext1" ${count!==16?'disabled':''}>Next &rarr;</button>
-        </div>
-      </div>
-    </div>`;
-
-    function renderList(filter='') {
-      const lc = filter.toLowerCase();
-      const filtered = allPlayers.filter((p) => !filter || p.name.toLowerCase().includes(lc));
-      const listEl = document.getElementById('trPlayerList');
-      if (!listEl) return;
-      const scrollTop = listEl.scrollTop;
-      listEl.innerHTML = filtered.map((p) => {
-        const sel = wiz.selectedPlayers.includes(p.id);
-        return `<div class="picker-item${sel?' tr-pl-row--sel':''}" data-pid="${p.id}" style="${sel?'background:#eef2ff':''}">
-          <div class="tr-pl-check" style="width:18px;flex-shrink:0;color:var(--primary)">${sel?'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>':''}</div>
-          <span style="flex:1">${esc(p.name)}</span>
-        </div>`;
-      }).join('') || `<div class="empty-state"><strong>No players found</strong></div>`;
-      listEl.scrollTop = scrollTop;
-    }
-
-    function updateCountUI() {
-      const c = wiz.selectedPlayers.length;
-      const countEl = document.getElementById('trCount');
-      if (countEl) { countEl.textContent = `${c}/16`; countEl.style.color = c === 16 ? 'var(--success)' : 'var(--text-muted)'; }
-      const nextBtn = document.getElementById('trNext1');
-      if (nextBtn) nextBtn.disabled = c !== 16;
-    }
-
-    renderList();
-    document.getElementById('trSearch').addEventListener('input', (e) => renderList(e.target.value));
-    document.getElementById('trPlayerList').addEventListener('click', (e) => {
-      const row = e.target.closest('[data-pid]');
-      if (!row) return;
-      const pid = Number(row.dataset.pid);
-      const idx = wiz.selectedPlayers.indexOf(pid);
-      if (idx >= 0) wiz.selectedPlayers.splice(idx, 1);
-      else if (wiz.selectedPlayers.length < 16) wiz.selectedPlayers.push(pid);
-      renderList(document.getElementById('trSearch')?.value || '');
-      updateCountUI();
-    });
-    document.getElementById('trNext1').addEventListener('click', async () => {
-      wiz.groups = await window.api.suggestTournamentGroups({ playerIds: wiz.selectedPlayers });
-      wiz.step = 2; render();
-    });
-  }
-
-  // ── Step 2: Arrange groups ──────────────────────────────────────────────────
-  function renderStep2() {
-    function gCard(gName) {
-      return `<div class="tr-group-card">
-        <div class="tr-group-header"><span class="tr-group-name">Group ${gName}</span></div>
-        <div class="tr-swap-list">
-          ${(wiz.groups[gName]||[]).map((pid) => {
-            const p = allPlayers.find((pl) => pl.id === pid) || { id: pid, name: 'Unknown' };
-            const isSel = wiz.swapTarget?.pid === pid;
-            return `<div class="tr-swap-row${isSel?' tr-swap-row--sel':''}" data-pid="${pid}" data-grp="${gName}">
-              ${isSel?'<span class="tr-swap-sel-dot"></span>':''}${esc(p.name)}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }
-
-    content.innerHTML = `<div class="wizard">
-      ${wizSteps(2)}
-      <div class="wizard-card">
-        <h3 style="font-size:16px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:12px">
-          Arrange Groups
-          <button class="btn btn-outline btn-sm" id="trReset" style="font-size:12px">↺ Reset</button>
-        </h3>
-        <p class="text-muted" style="font-size:13px;margin-bottom:18px">Tap a player to select, then tap another to swap positions. Auto-balanced by ladder ranking.</p>
-        <div class="tr-wiz-groups">${['A','B','C','D'].map(gCard).join('')}</div>
-        <div class="wizard-footer">
-          <button class="btn btn-outline" id="trBack2">&larr; Back</button>
-          <button class="btn btn-primary" id="trNext2">Next &rarr;</button>
-        </div>
-      </div>
-    </div>`;
-
-    document.getElementById('trReset').addEventListener('click', async () => {
-      wiz.groups = await window.api.suggestTournamentGroups({ playerIds: wiz.selectedPlayers });
-      wiz.swapTarget = null; renderStep2();
-    });
-    document.getElementById('trBack2').addEventListener('click', () => { wiz.step = 1; render(); });
-    document.getElementById('trNext2').addEventListener('click', () => { wiz.step = 3; render(); });
-    content.querySelectorAll('.tr-swap-row').forEach((el) => {
-      el.addEventListener('click', () => {
-        const pid = Number(el.dataset.pid), grp = el.dataset.grp;
-        if (!wiz.swapTarget) { wiz.swapTarget = { pid, grp }; renderStep2(); } else if (wiz.swapTarget.pid === pid) { wiz.swapTarget = null; renderStep2(); } else {
-          const a = wiz.swapTarget, b = { pid, grp };
-          const ai = wiz.groups[a.grp].indexOf(a.pid), bi = wiz.groups[b.grp].indexOf(b.pid);
-          wiz.groups[a.grp][ai] = b.pid; wiz.groups[b.grp][bi] = a.pid;
-          wiz.swapTarget = null; renderStep2();
-        }
-      });
-    });
-  }
-
-  // ── Step 3: Settings ────────────────────────────────────────────────────────
-  function renderStep3() {
-    const today = new Date();
-    const nextSun = new Date(today);
-    nextSun.setDate(today.getDate() + ((7 - today.getDay()) % 7 || 7));
-    const defaultDate = nextSun.toISOString().slice(0, 10);
-
-    content.innerHTML = `<div class="wizard">
-      ${wizSteps(3)}
-      <div class="wizard-card">
-        <h3 style="font-size:16px;font-weight:600;margin-bottom:20px">Tournament Settings</h3>
-        <div class="form-group">
-          <label>Tournament Name</label>
-          <input type="text" class="form-control" id="trName" value="Tournament ${new Date().getFullYear()}">
-        </div>
-        <div class="form-group">
-          <label>Championship Day <span class="form-hint">(Sunday &middot; Semis &amp; Final)</span></label>
-          <input type="date" class="form-control" id="trChampDate" value="${defaultDate}">
-          <div id="trConflictWarn" class="tr-conflict-warn" style="display:none"></div>
-        </div>
-        <div class="form-group">
-          <label>Courts</label>
-          <div class="tr-court-checks" id="trCourtList">Loading…</div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Match Duration <span class="form-hint">(minutes)</span></label>
-            <input type="number" class="form-control" id="trDuration" value="60" min="15" max="180">
-          </div>
-          <div class="form-group">
-            <label>Buffer Between Matches <span class="form-hint">(minutes)</span></label>
-            <input type="number" class="form-control" id="trBuffer" value="0" min="0" max="60">
-          </div>
-        </div>
-        <div id="trError" class="form-error"></div>
-        <div class="wizard-footer">
-          <button class="btn btn-outline" id="trBack3">&larr; Back</button>
-          <button class="btn btn-primary" id="trCreate">Create Tournament</button>
-        </div>
-      </div>
-    </div>`;
-
-    document.getElementById('trBack3').addEventListener('click', () => { wiz.step = 2; render(); });
-
-    (async () => {
-      const courts = (await window.api.getCourts()).filter((c) => c.active);
-      document.getElementById('trCourtList').innerHTML = courts.length
-        ? courts.map((c) => `<label class="tr-court-label"><input type="checkbox" value="${c.id}" checked> ${esc(c.name)}</label>`).join('')
-        : `<span class="form-hint">No active courts configured.</span>`;
-    })();
-
-    let conflictTimer = null;
-    async function checkConflicts() {
-      const champDate = document.getElementById('trChampDate')?.value;
-      const courtIds = [...document.querySelectorAll('#trCourtList input:checked')].map((el) => Number(el.value));
-      const duration = Number(document.getElementById('trDuration')?.value) || 60;
-      const buffer = Number(document.getElementById('trBuffer')?.value) || 0;
-      if (!champDate || !courtIds.length) return;
-      try {
-        const { conflicts } = await window.api.checkTournamentDate({ championshipDate: champDate, courtIds, matchDurationMinutes: duration, bufferMinutes: buffer });
-        const warn = document.getElementById('trConflictWarn');
-        if (!warn) return;
-        if (conflicts.length) {
-          warn.textContent = `League conflict on ${conflicts.map((d) => _trFmtShort(d)).join(', ')}. Choose a different week.`;
-          warn.style.display = '';
-          document.getElementById('trCreate').disabled = true;
-        } else {
-          warn.style.display = 'none';
-          document.getElementById('trCreate').disabled = false;
-        }
-      } catch (_) {}
-    }
-
-    function scheduleCheck() { clearTimeout(conflictTimer); conflictTimer = setTimeout(checkConflicts, 400); }
-    document.getElementById('trChampDate').addEventListener('change', scheduleCheck);
-    document.getElementById('trDuration').addEventListener('input', scheduleCheck);
-    document.getElementById('trBuffer').addEventListener('input', scheduleCheck);
-    document.getElementById('trCourtList').addEventListener('change', scheduleCheck);
-
-    document.getElementById('trCreate').addEventListener('click', async () => {
-      const name = document.getElementById('trName').value.trim();
-      const championshipDate = document.getElementById('trChampDate').value;
-      const courtIds = [...document.querySelectorAll('#trCourtList input:checked')].map((el) => Number(el.value));
-      const matchDurationMinutes = Number(document.getElementById('trDuration').value) || 60;
-      const bufferMinutes = Number(document.getElementById('trBuffer').value) || 0;
-      const errEl = document.getElementById('trError');
-      if (!name) { errEl.textContent = 'Tournament name is required.'; return; }
-      if (!championshipDate) { errEl.textContent = 'Championship date is required.'; return; }
-      if (!courtIds.length) { errEl.textContent = 'Select at least one court.'; return; }
-      errEl.textContent = '';
-      const btn = document.getElementById('trCreate');
-      btn.disabled = true; btn.textContent = 'Creating…';
-      try {
-        const { tournamentId } = await window.api.createTournament({ name, groups: wiz.groups, championshipDate, courtIds, matchDurationMinutes, bufferMinutes });
-        toast(`"${name}" created!`, 'success');
-        window.navigate('tournamentDetail', { tournamentId });
-      } catch (e) {
-        if (e.message?.includes('League match')) {
-          const warn = document.getElementById('trConflictWarn');
-          if (warn) { warn.textContent = e.message; warn.style.display = ''; }
-        } else {
-          errEl.textContent = e.message || 'Failed to create tournament.';
-        }
-        btn.disabled = false; btn.textContent = 'Create Tournament';
-      }
-    });
-  }
-
-  render();
+export function openScoreModal(m) {
+  _scoreModal({ id: m.id, p1Name: m.p1?.name, p2Name: m.p2?.name, value: m.score, onDone: _reload });
 }
+
+/**
+ * From the match card's "Submit score": the match may be on the bracket being
+ * shown, or anywhere else in the app (the dashboard, a profile).
+ */
+window.openTournamentScore = async (matchId) => {
+  const m = _b && state.page === 'tournamentDetail' ? _b.rounds.flat().find((x) => x.id === Number(matchId)) : null;
+  if (m) { openScoreModal(m); return; }
+  const card = await window.api.getMatchCard(matchId);
+  if (!card) return;
+  _scoreModal({
+    id: card.id,
+    p1Name: card.players[0]?.name,
+    p2Name: card.players[1]?.name,
+    value: null,
+    onDone: () => { if (state.page === 'tournamentDetail') _reload(); },
+  });
+};

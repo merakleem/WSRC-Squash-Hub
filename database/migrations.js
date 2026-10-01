@@ -520,6 +520,57 @@ const MIGRATIONS = [
       )`);
     },
   },
+  {
+    id: 31, name: 'retire the groups tournament format',
+    // Tournaments become single-elimination knockouts (migration 32). The old
+    // format - sixteen players in four groups, then a fixed eight-player
+    // bracket - has no place in that model, so its tournaments go, and with
+    // them (by cascade) their matches, players, groups and courts. An event
+    // that linked to one keeps itself and loses the link (ON DELETE SET NULL).
+    up: (db) => {
+      db.prepare(`DELETE FROM tournaments WHERE type = 'groups_16'`).run();
+      db.prepare(`DELETE FROM matches WHERE type = 'tournament' AND tournament_id NOT IN (SELECT id FROM tournaments)`).run();
+    },
+  },
+  {
+    id: 32, name: 'knockout tournaments',
+    // A tournament is announced (status 'upcoming'), members sign up, and the
+    // admin builds the draw, which makes it 'active' and then 'completed' when
+    // the final is played. The same row throughout, as with leagues, so the
+    // signups stay attached to the tournament people joined.
+    //
+    // championship_date keeps meaning "the day it all ends": the tentative
+    // first-round date while announced, the final's date once built.
+    up: (db, h) => {
+      h.addColumn('tournaments', 'draw_cap', `INTEGER NOT NULL DEFAULT 16`);  // 8 or 16, set when announced
+      h.addColumn('tournaments', 'draw_size', `INTEGER`);                     // 8 or 16, set when built
+      h.addColumn('tournaments', 'seeding', `TEXT NOT NULL DEFAULT 'ladder'`); // ladder | manual
+      h.addColumn('tournaments', 'description', `TEXT NOT NULL DEFAULT ''`);
+      h.addColumn('tournaments', 'first_round_date', `TEXT`);
+      h.addColumn('tournaments', 'signup_deadline', `TEXT`);                  // null = no deadline
+      // Ladder rank when the draw was seeded, so "#12 at seeding" never moves.
+      h.addColumn('tournament_players', 'ladder_rank', `INTEGER`);
+      // Withdrawn after the draw was built: they keep their line in the draw,
+      // and whoever meets them next gets a walkover.
+      h.addColumn('tournament_players', 'withdrawn', `INTEGER NOT NULL DEFAULT 0`);
+      h.createTable(`CREATE TABLE tournament_signups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tournament_id, player_id)
+      )`);
+      h.createIndex(`CREATE INDEX IF NOT EXISTS idx_tournament_signups_tournament ON tournament_signups (tournament_id)`);
+      // One date and start time per round; round_index 0 is the first round.
+      h.createTable(`CREATE TABLE tournament_rounds (
+        tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+        round_index INTEGER NOT NULL,
+        round_date TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        PRIMARY KEY (tournament_id, round_index)
+      )`);
+    },
+  },
 ];
 
 /**
