@@ -11,3 +11,12 @@ squash.db*
 test/*.mjs
 !test/*.harness.mjs
 !test/run-browser.mjs
+
+# Claude Design sync (design-system/ and .design-sync/ are committed; these are
+# the staged toolchain, build output and machine state).
+design-system/dist/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

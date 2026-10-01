@@ -1,0 +1,89 @@
+{
+  "projectId": "367014bc-0b53-4d0e-bbc2-fdcfbf93ced2",
+  "shape": "package",
+  "pkg": "playwsrc-ui",
+  "globalName": "PlayWSRC",
+  "buildCmd": "cd design-system && npm ci && npm run build",
+  "cssEntry": "dist/playwsrc.css",
+  "extraFonts": [
+    "fonts/fonts.css"
+  ],
+  "docsMap": {
+    "Button": "docs/groups/actions.md",
+    "Icon": "docs/groups/actions.md",
+    "Pill": "docs/groups/status.md",
+    "Chip": "docs/groups/status.md",
+    "StatusBadge": "docs/groups/status.md",
+    "SectionLabel": "docs/groups/status.md",
+    "AppShell": "docs/groups/navigation.md",
+    "Tabs": "docs/groups/navigation.md",
+    "WizardSteps": "docs/groups/navigation.md",
+    "FormField": "docs/groups/forms.md",
+    "Input": "docs/groups/forms.md",
+    "Select": "docs/groups/forms.md",
+    "Textarea": "docs/groups/forms.md",
+    "Checkbox": "docs/groups/forms.md",
+    "FormActions": "docs/groups/forms.md",
+    "SearchInput": "docs/groups/forms.md",
+    "TableCard": "docs/groups/layout.md",
+    "EmptyState": "docs/groups/layout.md",
+    "LeagueCard": "docs/groups/layout.md",
+    "Modal": "docs/groups/overlays.md",
+    "Toast": "docs/groups/overlays.md",
+    "Avatar": "docs/groups/matches.md",
+    "MatchCard": "docs/groups/matches.md",
+    "GroupCard": "docs/groups/tournaments.md",
+    "BracketMatch": "docs/groups/tournaments.md",
+    "Bracket": "docs/groups/tournaments.md",
+    "ScorePicker": "docs/groups/tournaments.md"
+  },
+  "overrides": {
+    "AppShell": {
+      "cardMode": "single",
+      "viewport": "1280x760"
+    },
+    "Modal": {
+      "cardMode": "column"
+    },
+    "MatchCard": {
+      "cardMode": "column"
+    },
+    "Bracket": {
+      "cardMode": "column"
+    },
+    "TableCard": {
+      "cardMode": "column"
+    },
+    "Icon": {
+      "cardMode": "column"
+    },
+    "FormActions": {
+      "cardMode": "column"
+    },
+    "FormField": {
+      "cardMode": "column"
+    },
+    "Textarea": {
+      "cardMode": "column"
+    },
+    "EmptyState": {
+      "cardMode": "column"
+    },
+    "LeagueCard": {
+      "cardMode": "column"
+    },
+    "Tabs": {
+      "cardMode": "column"
+    },
+    "WizardSteps": {
+      "cardMode": "column"
+    },
+    "GroupCard": {
+      "cardMode": "column"
+    },
+    "ScorePicker": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

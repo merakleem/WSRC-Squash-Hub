@@ -1,0 +1,6 @@
+/* ===== DESIGN CANVAS =====
+   The app locks the body to the viewport (height: 100dvh; overflow: hidden)
+   because its pages scroll inside .content. A design is a plain page that has
+   to scroll, so the body is released here. <AppShell> still fills the
+   viewport and scrolls its own .content, exactly as the app does. */
+body { height: auto; min-height: 100vh; overflow: auto; }
