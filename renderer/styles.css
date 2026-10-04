@@ -34,6 +34,11 @@
   --text-muted:    #6b7e93;
   --sidebar-w:     240px;
   --topbar-h:      60px;
+  /* The page is drawn edge to edge (viewport-fit=cover), so on an iPhone run
+     from the Home Screen the status bar and Dynamic Island sit over its top.
+     Anything at the very top of the screen starts below this; it is 0 on
+     every screen without a notch or a translucent status bar. */
+  --safe-top:      env(safe-area-inset-top, 0px);
   --page-pad:      24px;
   --radius:        8px;
   --radius-lg:     12px;
@@ -107,6 +112,13 @@ h1, h2, h3, h4, h5, h6,
   flex-direction: column;
   flex-shrink: 0;
   position: relative; /* the account popover is positioned inside it */
+}
+/* In the flow on a wide screen, so it starts at the very top: clear of the
+   status bar (an iPad from the Home Screen). The phone drawer's own headers
+   pad for it instead, and the view-as bar does when it is showing. */
+@media (min-width: 769px) {
+  .sidebar { padding-top: var(--safe-top); }
+  body.is-viewing-as .sidebar { padding-top: 0; }
 }
 
 /* ── Wordmark ── */
@@ -316,7 +328,7 @@ h1, h2, h3, h4, h5, h6,
 .hamburger-btn {
   display: none;
   position: fixed;
-  top: calc((var(--topbar-h) - 36px) / 2);
+  top: calc(var(--safe-top) + (var(--topbar-h) - 36px) / 2);
   right: 12px;
   width: 36px;
   height: 36px;
@@ -355,7 +367,9 @@ h1, h2, h3, h4, h5, h6,
 
 /* ===== TOPBAR ===== */
 .topbar {
-  height: var(--topbar-h);
+  /* Taller by the status bar, which sits over the padding. */
+  height: calc(var(--topbar-h) + var(--safe-top));
+  padding-top: var(--safe-top);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -3932,7 +3946,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
      gain an Admin pill. The top padding clears the status bar and topbar. */
   .sidebar-logo,
   .sb-drawer-profile {
-    padding: calc(env(safe-area-inset-top) + 46px) 18px 18px;
+    padding: calc(var(--safe-top) + 46px) 18px 18px;
     border-bottom: 1px solid rgba(255,255,255,.08);
   }
   .sidebar.sb-role-player .sidebar-logo { display: none; }
@@ -4013,7 +4027,7 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   .main-wrapper { width: 100%; }
 
   .topbar {
-    padding: 0 68px 0 16px;
+    padding: var(--safe-top) 68px 0 16px;
   }
   .topbar-title { font-size: 16px; }
   .topbar-actions { gap: 6px; }
@@ -9031,6 +9045,10 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
   font-weight: 500;
 }
 .viewas-bar[hidden] { display: none; }
+/* At the top of the screen, so the bar takes the status bar's space and the
+   top bar below it no longer needs to. */
+.viewas-bar { height: calc(38px + var(--safe-top)); padding-top: var(--safe-top); }
+body.is-viewing-as .topbar { height: var(--topbar-h); padding-top: 0; }
 .viewas-text strong { font-weight: 700; }
 .viewas-btn {
   padding: 5px 12px;
@@ -9048,19 +9066,19 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 /* Padding on a border-box body rather than a margin on the container: body is
    a fixed 100dvh, so a margin pushed 38px of layout past the bottom of it and
    left a strip of page showing under the app. */
-body.is-viewing-as { box-sizing: border-box; padding-top: 38px; }
+body.is-viewing-as { box-sizing: border-box; padding-top: calc(38px + var(--safe-top)); }
 body.is-viewing-as .app-container { height: 100%; }
 /* Anything fixed to the top of the viewport sits outside the flow that padding
    moved, so it has to be told about the bar by hand. On a phone that is the
    hamburger, which otherwise sat inside the bar and could not be tapped. */
-body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 2); }
+body.is-viewing-as .hamburger-btn { top: calc(38px + var(--safe-top) + (var(--topbar-h) - 36px) / 2); }
 
 @media (max-width: 768px) {
   .viewas-bar { font-size: 12px; gap: 10px; }
   .viewas-btn { padding: 5px 10px; font-size: 12px; }
   /* The drawer is fixed here too, and starts below the bar for the same reason.
      On a wider screen the sidebar is in the flow and needs no offset. */
-  body.is-viewing-as .sidebar { top: 38px; }
+  body.is-viewing-as .sidebar { top: calc(38px + var(--safe-top)); }
 }
 
 /* ===== ADMIN SCHEDULE — chrome and grid, matched to the player page =====
@@ -11397,7 +11415,7 @@ body.is-viewing-as .hamburger-btn { top: calc(38px + (var(--topbar-h) - 36px) / 
   .pl-confirm-card { width: auto; max-width: calc(100% - 32px); }
   .pl-confirm-btns { flex-wrap: wrap; }
   .pl-confirm-btns .btn { flex: 1 1 140px; justify-content: center; }
-  .pl-toasts { position: fixed; z-index: 440; max-width: calc(100% - 32px); top: calc(12px + env(safe-area-inset-top)); }
+  .pl-toasts { position: fixed; z-index: 440; max-width: calc(100% - 32px); top: calc(12px + var(--safe-top)); }
 
   /* The ✕ leads, then the name: space-between would push the title to the far
      edge, under the hamburger. */

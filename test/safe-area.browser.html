@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<style>
+#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}
+iframe{position:absolute;left:-9999px;border:0}
+</style>
+</head>
+<body>
+<pre id="log"></pre>
+<script type="module">
+// The page is drawn edge to edge (viewport-fit=cover), so on an iPhone run from
+// the Home Screen the status bar and Dynamic Island cover the top 59px. The
+// hamburger used to sit there, where iOS takes the taps, and the menu could
+// not be opened. A test page cannot fake the device's safe-area insets, so it
+// sets --safe-top - the one value they feed - and checks everything at the top
+// of the screen moves clear of it.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+const INSET = 59; // iPhone 16, portrait
+
+async function boot(role, width, height) {
+  const f = document.createElement('iframe');
+  f.src = `sidebar-boot.html?role=${role}`;
+  f.style.width = `${width}px`;
+  f.style.height = `${height}px`;
+  document.body.appendChild(f);
+  for (let i = 0; i < 300; i++) {
+    if (f.contentDocument?.title === 'ready') break;
+    await settle(50);
+  }
+  if (f.contentDocument?.title !== 'ready') throw new Error(`${role} frame never booted`);
+  const d = f.contentDocument;
+  const box = (sel) => d.querySelector(sel).getBoundingClientRect();
+  const inset = (px) => { d.documentElement.style.setProperty('--safe-top', `${px}px`); return settle(); };
+  return { d, box, inset };
+}
+
+try {
+  log.textContent += 'A PHONE WITH NO NOTCH\n';
+  const plain = await boot('member', 393, 852);
+  ok('the hamburger is where it always was', Math.round(plain.box('#hamburgerBtn').top) === 10, plain.box('#hamburgerBtn').top);
+  ok('and the top bar is its usual height', Math.round(plain.box('.topbar').height) === 56, plain.box('.topbar').height);
+
+  log.textContent += '\nAN IPHONE 16 FROM THE HOME SCREEN\n';
+  await plain.inset(INSET);
+  const h = plain.box('#hamburgerBtn');
+  ok('the hamburger clears the status bar', h.top >= INSET, h.top);
+  ok('and is centred in the top bar below it', Math.round(h.top) === INSET + 10, h.top);
+  ok('the page title clears it too', plain.box('#pageTitle').top >= INSET, plain.box('#pageTitle').top);
+  ok('the top bar grows by the inset, so its row is unchanged', Math.round(plain.box('.topbar').height) === 56 + INSET, plain.box('.topbar').height);
+  plain.d.getElementById('hamburgerBtn').click();
+  await settle(60);
+  ok('a tap on it opens the menu', plain.d.querySelector('.sidebar').classList.contains('mobile-open'));
+  const drawerHead = plain.box('.sb-drawer-profile');
+  ok('and the drawer header clears the status bar', drawerHead.top + parseFloat(getComputedStyle(plain.d.querySelector('.sb-drawer-profile')).paddingTop) >= INSET);
+
+  log.textContent += '\nAN ADMIN VIEWING AS A MEMBER\n';
+  plain.d.getElementById('hamburgerBtn').click();
+  plain.d.body.classList.add('is-viewing-as');
+  plain.d.getElementById('viewAsBar').hidden = false;
+  await settle(60);
+  ok('the view-as bar takes the status bar space', plain.d.querySelector('.viewas-text').getBoundingClientRect().top >= INSET);
+  ok('the top bar sits straight under it, at its usual height', Math.round(plain.box('.topbar').top) === 38 + INSET && Math.round(plain.box('.topbar').height) === 56,
+    `${plain.box('.topbar').top} ${plain.box('.topbar').height}`);
+  ok('and the hamburger is centred in that top bar', Math.round(plain.box('#hamburgerBtn').top) === 38 + INSET + 10, plain.box('#hamburgerBtn').top);
+
+  log.textContent += '\nA WIDE SCREEN (AN IPAD FROM THE HOME SCREEN)\n';
+  const wide = await boot('member', 1180, 820);
+  await wide.inset(24);
+  ok('the top bar clears the status bar', wide.box('#pageTitle').top >= 24, wide.box('#pageTitle').top);
+  ok('so does the sidebar wordmark', wide.box('.sb-wordmark').top >= 24, wide.box('.sb-wordmark').top);
+} catch (e) {
+  ok(`no exception: ${e.message}`, false, e.stack);
+}
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>
