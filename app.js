@@ -68,6 +68,7 @@ function createApp() {
 
   // Auth pages + mobile token endpoint
   app.use(require('./routes/auth'));
+  app.use(require('./routes/staffAuth'));
 
   // ===== HEALTH =====
   // Unauthenticated, and what Railway polls before it sends traffic to a new
@@ -155,7 +156,12 @@ function createApp() {
     // Which tabs have something the member has not seen, and the stamp each
     // list will mark its cards against. Empty for an admin: they posted them.
     const { unread, opened } = require('./lib/unread').unreadFor(req.session);
-    res.json({ role: req.session.role, playerId: req.session.playerId || null, csrf: req.session.csrf || null, is_tester, is_member, name, photo_path, viewing_as, unread, opened, club_timezone: require('./lib/clock').getClubTimezone() });
+    // A staff member: their name and what they may do. The admin account may do
+    // everything, and only it manages staff.
+    if (req.session.role === 'staff') name = req.session.staff.name;
+    const permissions = req.session.role === 'admin' ? require('./lib/staff').PERMISSION_KEYS
+      : req.session.role === 'staff' ? req.session.staff.permissions : [];
+    res.json({ role: req.session.role, playerId: req.session.playerId || null, staffId: req.session.staffId || null, csrf: req.session.csrf || null, is_tester, is_member, name, photo_path, viewing_as, unread, opened, permissions, club_timezone: require('./lib/clock').getClubTimezone() });
   });
 
   // The member opened Leagues or Events. Answers with the stamp this visit
@@ -169,6 +175,7 @@ function createApp() {
 
   // ===== API ROUTES =====
   app.use('/api', require('./routes/me'));
+  app.use('/api', require('./routes/staff'));
   app.use('/api', require('./routes/players'));
   app.use('/api', require('./routes/leagues'));
   app.use('/api', require('./routes/matches'));

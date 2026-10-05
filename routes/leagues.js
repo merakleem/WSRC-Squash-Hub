@@ -4,7 +4,8 @@ const { getDB } = require('../database/db');
 const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
 const { getValidConfigurations } = require('../utils/helpers');
-const { wrap, requireAdmin, emailLimiter } = require('../middleware');
+const { wrap, emailLimiter, requirePerm, hasPerm } = require('../middleware');
+const { audit } = require('../lib/audit');
 const { isConfigured: emailConfigured } = require('../lib/email');
 const { clubToday } = require('../lib/clock');
 const { signupState: _signupState } = require('../lib/signups');
@@ -135,7 +136,7 @@ router.get('/leagues/:id', wrap(async (req, res) => {
 
   // An announcement has no weeks to send; it has a roster. Member numbers and
   // ratings are the admin's to see, as everywhere else.
-  const isAdminUser = req.session?.role === 'admin';
+  const isAdminUser = hasPerm(req.session, 'leagues');
   const rows = leagueModel.getSignups(id);
   const signups = rows.map((r) => ({
     player_id: r.player_id,
@@ -186,7 +187,7 @@ function readAnnouncement(body) {
   };
 }
 
-router.post('/leagues/upcoming', requireAdmin, wrap(async (req, res) => {
+router.post('/leagues/upcoming', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const fields = readAnnouncement(req.body || {});
   const bad = checkAnnouncement(fields);
   if (bad) return res.status(400).json({ error: bad });
@@ -195,7 +196,7 @@ router.post('/leagues/upcoming', requireAdmin, wrap(async (req, res) => {
   res.json({ id });
 }));
 
-router.put('/leagues/:id/announcement', requireAdmin, wrap(async (req, res) => {
+router.put('/leagues/:id/announcement', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const id = Number(req.params.id);
   const league = leagueModel.getLeagueById(id);
   if (!league) return res.status(404).json({ error: 'League not found' });
@@ -238,7 +239,7 @@ router.delete('/leagues/:id/signup', wrap(async (req, res) => {
 }));
 
 /** The admin adding someone by hand. The cap does not apply to them. */
-router.post('/leagues/:id/signups', requireAdmin, wrap(async (req, res) => {
+router.post('/leagues/:id/signups', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const id = Number(req.params.id);
   const playerId = Number(req.body?.playerId);
   const league = leagueModel.getLeagueById(id);
@@ -249,12 +250,12 @@ router.post('/leagues/:id/signups', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true, ...signupState(league, count, clubToday()) });
 }));
 
-router.delete('/leagues/:id/signups/:playerId', requireAdmin, wrap(async (req, res) => {
+router.delete('/leagues/:id/signups/:playerId', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   leagueModel.removeSignup(Number(req.params.id), Number(req.params.playerId));
   res.json({ ok: true });
 }));
 
-router.post('/leagues', requireAdmin, wrap(async (req, res) => {
+router.post('/leagues', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   // `leagueId` means "build this announcement", which fills the row in rather
   // than inserting. Only ever an upcoming one: pointed at a running league it
   // would overwrite a live schedule.
@@ -266,12 +267,12 @@ router.post('/leagues', requireAdmin, wrap(async (req, res) => {
   res.json(leagueId);
 }));
 
-router.delete('/leagues/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/leagues/:id', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   await leagueModel.deleteLeague(Number(req.params.id));
   res.json({ ok: true });
 }));
 
-router.put('/leagues/:id/end', requireAdmin, wrap(async (req, res) => {
+router.put('/leagues/:id/end', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const id = Number(req.params.id);
   const db = getDB();
   const league = db.prepare('SELECT id, status FROM leagues WHERE id = ?').get(id);
@@ -292,21 +293,21 @@ router.put('/leagues/:id/end', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true, matchesSkipped: skipped.changes });
 }));
 
-router.post('/leagues/:id/replace-player', requireAdmin, wrap(async (req, res) => {
+router.post('/leagues/:id/replace-player', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const { oldPlayerId, newPlayerId } = req.body;
   if (!oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'oldPlayerId and newPlayerId are required' });
   await leagueModel.replacePlayerInLeague(Number(req.params.id), Number(oldPlayerId), Number(newPlayerId));
   res.json({ ok: true });
 }));
 
-router.post('/leagues/:id/replace-pair-player', requireAdmin, wrap(async (req, res) => {
+router.post('/leagues/:id/replace-pair-player', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const { pairId, oldPlayerId, newPlayerId } = req.body;
   if (!pairId || !oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'pairId, oldPlayerId and newPlayerId are required' });
   leagueModel.replacePairPlayer(Number(req.params.id), Number(pairId), Number(oldPlayerId), Number(newPlayerId));
   res.json({ ok: true });
 }));
 
-router.put('/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) => {
+router.put('/leagues/:id/sub-remaining', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const { originalPlayerId, subPlayerId } = req.body;
   const count = await leagueModel.setSubForRemaining(Number(req.params.id), originalPlayerId, subPlayerId);
   res.json({ ok: true, count });
@@ -314,7 +315,7 @@ router.put('/leagues/:id/sub-remaining', requireAdmin, wrap(async (req, res) => 
 
 router.sanitizeMessageHtml = sanitizeMessageHtml;
 
-router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
+router.post('/leagues/:id/message', requirePerm('message'), audit('message'), wrap(async (req, res) => {
   const { subject, body, bodyHtml, attachments } = req.body;
   if (!subject || !(bodyHtml || body)) return res.status(400).json({ error: 'Subject and body are required' });
 
@@ -331,7 +332,7 @@ router.post('/leagues/:id/message', requireAdmin, wrap(async (req, res) => {
   res.json({ sent, failed });
 }));
 
-router.post('/leagues/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
+router.post('/leagues/:id/bulk-invite', requirePerm('message'), audit('message'), emailLimiter, wrap(async (req, res) => {
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
   const players = await leagueModel.getLeaguePlayers(Number(req.params.id));

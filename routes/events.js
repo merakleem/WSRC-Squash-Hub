@@ -1,7 +1,8 @@
 const express = require('express');
 const notify = require('../lib/notify');
 const eventModel = require('../models/eventModel');
-const { wrap, requireAdmin, requireAuth } = require('../middleware');
+const { wrap, requireAuth, requirePerm, isClubSide } = require('../middleware');
+const { audit } = require('../lib/audit');
 const { clubToday } = require('../lib/clock');
 
 const router = express.Router();
@@ -10,15 +11,15 @@ const router = express.Router();
 // and a three-face preview all come from the model in one place.
 router.get('/events', requireAuth, wrap(async (req, res) => {
   const scope = req.query.scope === 'past' ? 'past' : 'upcoming';
-  res.json(eventModel.listEvents({ scope, today: clubToday(), viewerId: req.session.playerId, isAdmin: req.session.role === 'admin' }));
+  res.json(eventModel.listEvents({ scope, today: clubToday(), viewerId: req.session.playerId, isAdmin: isClubSide(req.session) }));
 }));
 
 // The linkables search sits above /events/:id so "linkables" is never read as an id.
-router.get('/events/linkables', requireAdmin, wrap(async (req, res) => {
+router.get('/events/linkables', requirePerm('events'), wrap(async (req, res) => {
   res.json(eventModel.searchLinkables(req.query.q || ''));
 }));
 
-router.get('/events/:id/export.csv', requireAdmin, wrap(async (req, res) => {
+router.get('/events/:id/export.csv', requirePerm('events'), wrap(async (req, res) => {
   const { event, rows } = eventModel.exportRows(Number(req.params.id));
   const csvField = (v) => {
     const s = v == null ? '' : String(v);
@@ -37,23 +38,23 @@ router.get('/events/:id/export.csv', requireAdmin, wrap(async (req, res) => {
 router.get('/events/:id', requireAuth, wrap(async (req, res) => {
   const event = eventModel.getEvent(Number(req.params.id), {
     viewerId: req.session.playerId,
-    isAdmin: req.session.role === 'admin',
+    isAdmin: isClubSide(req.session),
   });
   if (!event) return res.status(404).json({ error: 'Event not found.' });
   res.json(event);
 }));
 
-router.post('/events', requireAdmin, wrap(async (req, res) => {
+router.post('/events', requirePerm('events'), audit('events'), wrap(async (req, res) => {
   const event = eventModel.createEvent(req.body || {});
   await notify.eventPosted(req, event);
   res.json(event);
 }));
 
-router.put('/events/:id', requireAdmin, wrap(async (req, res) => {
+router.put('/events/:id', requirePerm('events'), audit('events'), wrap(async (req, res) => {
   res.json(eventModel.updateEvent(Number(req.params.id), req.body || {}));
 }));
 
-router.delete('/events/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/events/:id', requirePerm('events'), audit('events'), wrap(async (req, res) => {
   eventModel.deleteEvent(Number(req.params.id));
   res.json({ ok: true });
 }));
@@ -79,7 +80,7 @@ router.delete('/events/:id/signup', requireAuth, wrap(async (req, res) => {
 // The admin adds a member. Mirrors POST /leagues/:id/signups, and leans on the
 // same model write the member's own signup uses, so the cap and the
 // members-only rule cannot drift apart between the two ways onto a list.
-router.post('/events/:id/signups', requireAdmin, wrap(async (req, res) => {
+router.post('/events/:id/signups', requirePerm('events'), audit('events'), wrap(async (req, res) => {
   const playerId = Number(req.body?.playerId);
   if (!Number.isInteger(playerId)) return res.status(400).json({ error: 'A player is required.' });
   try {
@@ -93,7 +94,7 @@ router.post('/events/:id/signups', requireAdmin, wrap(async (req, res) => {
   }
 }));
 
-router.delete('/events/:id/signups/:playerId', requireAdmin, wrap(async (req, res) => {
+router.delete('/events/:id/signups/:playerId', requirePerm('events'), audit('events'), wrap(async (req, res) => {
   eventModel.removeAttendee(Number(req.params.id), Number(req.params.playerId));
   res.json({ ok: true });
 }));

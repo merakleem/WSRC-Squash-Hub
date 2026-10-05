@@ -1,7 +1,8 @@
 const express = require('express');
 const seasonModel = require('../models/seasonModel');
 const seasons = require('../lib/seasons');
-const { wrap, requireAdmin } = require('../middleware');
+const { wrap, requirePerm } = require('../middleware');
+const { audit } = require('../lib/audit');
 
 const router = express.Router();
 
@@ -26,7 +27,7 @@ router.get('/seasons/settings', wrap(async (req, res) => {
   });
 }));
 
-router.put('/seasons/settings', requireAdmin, wrap(async (req, res) => {
+router.put('/seasons/settings', requirePerm('ladder'), audit('ladder'), wrap(async (req, res) => {
   const { season_start_md } = req.body || {};
 
   if (season_start_md !== undefined) {

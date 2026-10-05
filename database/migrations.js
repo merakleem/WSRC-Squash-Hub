@@ -594,6 +594,69 @@ const MIGRATIONS = [
       )`);
     },
   },
+  {
+    id: 34, name: 'staff accounts and the activity log',
+    // Staff accounts sit beside the admin login (blank email and the club
+    // password), which is unchanged. Each staff member has their own email
+    // and password, a set of permissions and, if the admin account requires
+    // it, an authenticator app. They are not players and never appear as one.
+    //
+    // Link tokens are stored as SHA-256 hashes and backup codes as bcrypt
+    // hashes, so a copy of the database cannot be used to sign in.
+    // session_version is in every staff session cookie: raising it signs
+    // that person out everywhere (disable, password change, "sign out of all
+    // devices").
+    //
+    // The activity log records what the admin account and staff change.
+    // staff_id is null for the admin account. The text is written at the time,
+    // so it still reads right after the things it names are renamed or gone.
+    up: (db, h) => {
+      h.createTable(`CREATE TABLE staff_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT,
+        status TEXT NOT NULL DEFAULT 'invited' CHECK (status IN ('invited', 'active', 'disabled')),
+        permissions TEXT NOT NULL DEFAULT '[]',
+        require_two_step INTEGER NOT NULL DEFAULT 0,
+        totp_secret TEXT,
+        totp_enabled_at TEXT,
+        totp_last_step INTEGER,
+        two_step_failures INTEGER NOT NULL DEFAULT 0,
+        two_step_locked_until TEXT,
+        invite_token_hash TEXT,
+        invite_expires TEXT,
+        invited_at TEXT,
+        reset_token_hash TEXT,
+        reset_expires TEXT,
+        session_version INTEGER NOT NULL DEFAULT 0,
+        password_changed_at TEXT,
+        last_signed_in_at TEXT,
+        disabled_at TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      h.createTable(`CREATE TABLE staff_backup_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        staff_id INTEGER NOT NULL REFERENCES staff_accounts(id) ON DELETE CASCADE,
+        code_hash TEXT NOT NULL,
+        used_at TEXT
+      )`);
+      h.createTable(`CREATE TABLE staff_email_changes (
+        staff_id INTEGER PRIMARY KEY REFERENCES staff_accounts(id) ON DELETE CASCADE,
+        new_email TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL
+      )`);
+      h.createTable(`CREATE TABLE activity_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        staff_id INTEGER REFERENCES staff_accounts(id),
+        area TEXT NOT NULL,
+        text TEXT NOT NULL
+      )`);
+      h.createIndex('CREATE INDEX idx_activity_log_at ON activity_log (at)');
+    },
+  },
 ];
 
 /**

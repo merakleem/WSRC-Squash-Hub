@@ -1,7 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
-const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
+const { wrap, requireAuth, emailLimiter, requirePerm, hasPerm } = require('../middleware');
+const { audit } = require('../lib/audit');
 const { sendEmail, isConfigured: emailConfigured, appUrl, inviteEmail } = require('../lib/email');
 const { sendPasswordReset } = require('../lib/passwordReset');
 const playerService = require('../services/playerService');
@@ -36,7 +37,7 @@ function _stripContact(player) {
 
 router.get('/players', wrap(async (req, res) => {
   const players = await playerService.getAllPlayers();
-  const isAdmin = req.session?.role === 'admin';
+  const isAdmin = hasPerm(req.session, 'players');
   // Testers are listed like anyone else: the flag marks who gets features early,
   // it does not make a person private. What non-admins still never receive is
   // the flag itself, alongside contact details and membership - see _stripContact.
@@ -44,7 +45,7 @@ router.get('/players', wrap(async (req, res) => {
 }));
 
 // /records and /verified-count must be registered before /:id to avoid Express matching them as an id
-router.get('/players/verified-count', requireAdmin, wrap(async (req, res) => {
+router.get('/players/verified-count', requirePerm('players'), wrap(async (req, res) => {
   const db = getDB();
   const row = db.prepare('SELECT COUNT(*) AS count FROM user_accounts WHERE password_hash IS NOT NULL').get();
   res.json({ count: row.count });
@@ -130,7 +131,7 @@ router.get('/players/:id/history', wrap(async (req, res) => {
     });
   }
 
-  const isAdmin = req.session?.role === 'admin';
+  const isAdmin = hasPerm(req.session, 'players');
   const playerData = isAdmin ? player : _stripContact(player);
   // Seasons ship with the profile so the tab bar can be built without a second
   // round trip; per-season records are derived client-side from history rows,
@@ -202,26 +203,26 @@ router.get('/players/:id/doubles', wrap(async (req, res) => {
   });
 }));
 
-router.post('/players', requireAdmin, wrap(async (req, res) => {
+router.post('/players', requirePerm('players'), audit('players'), wrap(async (req, res) => {
   const player = await playerService.addPlayer(req.body);
   res.json(player);
 }));
 
-router.put('/players/:id', requireAdmin, wrap(async (req, res) => {
+router.put('/players/:id', requirePerm('players'), audit('players'), wrap(async (req, res) => {
   const player = await playerService.updatePlayer({ ...req.body, id: Number(req.params.id) });
   res.json(player);
 }));
 
 // Bulk field patch from the players page (flags and rating only). Admin-only —
 // membership is both an access switch (court booking) and private information.
-router.post('/players/bulk', requireAdmin, wrap(async (req, res) => {
+router.post('/players/bulk', requirePerm('players'), audit('players'), wrap(async (req, res) => {
   const { ids, patch } = req.body;
   const changed = await playerService.patchPlayers(ids, patch || {});
   res.json({ changed });
 }));
 
 // Kept as an alias of /players/bulk for older clients.
-router.post('/players/membership', requireAdmin, wrap(async (req, res) => {
+router.post('/players/membership', requirePerm('players'), audit('players'), wrap(async (req, res) => {
   const { ids, is_member } = req.body;
   const changed = await playerService.setMembership(ids, !!is_member);
   res.json({ changed });
@@ -229,7 +230,7 @@ router.post('/players/membership', requireAdmin, wrap(async (req, res) => {
 
 // Bulk invites: every selected player who has an email and no working
 // password gets a fresh invite. The rest are counted, not failed.
-router.post('/players/send-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
+router.post('/players/send-invite', requirePerm('players'), audit('players'), emailLimiter, wrap(async (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'Select at least one player' });
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
@@ -257,12 +258,12 @@ router.post('/players/send-invite', requireAdmin, emailLimiter, wrap(async (req,
   res.json({ sent, skipped, failed });
 }));
 
-router.delete('/players/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/players/:id', requirePerm('players'), audit('players'), wrap(async (req, res) => {
   await playerService.deletePlayer(Number(req.params.id));
   res.json({ ok: true });
 }));
 
-router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
+router.post('/players/:id/send-invite', requirePerm('players'), audit('players'), emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
@@ -290,7 +291,7 @@ router.post('/players/:id/send-invite', requireAdmin, emailLimiter, wrap(async (
   res.json({ ok: true, emailSent: false, inviteUrl });
 }));
 
-router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (req, res) => {
+router.post('/players/:id/send-reset', requirePerm('players'), audit('players'), emailLimiter, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
@@ -347,10 +348,10 @@ router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, 
 // ===== PROFILE PHOTOS =====
 // A player may set their own photo; an admin may set anyone's.
 function _canEditPhoto(req, playerId) {
-  return req.session?.role === 'admin' || req.session?.playerId === playerId;
+  return hasPerm(req.session, 'players') || req.session?.playerId === playerId;
 }
 
-router.put('/players/:id/photo', requireAuth, wrap(async (req, res) => {
+router.put('/players/:id/photo', audit('players'), requireAuth, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   if (!_canEditPhoto(req, playerId)) return res.status(403).json({ error: 'You can only change your own photo.' });
 
@@ -375,7 +376,7 @@ router.put('/players/:id/photo', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true, photo_path: updated.photo_path });
 }));
 
-router.delete('/players/:id/photo', requireAuth, wrap(async (req, res) => {
+router.delete('/players/:id/photo', audit('players'), requireAuth, wrap(async (req, res) => {
   const playerId = Number(req.params.id);
   if (!_canEditPhoto(req, playerId)) return res.status(403).json({ error: 'You can only change your own photo.' });
 

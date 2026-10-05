@@ -4,11 +4,12 @@ const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
 const matchModel = require('../models/matchModel');
 const seasonModel = require('../models/seasonModel');
-const { wrap, requireAdmin, requireAuth } = require('../middleware');
+const { wrap, requireAuth, requirePerm, hasPerm } = require('../middleware');
+const { audit } = require('../lib/audit');
 
 const router = express.Router();
 
-router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
+router.put('/matches/:id/timing', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const matchId = Number(req.params.id);
   const { matchTime, courtNumber, courtId } = req.body;
   const db = getDB();
@@ -62,7 +63,7 @@ router.put('/matches/:id/timing', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true, warning });
 }));
 
-router.put('/matches/:id/score', requireAdmin, wrap(async (req, res) => {
+router.put('/matches/:id/score', requirePerm('scores'), audit('scores'), wrap(async (req, res) => {
   await leagueModel.updateMatchScore({ matchId: Number(req.params.id), submittedByPlayerId: null, ...req.body });
   res.json({ ok: true });
 }));
@@ -148,10 +149,10 @@ router.get('/my-matches/reportable', requireAuth, wrap(async (req, res) => {
   res.json(matchModel.getReportableMatches(req.session.playerId));
 }));
 
-router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
+router.post('/matches/pickup', requireAuth, audit('scores'), wrap(async (req, res) => {
   const db = getDB();
   const submitterId = req.session.playerId;
-  const isAdminUser = req.session.role === 'admin';
+  const isAdminUser = hasPerm(req.session, 'scores');
 
   let { player1Id, player2Id, player1Score, player2Score, playedOn } = req.body;
   player1Id    = Number(player1Id);
@@ -218,7 +219,7 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-router.delete('/matches/pickup/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/matches/pickup/:id', requirePerm('scores'), audit('scores'), wrap(async (req, res) => {
   getDB().prepare(`DELETE FROM matches WHERE id = ? AND type = 'ladder'`).run(Number(req.params.id));
   res.json({ ok: true });
 }));
@@ -242,9 +243,9 @@ function _playedAtFrom(playedOn) {
 // A doubles ladder match: two pairs, best of five. Anyone signed in may record
 // one they played in; an admin may record any. It lands in the same table as
 // every other match, marked doubles, and moves all four doubles ratings.
-router.post('/matches/doubles', requireAuth, wrap(async (req, res) => {
+router.post('/matches/doubles', requireAuth, audit('scores'), wrap(async (req, res) => {
   const submitterId = req.session.playerId;
-  const isAdminUser = req.session.role === 'admin';
+  const isAdminUser = hasPerm(req.session, 'scores');
   const { team1, team2, playedOn } = req.body;
   const team1Score = Number(req.body.team1Score);
   const team2Score = Number(req.body.team2Score);
@@ -290,23 +291,23 @@ router.post('/matches/doubles', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true, id: Number(result.lastInsertRowid) });
 }));
 
-router.delete('/matches/doubles/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/matches/doubles/:id', requirePerm('scores'), audit('scores'), wrap(async (req, res) => {
   getDB().prepare(`DELETE FROM matches WHERE id = ? AND type = 'ladder' AND format = 'doubles'`).run(Number(req.params.id));
   res.json({ ok: true });
 }));
 
-router.put('/matches/:id/unskip', requireAdmin, wrap(async (req, res) => {
+router.put('/matches/:id/unskip', requirePerm('scores'), audit('scores'), wrap(async (req, res) => {
   await leagueModel.unskipMatch(Number(req.params.id));
   res.json({ ok: true });
 }));
 
-router.put('/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
+router.put('/matches/:id/sub', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const { originalPlayerId, subPlayerId } = req.body;
   await leagueModel.setMatchSub(Number(req.params.id), originalPlayerId, subPlayerId);
   res.json({ ok: true });
 }));
 
-router.delete('/matches/:id/sub', requireAdmin, wrap(async (req, res) => {
+router.delete('/matches/:id/sub', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
   const { originalPlayerId } = req.body;
   await leagueModel.removeMatchSub(Number(req.params.id), originalPlayerId);
   res.json({ ok: true });

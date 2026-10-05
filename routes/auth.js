@@ -26,7 +26,7 @@ function serverEsc(str) {
 // above a Sign in button is noise — the other pages keep theirs, since
 // "Activate your account" is the only thing naming the task). Everything
 // dropped visually stays in the accessibility tree.
-function authPage({ title, heading, sub, body, error, info, link, variant }) {
+function authPage({ title, heading, sub, body, error, info, link, variant, top = '', after = '' }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -184,6 +184,38 @@ function authPage({ title, heading, sub, body, error, info, link, variant }) {
       .is-login .panel-head,
       .is-login .field > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
     }
+    /* Staff sign-in additions (design_handoff_staff_accounts) */
+    .sa-steps { display: flex; align-items: center; gap: 8px; }
+    .sa-step { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; line-height: 1; color: rgba(255,255,255,.5); white-space: nowrap; }
+    .sa-step-n { flex: 0 0 20px; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.35); display: inline-flex; align-items: center; justify-content: center; font-family: 'Barlow', sans-serif; font-size: 11px; font-weight: 700; line-height: 1; padding: 0; }
+    .sa-step--on { color: #fff; }
+    .sa-step--on .sa-step-n { background: #fff; box-shadow: none; color: #1e2758; }
+    .sa-step--done .sa-step-n { background: rgba(255,255,255,.2); box-shadow: none; color: #fff; font-size: 10px; }
+    .sa-step-line { flex: 1; height: 1px; background: rgba(255,255,255,.2); min-width: 12px; }
+    input[type=text].sa-code { font-family: 'Barlow', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: .4em; text-align: center; height: 56px; }
+    input[type=text].sa-code::placeholder { letter-spacing: .4em; font-weight: 600; }
+    input[type=text].sa-code--backup { letter-spacing: .15em; font-size: 22px; }
+    .sa-qr-row { display: flex; gap: 18px; align-items: center; }
+    .sa-qr { width: 132px; height: 132px; flex-shrink: 0; border-radius: 12px; background: #fff; padding: 8px; display: flex; align-items: center; justify-content: center; }
+    .sa-qr img { width: 100%; height: 100%; display: block; }
+    .sa-key-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .sa-key-label { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.7); }
+    .sa-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; letter-spacing: .06em; color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 8px 10px; word-break: break-all; line-height: 1.5; }
+    button.sa-key-copy { align-self: flex-start; height: auto; margin: 0; font-size: 12.5px; font-weight: 600; color: #fff; background: none; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-family: inherit; }
+    button.sa-key-copy:hover { background: rgba(255,255,255,.1); }
+    .sa-backup { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; padding: 14px 16px; border-radius: 12px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; letter-spacing: .08em; color: #fff; }
+    .sa-backup-actions { display: flex; gap: 10px; }
+    .sa-backup-actions .sa-key-copy { flex: 1; text-align: center; height: 40px; }
+    .sa-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13.5px; color: #fff; cursor: pointer; line-height: 1.4; }
+    .sa-check input { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; accent-color: #fff; }
+    .sa-apps { font-size: 12.5px; color: rgba(255,255,255,.65); line-height: 1.5; }
+    .sa-apps a { color: #fff; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    @media (max-width: 899px) {
+      .sa-qr-row { flex-direction: column; align-items: stretch; }
+      .sa-qr { align-self: center; }
+      input[type=text].sa-code { height: 56px; font-size: 26px; }
+    }
   </style>
 </head>
 <body${variant === 'login' ? ' class="is-login"' : ''}>
@@ -196,6 +228,7 @@ function authPage({ title, heading, sub, body, error, info, link, variant }) {
       <p class="blurb">Court booking, leagues, ladder, and events for WSRC members.</p>
     </div>
     <div class="panel">
+      ${top}
       <div class="panel-head">
         <h1>${heading || title}</h1>
         ${sub ? `<p class="panel-sub">${sub}</p>` : ''}
@@ -204,6 +237,7 @@ function authPage({ title, heading, sub, body, error, info, link, variant }) {
       ${body}
       ${error ? `<div class="error">${error}</div>` : ''}
       ${link ? `<a class="foot-link" href="${link.href}">${link.text}</a>` : ''}
+      ${after}
     </div>
   </div>
   <script>
@@ -303,6 +337,9 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
   const db = getDB();
   const player = db.prepare('SELECT * FROM players WHERE LOWER(email) = LOWER(?)').get([email.trim()]);
   if (!player) {
+    // Not a player: perhaps a staff member, who signs in on the same form.
+    const staffRow = require('../lib/staff').getByEmail(email);
+    if (staffRow) return require('./staffAuth').passwordSignIn(req, res, staffRow, password);
     return res.status(401).send(loginPage({ error: 'Invalid email or password.' }));
   }
   const account = db.prepare('SELECT * FROM user_accounts WHERE player_id = ?').get(player.id);
@@ -453,3 +490,7 @@ router.get('/forgot-password', (req, res) => {
 
 
 module.exports = router;
+module.exports.authPage = authPage;
+module.exports.messagePage = messagePage;
+module.exports.loginPage = loginPage;
+module.exports.serverEsc = serverEsc;

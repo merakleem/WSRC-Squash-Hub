@@ -3,7 +3,8 @@ const notify = require('../lib/notify');
 const tournamentModel = require('../models/tournamentModel');
 const bookingModel = require('../models/bookingModel');
 const { getLadderForSeason } = require('../models/ladderModel');
-const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
+const { wrap, requireAuth, emailLimiter, requirePerm, hasPerm } = require('../middleware');
+const { audit } = require('../lib/audit');
 const { isConfigured: emailConfigured } = require('../lib/email');
 const { clubToday } = require('../lib/clock');
 const { signupState, ISO_DATE } = require('../lib/signups');
@@ -106,7 +107,7 @@ router.get('/tournaments', wrap(async (req, res) => {
 router.get('/tournaments/:id', wrap(async (req, res) => {
   const t = tournamentModel.getTournament(req.params.id);
   if (!t) return res.status(404).json({ error: 'Tournament not found.' });
-  const isAdminUser = req.session?.role === 'admin';
+  const isAdminUser = hasPerm(req.session, 'tournaments');
   const viewerId = req.session?.playerId ?? null;
   const strip = (p) => {
     const { email, member_number: num, ...rest } = p;
@@ -152,7 +153,7 @@ function checkAnnouncement(f) {
   return '';
 }
 
-router.post('/tournaments/upcoming', requireAdmin, wrap(async (req, res) => {
+router.post('/tournaments/upcoming', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   const f = readAnnouncement(req.body || {});
   const bad = checkAnnouncement(f);
   if (bad) return res.status(400).json({ error: bad });
@@ -161,7 +162,7 @@ router.post('/tournaments/upcoming', requireAdmin, wrap(async (req, res) => {
   res.json({ id });
 }));
 
-router.put('/tournaments/:id/announcement', requireAdmin, wrap(async (req, res) => {
+router.put('/tournaments/:id/announcement', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   const t = tournamentModel.getTournamentRow(req.params.id);
   if (!t) return res.status(404).json({ error: 'Tournament not found.' });
   if (t.status !== 'upcoming') return res.status(400).json({ error: 'This tournament has already been built.' });
@@ -198,7 +199,7 @@ router.delete('/tournaments/:id/signup', wrap(async (req, res) => {
 }));
 
 /** The admin adding someone by hand. A draw has no room past its cap. */
-router.post('/tournaments/:id/signups', requireAdmin, wrap(async (req, res) => {
+router.post('/tournaments/:id/signups', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   const t = tournamentModel.getTournamentRow(req.params.id);
   if (!t || t.status !== 'upcoming') return res.status(404).json({ error: 'Tournament not found.' });
   const playerId = Number(req.body?.playerId);
@@ -208,7 +209,7 @@ router.post('/tournaments/:id/signups', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true, ...signupsOf(t, tournamentModel.getSignups(t.id).length) });
 }));
 
-router.delete('/tournaments/:id/signups/:playerId', requireAdmin, wrap(async (req, res) => {
+router.delete('/tournaments/:id/signups/:playerId', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   tournamentModel.removeSignup(Number(req.params.id), Number(req.params.playerId));
   res.json({ ok: true });
 }));
@@ -225,7 +226,7 @@ function readRounds(rounds) {
  * a match on one of its courts. A tournament being rescheduled is not in its
  * own way.
  */
-router.post('/tournaments/check-schedule', requireAdmin, wrap(async (req, res) => {
+router.post('/tournaments/check-schedule', requirePerm('tournaments'), wrap(async (req, res) => {
   const rounds = readRounds(req.body?.rounds);
   const counts = Array.isArray(req.body?.counts) ? req.body.counts.map(Number) : [];
   const courtIds = (req.body?.courtIds || []).map(Number);
@@ -266,7 +267,7 @@ router.post('/tournaments/check-schedule', requireAdmin, wrap(async (req, res) =
 }));
 
 /** Build the draw - a new tournament, or (with tournamentId) an announced one. */
-router.post('/tournaments', requireAdmin, wrap(async (req, res) => {
+router.post('/tournaments', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   const body = req.body || {};
   const fields = {
     tournamentId: body.tournamentId ? Number(body.tournamentId) : null,
@@ -291,7 +292,7 @@ router.post('/tournaments', requireAdmin, wrap(async (req, res) => {
   } catch (err) { return errorStatus(res, err); }
 }));
 
-router.put('/tournaments/:id/schedule', requireAdmin, wrap(async (req, res) => {
+router.put('/tournaments/:id/schedule', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   try {
     res.json(tournamentModel.updateSchedule(Number(req.params.id), {
       rounds: readRounds(req.body?.rounds),
@@ -302,14 +303,14 @@ router.put('/tournaments/:id/schedule', requireAdmin, wrap(async (req, res) => {
   } catch (err) { return errorStatus(res, err); }
 }));
 
-router.delete('/tournaments/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/tournaments/:id', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   tournamentModel.deleteTournament(req.params.id);
   res.json({ ok: true });
 }));
 
 // ===== THE DRAW'S PLAYERS =====
 
-router.post('/tournaments/:id/replace', requireAdmin, wrap(async (req, res) => {
+router.post('/tournaments/:id/replace', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   const oldId = Number(req.body?.oldPlayerId);
   const newId = Number(req.body?.newPlayerId);
   if (!oldId || !newId) return res.status(400).json({ error: 'Pick the player to bring in.' });
@@ -319,7 +320,7 @@ router.post('/tournaments/:id/replace', requireAdmin, wrap(async (req, res) => {
   } catch (err) { return errorStatus(res, err); }
 }));
 
-router.post('/tournaments/:id/withdraw', requireAdmin, wrap(async (req, res) => {
+router.post('/tournaments/:id/withdraw', requirePerm('tournaments'), audit('tournaments'), wrap(async (req, res) => {
   const playerId = Number(req.body?.playerId);
   if (!playerId) return res.status(400).json({ error: 'A player is required.' });
   try {
@@ -336,7 +337,7 @@ function recipientsOf(t) {
   return t.players.filter((p) => !p.withdrawn).map((p) => ({ player_id: p.player_id, player_name: p.name, player_email: p.email }));
 }
 
-router.post('/tournaments/:id/message', requireAdmin, wrap(async (req, res) => {
+router.post('/tournaments/:id/message', requirePerm('message'), audit('message'), wrap(async (req, res) => {
   const { subject, body, bodyHtml, attachments } = req.body || {};
   if (!subject || !(bodyHtml || body)) return res.status(400).json({ error: 'Subject and body are required' });
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
@@ -345,7 +346,7 @@ router.post('/tournaments/:id/message', requireAdmin, wrap(async (req, res) => {
   res.json(await messagePlayers(recipientsOf(t), { subject, body, bodyHtml, attachments }));
 }));
 
-router.post('/tournaments/:id/bulk-invite', requireAdmin, emailLimiter, wrap(async (req, res) => {
+router.post('/tournaments/:id/bulk-invite', requirePerm('message'), audit('message'), emailLimiter, wrap(async (req, res) => {
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
   const t = tournamentModel.getTournament(req.params.id);
   if (!t) return res.status(404).json({ error: 'Tournament not found.' });
@@ -355,7 +356,7 @@ router.post('/tournaments/:id/bulk-invite', requireAdmin, emailLimiter, wrap(asy
 // ===== RESULTS =====
 
 /** The admin entering or correcting any result. */
-router.put('/tournament-matches/:id/score', requireAdmin, wrap(async (req, res) => {
+router.put('/tournament-matches/:id/score', requirePerm('scores'), audit('scores'), wrap(async (req, res) => {
   const p1 = Number(req.body?.p1);
   const p2 = Number(req.body?.p2);
   try {
@@ -389,7 +390,7 @@ router.put('/tournament-matches/:id/player-score', requireAuth, wrap(async (req,
   } catch (err) { return errorStatus(res, err); }
 }));
 
-router.delete('/tournament-matches/:id/score', requireAdmin, wrap(async (req, res) => {
+router.delete('/tournament-matches/:id/score', requirePerm('scores'), audit('scores'), wrap(async (req, res) => {
   tournamentModel.clearScore(Number(req.params.id));
   res.json({ ok: true });
 }));
