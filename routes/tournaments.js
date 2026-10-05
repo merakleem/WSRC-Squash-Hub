@@ -1,4 +1,5 @@
 const express = require('express');
+const notify = require('../lib/notify');
 const tournamentModel = require('../models/tournamentModel');
 const bookingModel = require('../models/bookingModel');
 const { getLadderForSeason } = require('../models/ladderModel');
@@ -155,7 +156,9 @@ router.post('/tournaments/upcoming', requireAdmin, wrap(async (req, res) => {
   const f = readAnnouncement(req.body || {});
   const bad = checkAnnouncement(f);
   if (bad) return res.status(400).json({ error: bad });
-  res.json({ id: tournamentModel.createAnnouncement(f) });
+  const id = tournamentModel.createAnnouncement(f);
+  await notify.tournamentAnnounced(req, f);
+  res.json({ id });
 }));
 
 router.put('/tournaments/:id/announcement', requireAdmin, wrap(async (req, res) => {
@@ -377,7 +380,12 @@ router.put('/tournament-matches/:id/player-score', requireAuth, wrap(async (req,
   const p1 = mine != null ? (isP1 ? mine : theirs) : Number(req.body?.p1);
   const p2 = mine != null ? (isP1 ? theirs : mine) : Number(req.body?.p2);
   try {
-    res.json(tournamentModel.recordScore(m.id, { p1, p2 }, { submittedBy: playerId }));
+    const result = tournamentModel.recordScore(m.id, { p1, p2 }, { submittedBy: playerId });
+    await notify.scoreReported(req, {
+      reporterId: playerId, reporterSide: [playerId], otherSide: [isP1 ? m.player2_id : m.player1_id],
+      reporterGames: isP1 ? p1 : p2, otherGames: isP1 ? p2 : p1,
+    });
+    res.json(result);
   } catch (err) { return errorStatus(res, err); }
 }));
 

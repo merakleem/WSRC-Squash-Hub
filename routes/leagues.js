@@ -1,4 +1,5 @@
 const express = require('express');
+const notify = require('../lib/notify');
 const { getDB } = require('../database/db');
 const leagueService = require('../services/leagueService');
 const leagueModel = require('../models/leagueModel');
@@ -190,6 +191,7 @@ router.post('/leagues/upcoming', requireAdmin, wrap(async (req, res) => {
   const bad = checkAnnouncement(fields);
   if (bad) return res.status(400).json({ error: bad });
   const id = leagueModel.createAnnouncement(fields);
+  await notify.leagueAnnounced(req, fields);
   res.json({ id });
 }));
 

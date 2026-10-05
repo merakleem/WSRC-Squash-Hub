@@ -1,4 +1,5 @@
 const express = require('express');
+const notify = require('../lib/notify');
 const eventModel = require('../models/eventModel');
 const { wrap, requireAdmin, requireAuth } = require('../middleware');
 const { clubToday } = require('../lib/clock');
@@ -43,7 +44,9 @@ router.get('/events/:id', requireAuth, wrap(async (req, res) => {
 }));
 
 router.post('/events', requireAdmin, wrap(async (req, res) => {
-  res.json(eventModel.createEvent(req.body || {}));
+  const event = eventModel.createEvent(req.body || {});
+  await notify.eventPosted(req, event);
+  res.json(event);
 }));
 
 router.put('/events/:id', requireAdmin, wrap(async (req, res) => {

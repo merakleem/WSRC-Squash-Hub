@@ -1,4 +1,5 @@
 const express = require('express');
+const notify = require('../lib/notify');
 const { getDB } = require('../database/db');
 const leagueModel = require('../models/leagueModel');
 const matchModel = require('../models/matchModel');
@@ -123,6 +124,10 @@ router.put('/matches/:id/player-score', requireAuth, wrap(async (req, res) => {
   // has to guess which of the two conventions this row followed.
   const winnerId = p1Score > p2Score ? effP1 : effP2;
   await leagueModel.updateMatchScore({ matchId, player1Score: p1Score, player2Score: p2Score, winnerId, submittedByPlayerId: playerId });
+  await notify.scoreReported(req, {
+    reporterId: playerId, reporterSide: isP1 ? side1 : side2, otherSide: isP1 ? side2 : side1,
+    reporterGames: isP1 ? p1Score : p2Score, otherGames: isP1 ? p2Score : p1Score,
+  });
   res.json({ ok: true });
 }));
 
@@ -201,6 +206,15 @@ router.post('/matches/pickup', requireAuth, wrap(async (req, res) => {
      VALUES ('ladder', 'played', ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`,
   ).run(player1Id, player2Id, player1Score, player2Score, winnerId, submitterId, playedAt);
 
+  // A member reporting their own match tells the other player; an admin
+  // entering one is the club's record, not a report.
+  if (!isAdminUser) {
+    const isP1 = submitterId === player1Id;
+    await notify.scoreReported(req, {
+      reporterId: submitterId, reporterSide: [submitterId], otherSide: [isP1 ? player2Id : player1Id],
+      reporterGames: isP1 ? player1Score : player2Score, otherGames: isP1 ? player2Score : player1Score,
+    });
+  }
   res.json({ ok: true });
 }));
 
@@ -264,6 +278,14 @@ router.post('/matches/doubles', requireAuth, wrap(async (req, res) => {
                           player1_score, player2_score, winner_id, submitted_by_player_id, played_at, confirmed_at)
      VALUES ('ladder', 'played', 'doubles', ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`,
   ).run(a, b, c, d, team1Score, team2Score, winnerId, submitterId, when.playedAt);
+
+  if (!isAdminUser) {
+    const onTeam1 = submitterId === a || submitterId === b;
+    await notify.scoreReported(req, {
+      reporterId: submitterId, reporterSide: onTeam1 ? [a, b] : [c, d], otherSide: onTeam1 ? [c, d] : [a, b],
+      reporterGames: onTeam1 ? team1Score : team2Score, otherGames: onTeam1 ? team2Score : team1Score,
+    });
+  }
 
   res.json({ ok: true, id: Number(result.lastInsertRowid) });
 }));
