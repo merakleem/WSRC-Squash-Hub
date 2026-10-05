@@ -3,7 +3,7 @@
 // tournaments and the doubles tab. Split from players.js (the list page),
 // which keeps the admin entry points this page reuses.
 
-import { state, isAdmin } from '../state.js';
+import { state, isAdmin, can } from '../state.js';
 import { esc, formatShortDate, toast, avatarHTML, formatShortDateWeekday } from '../utils.js';
 import { openEditPlayerModal, confirmDeletePlayer, openMessagePlayerModal, showAuthLinkModal } from './players.js';
 import { openPhotoModal } from './playerPhoto.js';
@@ -55,7 +55,7 @@ export function renderPlayerProfile() {
   }
   if (Array.isArray(p.history)) _profileRefetchedFor = null;
 
-  const adminMode = isAdmin();
+  const adminMode = can('players');
   document.getElementById('pageTitle').textContent = p.name;
   const acctStatus = p.accountStatus || 'none'; // 'verified' | 'pending' | 'none'
   const hasEmail = !!p.email;

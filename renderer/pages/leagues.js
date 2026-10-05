@@ -1,4 +1,4 @@
-import { state, isAdmin } from '../state.js';
+import { state, isAdmin, can } from '../state.js';
 import { esc, formatShortDate, toast, modal, playDayNamesLong, playDatesFor, formatWeekRange, DAY_LONG } from '../utils.js';
 import { startCreateLeague } from './createLeague.js';
 import { isNew, visitPainted } from '../unread.js';
@@ -15,7 +15,7 @@ let _filter = 'all';
 let _format = 'all';
 
 export async function renderLeagues() {
-  document.getElementById('topbarActions').innerHTML = isAdmin() ? `
+  document.getElementById('topbarActions').innerHTML = can('leagues') ? `
     <button class="btn btn-primary" id="btnCreateLeague">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
       <span class="lgl-new-long">New League</span><span class="lgl-new-short">New</span>
@@ -43,7 +43,7 @@ export async function renderLeagues() {
       <div class="table-card">
         <div class="empty-state">
           <strong>No leagues yet</strong>
-          <p>${isAdmin() ? 'Create your first league to get started.' : 'No leagues have been created yet.'}</p>
+          <p>${can('leagues') ? 'Create your first league to get started.' : 'No leagues have been created yet.'}</p>
         </div>
       </div>`;
   } else {
@@ -56,7 +56,7 @@ export async function renderLeagues() {
     _wireCards();
   }
 
-  if (isAdmin()) {
+  if (can('leagues')) {
     document.getElementById('btnCreateLeague')?.addEventListener('click', openNewLeagueChoice);
   }
 
@@ -297,7 +297,7 @@ const _newCls = (league) => (isNew('leagues', league.created_at) ? ' um-new' : '
 const _newDot = (league) => (isNew('leagues', league.created_at) ? '<span class="um-mark" role="img" aria-label="New"></span>' : '');
 
 function _upcomingCardHTML(league) {
-  const admin = isAdmin();
+  const admin = can('leagues');
   const n = league.signup_count || 0;
   const cap = league.signup_cap ?? null;
   const weekday = _weekdayName(league.start_date);

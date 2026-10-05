@@ -41,6 +41,8 @@ export function progressHTML({ label, dates, segs }) {
  * wireOptionsMenu calls `onAction(action, button)` for the one picked.
  */
 export function optionsMenuHTML(items, { label = 'Options' } = {}) {
+  // With nothing the person may use, there is no Options button at all.
+  if (!items.some(Boolean)) return '';
   return `
     <div class="options-menu" id="optionsMenu">
       <button class="btn btn-outline" id="optionsBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="optionsDropdown">Options <svg width="14" height="14" viewBox="0 0 4 14" fill="currentColor" style="vertical-align:middle;margin-left:2px"><circle cx="2" cy="2" r="1.5"/><circle cx="2" cy="7" r="1.5"/><circle cx="2" cy="12" r="1.5"/></svg></button>

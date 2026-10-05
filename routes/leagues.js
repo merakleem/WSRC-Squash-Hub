@@ -332,7 +332,7 @@ router.post('/leagues/:id/message', requirePerm('message'), audit('message'), wr
   res.json({ sent, failed });
 }));
 
-router.post('/leagues/:id/bulk-invite', requirePerm('message'), audit('message'), emailLimiter, wrap(async (req, res) => {
+router.post('/leagues/:id/bulk-invite', requirePerm('message'), requirePerm('players'), audit('message'), emailLimiter, wrap(async (req, res) => {
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
 
   const players = await leagueModel.getLeaguePlayers(Number(req.params.id));

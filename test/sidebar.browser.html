@@ -55,7 +55,7 @@ ok('sees the everyday pages',
   ['Dashboard', 'Ladder', 'Leagues', 'Tournaments', 'Events', 'Players', 'Club Activity'].every((n) => guest.visibleNav().includes(n)),
   guest.visibleNav().join(', '));
 ok('is not shown Court Schedule', !guest.visibleNav().includes('Court Schedule'), guest.visibleNav().join(', '));
-ok('is not shown Club Settings', !guest.visibleNav().includes('Club Settings'), guest.visibleNav().join(', '));
+ok('is not shown Club Settings', !guest.visibleNav().includes('Settings'), guest.visibleNav().join(', '));
 ok('never sees the word Admin in the nav', !guest.visibleLabels().includes('Admin'), guest.visibleLabels().join(', '));
 ok('sees only the Play and Club headings', guest.visibleLabels().join('|') === 'Play|Club', guest.visibleLabels().join('|'));
 ok('and no Book a Court, being no member', !guest.visibleNav().includes('Book a Court'), guest.visibleNav().join(', '));
@@ -64,7 +64,7 @@ log.textContent += '\nA PLAYER WHO IS A MEMBER\n';
 const member = await boot('member');
 ok('gets Book a Court', member.visibleNav().includes('Book a Court'), member.visibleNav().join(', '));
 ok('but still no admin pages',
-  !member.visibleNav().some((n) => ['Court Schedule', 'Club Settings'].includes(n)),
+  !member.visibleNav().some((n) => ['Court Schedule', 'Settings'].includes(n)),
   member.visibleNav().join(', '));
 ok('and still no Admin heading', !member.visibleLabels().includes('Admin'), member.visibleLabels().join(', '));
 
@@ -105,7 +105,7 @@ ok('popover items are not nav items',
 log.textContent += '\nAN ADMIN\n';
 const admin = await boot('admin');
 ok('gets the admin pages',
-  ['Court Schedule', 'Club Settings', 'Tournaments'].every((n) => admin.visibleNav().includes(n)),
+  ['Court Schedule', 'Settings', 'Tournaments'].every((n) => admin.visibleNav().includes(n)),
   admin.visibleNav().join(', '));
 ok('under an Admin heading', admin.visibleLabels().join('|') === 'Play|Club|Admin', admin.visibleLabels().join('|'));
 ok('and is NOT offered Book a Court', !admin.visibleNav().includes('Book a Court'), admin.visibleNav().join(', '));
@@ -115,6 +115,20 @@ ok('reading Administrator', admin.$('.sb-admin-name').textContent.trim() === 'Ad
 ok('with its own logout link', admin.$('.sb-admin-logout').getAttribute('href') === '/logout');
 ok('the profile card is not', !admin.shows('#sbProfile'));
 ok('and there is no name or photo to leak', !admin.$('#sbProfileName').textContent.trim());
+
+log.textContent += '\nA STAFF MEMBER WITH ONLY TOURNAMENTS\n';
+const staff = await boot('staff');
+ok('gets Settings but not the Court Schedule', staff.visibleNav().includes('Settings') && !staff.visibleNav().includes('Court Schedule'), staff.visibleNav().join(', '));
+ok('and is not offered Book a Court', !staff.visibleNav().includes('Book a Court'));
+ok('the sidebar is marked as staff, not admin', staff.$('.sidebar').classList.contains('sb-role-staff') && !staff.$('.sidebar').classList.contains('sb-role-admin'));
+ok('the card shows their name and Staff', staff.shows('#sbProfile') && staff.$('#sbProfileName').textContent.trim() === 'Chris Nguyen' && staff.$('#sbProfileRole').textContent.trim() === 'Staff');
+ok('with initials, not a photo', staff.$('#sbProfileAvatar').textContent.trim() === 'CN' && staff.$('#sbProfileAvatar').classList.contains('sb-profile-avatar--staff'));
+ok('the admin card is not on show', !staff.shows('.sb-admin'));
+const menuItems = () => staff.$$('.sb-menu-item').filter((e) => !e.hidden).map((e) => e.textContent.trim()).join('|');
+ok('the menu offers My account and Logout', menuItems() === 'My account|Logout', menuItems());
+staff.win.navigate('schedule');
+await settle();
+ok('following a link to the schedule says it is not theirs', /You don't have access to this page/.test(staff.$('#mainContent').textContent));
 
 log.textContent += '\nCOURT BOOKING IS NOT REACHABLE FOR AN ADMIN\n';
 admin.win.navigate('courtBooking');

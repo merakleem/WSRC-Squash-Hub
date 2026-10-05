@@ -1,4 +1,4 @@
-import { state, isAdmin } from '../state.js';
+import { state, can } from '../state.js';
 import { esc, toast, modal, avatarHTML, avatarInner } from '../utils.js';
 import * as K from '../knockout.js';
 import {
@@ -28,7 +28,7 @@ const _courtList = (courts) => courts.map((c) => String(c.name).replace(/^Court\
 let _list = [];
 
 export async function renderTournaments() {
-  const admin = isAdmin();
+  const admin = can('tournaments');
   document.getElementById('pageTitle').textContent = 'Tournaments';
   document.getElementById('topbarActions').innerHTML = admin ? `
     <button class="btn btn-primary" id="btnNewTournament">
@@ -73,7 +73,7 @@ function _groupsHTML() {
 const _fmtBadge = '<span class="lgl-fmt">Knockout</span>';
 
 function _upcomingCard(t) {
-  const admin = isAdmin();
+  const admin = can('tournaments');
   const n = t.signup_count || 0;
   const cap = t.draw_cap;
   return upcomingCardHTML({
@@ -324,7 +324,7 @@ function _ranks() {
 }
 
 function _renderUpcoming(t) {
-  const admin = isAdmin();
+  const admin = can('tournaments');
   const n = t.signup_count || 0;
   const cap = t.draw_cap;
   const closed = !!t.deadline_passed;
@@ -463,17 +463,17 @@ function _bracketOf(t) {
 }
 
 function _renderBuilt(t) {
-  const admin = isAdmin();
+  const admin = can('tournaments');
   const b = _b = _bracketOf(t);
   const me = b.pById[state.currentUser?.playerId] || null;
   document.getElementById('pageTitle').textContent = t.name;
-  document.getElementById('topbarActions').innerHTML = admin ? optionsMenuHTML([
-    { action: 'message', label: 'Message players' },
-    { action: 'invite', label: 'Send account invites' },
-    t.status !== 'completed' ? { action: 'schedule', label: 'Edit schedule' } : null,
-    { action: 'delete', label: 'Delete tournament', danger: true },
-  ], { label: 'Tournament options' }) : '';
-  if (admin) wireOptionsMenu((action) => _onOption(action, t));
+  document.getElementById('topbarActions').innerHTML = optionsMenuHTML([
+    can('message') ? { action: 'message', label: 'Message players' } : null,
+    can('message') && can('players') ? { action: 'invite', label: 'Send account invites' } : null,
+    admin && t.status !== 'completed' ? { action: 'schedule', label: 'Edit schedule' } : null,
+    admin ? { action: 'delete', label: 'Delete tournament', danger: true } : null,
+  ], { label: 'Tournament options' });
+  wireOptionsMenu((action) => _onOption(action, t));
 
   const roundName = K.ROUND_NAMES[K.ROUND_KEYS[b.draw][b.cur]];
   const first = t.rounds[0]?.date;
@@ -529,7 +529,7 @@ function _renderBuilt(t) {
   const panel = document.getElementById('koPanel');
   if (_tab === 'bracket') {
     const phone = _phone();
-    const canScore = (m) => admin || (!!me && (m.p1 === me || m.p2 === me) && !m.winner);
+    const canScore = (m) => can('scores') || (!!me && (m.p1 === me || m.p2 === me) && !m.winner);
     panel.innerHTML = `<div class="ko-tree-scroll ko-tree-scroll--bleed">${bracketTreeHTML(b, { compact: phone, plainHeads: phone, live: true, me, canScore })}</div>`;
     wireBracketTree(panel.querySelector('.ko-tree'), b, {
       hover: !phone,
@@ -664,7 +664,7 @@ const PRESETS = [{ p1: 3, p2: 0 }, { p1: 3, p2: 1 }, { p1: 3, p2: 2 }, { p1: 0, 
  * own, once.
  */
 function _scoreModal({ id, p1Name, p2Name, value, onDone }) {
-  const admin = isAdmin();
+  const admin = can('scores');
   let sel = value || null;
   const first = (n) => String(n || '').split(' ')[0];
   const paint = () => {

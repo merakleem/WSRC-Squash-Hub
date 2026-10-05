@@ -1,4 +1,4 @@
-import { state, isAdmin } from '../state.js';
+import { state, can } from '../state.js';
 import { esc, toast, modal } from '../utils.js';
 // playerProfile.js imports the edit/delete/message entry points from here and
 // this page opens profiles from its rows: a cycle, safe because every use is
@@ -52,7 +52,7 @@ const pl = {
 const _mq = window.matchMedia ? window.matchMedia('(max-width: 768px)') : { matches: false, addEventListener() {} };
 const _isMobile = () => _mq.matches;
 _mq.addEventListener('change', () => {
-  if (state.page !== 'players' || !isAdmin()) return;
+  if (state.page !== 'players' || !can('players')) return;
   // Sheets and select mode are mobile furniture; a rotation into desktop must
   // not leave them behind.
   pl.sheet = null;
@@ -206,7 +206,7 @@ export async function renderPlayers() {
   const content = document.getElementById('mainContent');
   document.getElementById('topbarActions').innerHTML = '';
 
-  if (!isAdmin()) {
+  if (!can('players')) {
     document.getElementById('pageTitle').textContent = 'Players';
     content.innerHTML = `
       <div class="pl-public">
@@ -864,7 +864,7 @@ function _renderBulkBar() {
 
 async function _refreshPlayers() {
   state.players = await window.api.getPlayers();
-  if (state.page === 'players' && isAdmin()) {
+  if (state.page === 'players' && can('players')) {
     _renderPageTitle();
     _renderTable();
   }

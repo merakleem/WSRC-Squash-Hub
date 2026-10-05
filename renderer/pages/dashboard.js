@@ -1,4 +1,11 @@
-import { state, isAdmin, isMember } from '../state.js';
+import { state, isAdmin, isMember, can } from '../state.js';
+import { resolveSettingsTab, settingsTabsHTML, wireSettingsTabs, renderNewSettingsTab, renderDenied, deniedSentenceForTab } from './staffSettings.js';
+
+// Which Settings tab each of today's sections lives under, by its title.
+const SECTION_TAB = {
+  'Seasons': 'ladder', 'Time zone': 'club', 'Joining the ladder': 'ladder',
+  'Winning margin': 'ladder', 'Courts': 'courts', 'Booking Types': 'courts',
+};
 import { esc, toast, modal, formatShortDate, abbrevName, avatarInner, clubNow, clubTodayStr } from '../utils.js';
 import { openMessagePlayerModal } from './players.js';
 import { ROUND_NAMES } from '../knockout.js';
@@ -170,7 +177,7 @@ function _caMatching() {
     .filter((m) => !q || [...m.winners, ...m.losers].some((p) => String(p.name || '').toLowerCase().includes(q)));
 }
 
-function _caRowHTML(m, admin) {
+function _caRowHTML(m, admin, canDelete = admin) {
   const avatars = [...m.winners.map((p) => ({ ...p, win: true })), ...m.losers.map((p) => ({ ...p, win: false }))]
     .map((p) => `<span class="ca-av${p.win ? '' : ' ca-av--lost'}" title="${esc(p.name)}"${p.photo_path ? '' : ` style="background:${CA_AVATAR_COLORS[Math.abs(Number(p.id) || 0) % CA_AVATAR_COLORS.length]}"`}>${avatarInner(p)}</span>`)
     .join('');
@@ -178,7 +185,7 @@ function _caRowHTML(m, admin) {
     ? `<span class="ca-moved">${CA_ICON.up}${esc(abbrevName(m.winners[0].name))} up ${m.moved} place${m.moved !== 1 ? 's' : ''}</span>` : '';
   const by = admin && m.source !== 'tournament'
     ? `<span class="ca-by">Submitted by ${esc(abbrevName(m.by) || 'Admin')}</span>` : '';
-  const del = admin && m.source === 'pickup'
+  const del = canDelete && m.source === 'pickup'
     ? `<button class="ca-del" data-del="${m.id}" data-format="${m.format || 'singles'}" aria-label="Delete this ladder match" title="Delete">${CA_ICON.trash}</button>` : '';
   return `
     <article class="ca-row" data-match="${m.id}">
@@ -204,6 +211,7 @@ function _caRowHTML(m, admin) {
 
 function _caFeedHTML() {
   const admin = isAdmin();
+  const canDelete = can('scores');
   const q = ca.query.trim();
   const filter = admin ? ca.filter : 'all';
   const matching = _caMatching();
@@ -227,7 +235,7 @@ function _caFeedHTML() {
     return `
       <section class="ca-day">
         <div class="ca-day-head"><span class="ca-day-label">${esc(label)}</span><span class="ca-day-sub">${esc(sub)}</span></div>
-        <div class="ca-card">${items.map((m) => _caRowHTML(m, admin)).join('')}</div>
+        <div class="ca-card">${items.map((m) => _caRowHTML(m, admin, canDelete)).join('')}</div>
       </section>`;
   }).join('');
 
@@ -412,8 +420,15 @@ function _timezoneOptionsHTML(current) {
 }
 
 export async function renderClubSettings() {
-  document.getElementById('pageTitle').textContent = 'Club Settings';
+  document.getElementById('pageTitle').textContent = 'Settings';
   document.getElementById('topbarActions').innerHTML = '';
+  // Settings is tabbed, each tab shown only to those who may use it
+  // (design_handoff_staff_accounts). A link to a tab someone cannot see
+  // renders Not allowed in its place.
+  const tab = resolveSettingsTab();
+  if (!tab) return renderDenied(deniedSentenceForTab(state.settingsTab));
+  state.settingsTab = tab;
+  if (tab === 'staff' || tab === 'log' || tab === 'account') return renderNewSettingsTab(tab);
   const content = document.getElementById('mainContent');
   content.innerHTML = `<div style="padding:20px;color:var(--text-muted)">Loading…</div>`;
 
@@ -434,6 +449,7 @@ export async function renderClubSettings() {
   const [startMonth, startDay] = String(settings.season_start_md || '09-01').split('-');
 
   content.innerHTML = `
+    ${settingsTabsHTML(tab)}
     <div class="settings-page">
       <div class="settings-section">
         <div class="settings-section-header">
@@ -610,7 +626,14 @@ export async function renderClubSettings() {
       </div>
     </div>`;
 
-  document.getElementById('btnSaveSeasonSettings').addEventListener('click', async () => {
+  // Only this tab's sections stay; every control below is wired only if present.
+  wireSettingsTabs(content);
+  content.querySelectorAll('.settings-page > .settings-section').forEach((sec) => {
+    const title = sec.querySelector('.settings-section-title')?.textContent.trim();
+    if (SECTION_TAB[title] !== tab) sec.remove();
+  });
+
+  document.getElementById('btnSaveSeasonSettings')?.addEventListener('click', async () => {
     const md = `${document.getElementById('fSeasonStartMonth').value}-${document.getElementById('fSeasonStartDay').value}`;
     try {
       await window.api.updateSeasonSettings({ season_start_md: md });
@@ -655,7 +678,7 @@ export async function renderClubSettings() {
     const at = (r) => Math.round(base + (r - pivot) * scale);
     bonusHint.textContent = `A 3.0 would come in on ${at(3)}, a 5.0 on ${at(5)}.`;
   };
-  showBonus();
+  if (floorInput) showBonus();
   bonusInput?.addEventListener('input', showBonus);
   floorInput?.addEventListener('input', showBonus);
 
@@ -681,7 +704,7 @@ export async function renderClubSettings() {
     marginHint.textContent =
       `Between evenly matched players: 3-0 pays ${at(3)}, 3-1 pays ${at(2)}, 3-2 pays ${at(1)}.`;
   };
-  showMargin();
+  if (marginInput) showMargin();
   marginInput?.addEventListener('input', showMargin);
 
   document.getElementById('btnSaveMargin')?.addEventListener('click', async () => {
@@ -693,7 +716,7 @@ export async function renderClubSettings() {
     }
   });
 
-  document.getElementById('btnAddCourt').addEventListener('click', openAddCourtModal);
+  document.getElementById('btnAddCourt')?.addEventListener('click', openAddCourtModal);
 
   content.querySelectorAll('[data-court-edit]').forEach((btn) => {
     const id = Number(btn.dataset.courtEdit);
@@ -707,7 +730,7 @@ export async function renderClubSettings() {
     btn.addEventListener('click', () => deleteCourtConfirm(id, name));
   });
 
-  document.getElementById('btnAddBookingType').addEventListener('click', openAddBookingTypeModal);
+  document.getElementById('btnAddBookingType')?.addEventListener('click', openAddBookingTypeModal);
 
   content.querySelectorAll('[data-btype-edit]').forEach((btn) => {
     const id = Number(btn.dataset.btypeEdit);
@@ -964,13 +987,13 @@ export async function renderDashboard() {
 
   const user = state.currentUser;
 
-  if (!user || user.role === 'admin') {
+  if (!user || isAdmin()) {
     document.querySelector('.content').classList.add('content--dashboard');
     const todayStr = _localDateStr();
     const [scheduleData, activity, verifiedData] = await Promise.all([
       window.api.getSchedule(todayStr),
       window.api.getActivity(1),
-      window.api.getVerifiedPlayerCount(),
+      can('players') ? window.api.getVerifiedPlayerCount() : null,
     ]);
 
     const { courts, slots } = scheduleData;
@@ -1021,14 +1044,14 @@ export async function renderDashboard() {
                 <div class="adm-hero-divider"></div>
                 <div class="league-stats">
                   <div class="stat"><span class="stat-val">${totalPlayers}</span><span class="stat-label">Total Players</span></div>
-                  <div class="stat"><span class="stat-val">${verifiedPlayers}</span><span class="stat-label">Verified Players</span></div>
+                  ${verifiedData ? `<div class="stat"><span class="stat-val">${verifiedPlayers}</span><span class="stat-label">Verified Players</span></div>` : ''}
                   <div class="stat"><span class="stat-val">${bookingsToday}</span><span class="stat-label">Court Bookings Today</span></div>
                   <div class="stat"><span class="stat-val">${matchesToday}</span><span class="stat-label">Matches Recorded Today</span></div>
                 </div>
               </div>
             </div>
 
-            ${courts.length > 0 ? `
+            ${courts.length > 0 && can('schedule') ? `
               <div class="section">
                 <div class="section-title">Court Status <div class="divider"></div></div>
                 <div class="adm-courts-grid">${courtCardsHTML}</div>

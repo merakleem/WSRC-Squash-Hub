@@ -1,4 +1,4 @@
-import { state, isAdmin } from './state.js';
+import { state, can } from './state.js';
 import { esc, toast, clubTodayStr, clubNowMin } from './utils.js';
 import { openBookingPanel, closeBookingPanel, isBookingPanelOpen } from './schedulePanel.js';
 
@@ -145,7 +145,7 @@ export async function renderSchedule() {
   const actionsEl = document.getElementById('topbarActions');
   // The helper line and the button live in the app's own top bar, as on every
   // other page, rather than the page growing a second bar of its own.
-  actionsEl.innerHTML = isAdmin()
+  actionsEl.innerHTML = can('schedule')
     ? `<span class="sch-topbar-help">Drag empty space to book · drag a booking to move it · pull its edges to resize · ${K.mod}C ${K.mod}V ${K.mod}D ${K.del} ${K.mod}Z</span>
        <button class="btn btn-primary" id="btnNewBooking">
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
@@ -318,7 +318,7 @@ export async function renderSchedule() {
   // ── Blocks ──────────────────────────────────────────────────────────────────
   // All blocks live in one overlay spanning the court columns, so a booking
   // across several courts is one wide block rather than a row per court.
-  const admin = isAdmin();
+  const admin = can('schedule');
 
   function blockGeometry(s0, d0, lo, hi) {
     const top = topFor(s0) + 1;
@@ -417,7 +417,7 @@ export async function renderSchedule() {
 
 
       ${courts.length === 0
-        ? `<div class="sch-no-courts">No courts configured.${isAdmin() ? ` <a href="#" id="schGoSettings">Add courts in Club Settings.</a>` : ''}</div>`
+        ? `<div class="sch-no-courts">No courts configured.${can('courts') ? ` <a href="#" id="schGoSettings">Add courts in Settings.</a>` : ''}</div>`
         : `<div class="sch-grid-area">
             <div class="sch-grid-card">
               <div class="sch-grid-scroll">

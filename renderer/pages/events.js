@@ -1,4 +1,4 @@
-import { state, isAdmin } from '../state.js';
+import { state, isAdmin, can } from '../state.js';
 import { esc, toast, clubTodayStr, avatarInner } from '../utils.js';
 import { isNew, visitPainted } from '../unread.js';
 
@@ -189,7 +189,7 @@ async function _refresh() {
 // ── Top bar ───────────────────────────────────────────────────────────────────
 function _topbarHTML() {
   return `
-    ${isAdmin() ? `
+    ${can('events') ? `
       <button class="btn btn-primary" id="evNew">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
         New event
@@ -244,7 +244,7 @@ function _listHTML() {
         <button class="tab${ev.tab === 'upcoming' ? ' tab--on' : ''}" data-tab="upcoming">Upcoming</button>
         <button class="tab${ev.tab === 'past' ? ' tab--on' : ''}" data-tab="past">Past</button>
       </div>
-      ${ev.events.length ? cards : `<div class="ev-empty">No ${ev.tab === 'past' ? 'past' : 'upcoming'} events${isAdmin() && ev.tab === 'upcoming' ? '. Create one with New event.' : '.'}</div>`}
+      ${ev.events.length ? cards : `<div class="ev-empty">No ${ev.tab === 'past' ? 'past' : 'upcoming'} events${can('events') && ev.tab === 'upcoming' ? '. Create one with New event.' : '.'}</div>`}
     </div>`;
 }
 
@@ -257,7 +257,7 @@ function _heroHTML(e) {
         <span class="pill pill--hero-${p.cls}">${p.label}</span>
         ${_typeChip(e.link, true)}
         <span class="ev-spacer"></span>
-        ${isAdmin() ? `
+        ${can('events') ? `
           <button class="ev-hero-edit" id="evEdit">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-3-3L5 17v3zM13.5 6.5l3 3"/></svg>
             Edit
@@ -363,7 +363,7 @@ function _addHTML(e) {
 }
 
 function _rosterHTML(e) {
-  const admin = isAdmin();
+  const admin = can('events');
   const myId = state.currentUser?.playerId;
   const rows = [];
   const mine = (e.attendees || []).find((a) => a.player_id === myId);

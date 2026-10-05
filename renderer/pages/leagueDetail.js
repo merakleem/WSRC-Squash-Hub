@@ -1,4 +1,4 @@
-import { state, isAdmin } from '../state.js';
+import { state, isAdmin, can } from '../state.js';
 import { esc, formatDate, formatShortDate, toast, modal, avatarInner, playDatesFor, playDayNames, formatWeekRange, formatWeekRangeShort, DAY_LONG, clubTodayStr } from '../utils.js';
 import { printBoxes, openMessagePlayersModal, openBulkInviteModal, printSchedule, confirmDeleteLeague, openAnnounceModal } from './leagues.js';
 import { startCreateLeague } from './createLeague.js';
@@ -187,7 +187,7 @@ function _lguBannerHTML(league) {
 }
 
 function _renderUpcoming(league) {
-  const admin = isAdmin();
+  const admin = can('leagues');
   const content = document.getElementById('mainContent');
   document.getElementById('pageTitle').textContent = league.name;
   document.getElementById('topbarActions').innerHTML = admin ? `
@@ -297,22 +297,25 @@ export function renderLeagueDetail() {
   const adminMode = isAdmin();
   const isDoubles = league.setup_type === 'doubles';
   document.getElementById('pageTitle').textContent = league.name;
+  // Each control shows only to someone allowed to use it; with none, the
+  // page reads as it does for a player.
+  const canLeagues = can('leagues');
   document.getElementById('topbarActions').innerHTML = adminMode ? `
-    <button class="btn ${leagueEditMode ? 'btn-primary' : 'btn-outline'}" id="editRosterBtn">
+    ${canLeagues ? `<button class="btn ${leagueEditMode ? 'btn-primary' : 'btn-outline'}" id="editRosterBtn">
       ${leagueEditMode ? 'Done Editing' : (isDoubles ? 'Edit Pairs' : 'Edit Players')}
-    </button>
+    </button>` : ''}
     ${optionsMenuHTML([
-      isDoubles ? null : { action: 'print-boxes', label: 'Print Boxes' },
-      isDoubles ? null : { action: 'box-scores', label: 'Submit scores by box view' },
-      league.setup_type === 'modern' || isDoubles ? { action: 'print-schedule', label: 'Print Schedule' } : null,
-      { action: 'message-players', label: 'Message Players' },
-      { action: 'bulk-invite', label: 'Send Account Invites' },
-      league.status !== 'completed' ? { action: 'end-league', label: 'End League', danger: true } : null,
-      { action: 'delete-league', label: 'Delete League', danger: true },
+      !isDoubles && canLeagues ? { action: 'print-boxes', label: 'Print Boxes' } : null,
+      !isDoubles && can('scores') ? { action: 'box-scores', label: 'Submit scores by box view' } : null,
+      (league.setup_type === 'modern' || isDoubles) && canLeagues ? { action: 'print-schedule', label: 'Print Schedule' } : null,
+      can('message') ? { action: 'message-players', label: 'Message Players' } : null,
+      can('message') && can('players') ? { action: 'bulk-invite', label: 'Send Account Invites' } : null,
+      league.status !== 'completed' && canLeagues ? { action: 'end-league', label: 'End League', danger: true } : null,
+      canLeagues ? { action: 'delete-league', label: 'Delete League', danger: true } : null,
     ], { label: 'League options' })}` : '';
 
   if (adminMode) {
-    document.getElementById('editRosterBtn').addEventListener('click', () => {
+    document.getElementById('editRosterBtn')?.addEventListener('click', () => {
       leagueEditMode = !leagueEditMode;
       renderLeagueDetail();
     });
@@ -1035,7 +1038,7 @@ function renderMatchRowDoubles(match, league, adminMode = true) {
     : (adminMode && league?.schedule_courts && match.court_number
         ? `Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}`
         : (match.match_time || ''));
-  const canEditTiming = adminMode && !match.skipped;
+  const canEditTiming = adminMode && can('leagues') && !match.skipped;
   const timingAttrs = canEditTiming ? `
     class="match-court-label timing-btn${timingLabel ? '' : ' timing-btn-empty'}"
     data-match-id="${match.id}"
@@ -1068,7 +1071,7 @@ function renderMatchRowDoubles(match, league, adminMode = true) {
         ${playersHTML}
         <div class="match-actions">
           <span class="match-skipped-label">Skipped</span>
-          ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn lg-ghost" data-match-id="${match.id}">Undo</button>` : ''}
+          ${adminMode && can('scores') ? `<button class="btn btn-ghost btn-sm unskip-btn lg-ghost" data-match-id="${match.id}">Undo</button>` : ''}
         </div>
       </div>`;
   }
@@ -1077,10 +1080,10 @@ function renderMatchRowDoubles(match, league, adminMode = true) {
   if (hasScore) {
     scoreSection = `<div class="match-score">
          <span class="score-display">${match.player1_score}–${match.player2_score}</span>
-         ${adminMode ? `<button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
+         ${adminMode && can('scores') ? `<button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
            data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="false">Edit</button>` : ''}
        </div>`;
-  } else if (adminMode) {
+  } else if (adminMode && can('scores')) {
     scoreSection = `<div class="match-score">
          ${bo5ScoreInputHTML()}
          <button class="btn btn-success btn-sm score-save-btn lg-save"
@@ -1096,7 +1099,7 @@ function renderMatchRowDoubles(match, league, adminMode = true) {
       ${playersHTML}
       <div class="match-actions">
         ${scoreSection}
-        ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn lg-ghost"
+        ${adminMode && can('leagues') ? `<button class="btn btn-ghost btn-sm sub-btn lg-ghost"
           data-match-id="${match.id}"
           data-league-id="${league ? league.id : ''}"
           data-p1-id="${match.player1_id}" data-p1-name="${esc(match.player1_name)}"
@@ -1504,7 +1507,7 @@ function renderMatchRow(match, league, adminMode = true) {
     : (adminMode && league?.schedule_courts && match.court_number
         ? `Court ${match.court_number}${match.match_time ? ' · ' + match.match_time : ''}`
         : (match.match_time || ''));
-  const canEditTiming = adminMode && !match.skipped;
+  const canEditTiming = adminMode && can('leagues') && !match.skipped;
   const timingAttrs = canEditTiming ? `
     class="match-court-label timing-btn${timingLabel ? '' : ' timing-btn-empty'}"
     data-match-id="${match.id}"
@@ -1538,7 +1541,7 @@ function renderMatchRow(match, league, adminMode = true) {
         </span>
         <div class="match-actions">
           <span class="match-skipped-label">Skipped</span>
-          ${adminMode ? `<button class="btn btn-ghost btn-sm unskip-btn lg-ghost" data-match-id="${match.id}">Undo</button>` : ''}
+          ${adminMode && can('scores') ? `<button class="btn btn-ghost btn-sm unskip-btn lg-ghost" data-match-id="${match.id}">Undo</button>` : ''}
         </div>
       </div>`;
   }
@@ -1547,10 +1550,10 @@ function renderMatchRow(match, league, adminMode = true) {
   if (hasScore) {
     scoreSection = `<div class="match-score">
          <span class="score-display">${match.player1_score}–${match.player2_score}</span>
-         ${adminMode ? `<button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
+         ${adminMode && can('scores') ? `<button class="btn btn-ghost btn-sm score-save-btn lg-ghost"
            data-match-id="${match.id}" data-p1-id="${match.player1_id}" data-p2-id="${match.player2_id}" data-editing="false">Edit</button>` : ''}
        </div>`;
-  } else if (adminMode) {
+  } else if (adminMode && can('scores')) {
     scoreSection = `<div class="match-score">
          ${bo5ScoreInputHTML()}
          <button class="btn btn-success btn-sm score-save-btn lg-save"
@@ -1573,7 +1576,7 @@ function renderMatchRow(match, league, adminMode = true) {
       </span>
       <div class="match-actions">
         ${scoreSection}
-        ${adminMode ? `<button class="btn btn-ghost btn-sm sub-btn lg-ghost"
+        ${adminMode && can('leagues') ? `<button class="btn btn-ghost btn-sm sub-btn lg-ghost"
           data-match-id="${match.id}"
           data-league-id="${leagueId}"
           data-p1-id="${match.player1_id}" data-p1-name="${esc(match.player1_name)}"

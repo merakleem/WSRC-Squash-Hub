@@ -346,7 +346,7 @@ router.post('/tournaments/:id/message', requirePerm('message'), audit('message')
   res.json(await messagePlayers(recipientsOf(t), { subject, body, bodyHtml, attachments }));
 }));
 
-router.post('/tournaments/:id/bulk-invite', requirePerm('message'), audit('message'), emailLimiter, wrap(async (req, res) => {
+router.post('/tournaments/:id/bulk-invite', requirePerm('message'), requirePerm('players'), audit('message'), emailLimiter, wrap(async (req, res) => {
   if (!emailConfigured()) return res.status(500).json({ error: 'RESEND_API_KEY is not configured' });
   const t = tournamentModel.getTournament(req.params.id);
   if (!t) return res.status(404).json({ error: 'Tournament not found.' });
