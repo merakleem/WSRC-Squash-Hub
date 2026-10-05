@@ -17,6 +17,7 @@ const NOTIFY_ROWS = [
 
 const ICON = {
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>',
   warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
 };
@@ -48,7 +49,8 @@ function _paint({ keep = true, focus = null } = {}) {
   const content = document.getElementById('mainContent');
   if (state.page !== 'settings' || !content) return;
   const typed = keep && document.getElementById('psName') ? _formValues() : null;
-  content.innerHTML = `<div class="ps-page">${_profileCard()}${_signInCard()}${_notifyCard()}</div>`;
+  const viewingAs = state.currentUser?.viewing_as;
+  content.innerHTML = `<div class="ps-page">${viewingAs ? _viewingAsNotice(viewingAs) : ''}${_profileCard()}${_signInCard()}${_notifyCard()}</div>`;
   if (typed) {
     document.getElementById('psName').value = typed.name;
     document.getElementById('psPhone').value = typed.phone;
@@ -56,7 +58,14 @@ function _paint({ keep = true, focus = null } = {}) {
   // Drawn from the fields as they now stand, so Save knows if anything changed.
   document.getElementById('psProfileActions').innerHTML = _profileActions();
   _wire();
+  // Viewing as a member shows their settings but never changes them (the
+  // server refuses), so every control is switched off rather than failing.
+  if (viewingAs) content.querySelectorAll('.ps-card input, .ps-card button').forEach((el) => { el.disabled = true; });
   if (focus) document.getElementById(focus)?.focus();
+}
+
+function _viewingAsNotice(name) {
+  return `<div class="ps-notice ps-notice--pending"><div class="ps-notice-row">${ICON.info}<span>You are viewing as ${esc(name)}. Settings can only be changed by the member.</span></div></div>`;
 }
 
 // ===== PROFILE =====

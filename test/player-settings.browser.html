@@ -160,7 +160,19 @@ try {
   await tryEmail('liam@example.com');
   ok('while it waits the warning stays, with the waiting note under it', !!$('.ps-notice--warn') && /liam@example\.com/.test($('.ps-notice--pending')?.textContent || ''));
 
-  ok('no em dash anywhere on the page', !/—/.test(document.getElementById('mainContent').textContent));
+  console.log('VIEWING AS A MEMBER');
+  me = fresh();
+  state.currentUser.viewing_as = 'Liam Gallagher';
+  const writesBefore = calls.length;
+  await renderSettings(); await tick();
+  ok('says why nothing can be changed', /You are viewing as Liam Gallagher\. Settings can only be changed by the member\./.test($('.ps-page').textContent));
+  ok('every switch, field and button is off', $$('.ps-card input, .ps-card button').every((el) => el.disabled));
+  sw('notify_league_new').click(); await tick();
+  ok('so flipping a switch does nothing, with no error', calls.length === writesBefore && !/Could not save/.test(lastToast()), lastToast());
+  ok('while the settings themselves still show', sw('notify_booking_added').checked && $('#psName').value === 'Liam Gallagher');
+  delete state.currentUser.viewing_as;
+
+  ok('no em dash anywhere on the page',!/—/.test(document.getElementById('mainContent').textContent));
 } catch (e) { ok('no exception: ' + e.message, false, e.stack); }
 document.getElementById('log').textContent = out.join('\n');
 document.title = fails ? `FAIL ${fails}` : 'PASS';
