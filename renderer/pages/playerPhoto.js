@@ -49,7 +49,11 @@ async function _shrinkPhoto(file) {
   return canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
 }
 
-export function openPhotoModal(player) {
+/**
+ * `onDone` runs after the photo is saved or removed; by default the player's
+ * profile is reopened to show it. Settings passes its own, to stay put.
+ */
+export function openPhotoModal(player, { onDone = () => window.openPlayerProfile(player.id) } = {}) {
   modal.open('Profile Photo', `
     <div class="photo-modal">
       <div class="photo-preview" id="photoPreview">
@@ -90,7 +94,7 @@ export function openPhotoModal(player) {
       await window.api.setPlayerPhoto(player.id, dataUrl);
       modal.close();
       toast('Photo updated');
-      await window.openPlayerProfile(player.id);
+      await onDone();
     } catch (err) {
       done();
       toast(err.message || 'Could not save photo', 'error');
@@ -102,7 +106,7 @@ export function openPhotoModal(player) {
       await window.api.deletePlayerPhoto(player.id);
       modal.close();
       toast('Photo removed');
-      await window.openPlayerProfile(player.id);
+      await onDone();
     } catch (err) {
       toast(err.message || 'Could not remove photo', 'error');
     }

@@ -24,7 +24,12 @@ if (typeof window !== 'undefined' && !window.api) {
     }
     const r = await fetch(url, opts);
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Request failed');
+    if (!r.ok) {
+      // `field` names the input a validation error belongs to, when it has one.
+      const err = new Error(data.error || 'Request failed');
+      if (data.field) err.field = data.field;
+      throw err;
+    }
     return data;
   }
 
@@ -76,6 +81,15 @@ if (typeof window !== 'undefined' && !window.api) {
     updateMatchTiming:(d)   => _apiFetch('PUT',  `/api/matches/${d.matchId}/timing`, d),
     sendInvite:        (id) => _apiFetch('POST', `/api/players/${id}/send-invite`),
     sendReset:         (id) => _apiFetch('POST', `/api/players/${id}/send-reset`),
+
+    // The signed-in member's own Settings.
+    getMySettings:        ()  => _apiFetch('GET',    '/api/me/settings'),
+    saveMyProfile:        (d) => _apiFetch('PUT',    '/api/me/profile', d),
+    setMyNotification:    (key, value) => _apiFetch('PUT', '/api/me/notifications', { key, value }),
+    changeMyEmail:        (email) => _apiFetch('POST', '/api/me/email', { email }),
+    resendMyEmailChange:  ()  => _apiFetch('POST',   '/api/me/email/resend'),
+    cancelMyEmailChange:  ()  => _apiFetch('DELETE', '/api/me/email'),
+    sendMyPasswordReset:  ()  => _apiFetch('POST',   '/api/me/password-reset'),
     setPlayerPhoto:    (id, image) => _apiFetch('PUT',    `/api/players/${id}/photo`, { image }),
     deletePlayerPhoto: (id) => _apiFetch('DELETE', `/api/players/${id}/photo`),
     getSettings:       ()   => _apiFetch('GET', '/api/settings'),

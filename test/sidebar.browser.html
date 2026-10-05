@@ -84,8 +84,8 @@ const card = member.$('#sbProfile');
 ok('it starts closed', menu.hidden && card.getAttribute('aria-expanded') === 'false');
 card.click(); await settle();
 ok('the card opens it', !menu.hidden && card.getAttribute('aria-expanded') === 'true');
-ok('offering My Profile and Logout',
-  [...menu.querySelectorAll('.sb-menu-item')].map((e) => e.textContent.trim()).join('|') === 'My Profile|Logout',
+ok('offering My Profile, Settings and Logout',
+  [...menu.querySelectorAll('.sb-menu-item')].map((e) => e.textContent.trim()).join('|') === 'My Profile|Settings|Logout',
   [...menu.querySelectorAll('.sb-menu-item')].map((e) => e.textContent.trim()).join('|'));
 ok('with Logout still a real link', menu.querySelector('a[href="/logout"]') !== null);
 member.doc.body.click(); await settle();

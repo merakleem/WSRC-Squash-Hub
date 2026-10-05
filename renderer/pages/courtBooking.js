@@ -211,7 +211,6 @@ export function renderCourtBooking() {
     panelStartMin: null,
     panelDuration: 30,
     panelPlayers: [],
-    panelNotify: true,
     panelSearch: '',
     panelBusy: false,
     panelAskCancel: false,
@@ -1027,7 +1026,6 @@ function _openPanel(mode, opts = {}) {
   cb.panelBusy      = false;
   cb.panelAskCancel = false;
   // Ticked every time a panel opens; unticking lasts for that panel only.
-  cb.panelNotify    = true;
   _renderPanel();
   _renderBody();
 }
@@ -1049,18 +1047,6 @@ function _closePanel(reason) {
   }
 
   if (reason === 'expired') toast('Your 5-minute hold expired', 'warn');
-}
-
-// Admins get the address itself in the player list; members get has_email.
-const _hasEmail = (p) => (p.has_email !== undefined ? !!p.has_email : !!(p.email && String(p.email).trim()));
-
-/** "Priya Sharma and Jon Reyes have no email on file and will not be notified." */
-function _noEmailHint(names, othersCanBe) {
-  const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  const verb = names.length === 1 ? 'has' : 'have';
-  return othersCanBe
-    ? `${who} ${verb} no email on file and will not be notified.`
-    : `${who} ${verb} no email on file, so no one can be notified.`;
 }
 
 function _buildPanelInner() {
@@ -1108,18 +1094,11 @@ function _buildPanelInner() {
 
   const others = isEdit ? _otherNames(booking || {}) : [];
 
-  // Notify by email (design_handoff_booking_notify): the box shows once anyone
-  // who can be emailed is added; a hint names whoever cannot be. Neither shows
-  // when editing, which sends nothing.
-  const added = cb.panelPlayers.map((id) => state.players?.find((p) => p.id === id)).filter(Boolean);
-  const noEmail = isEdit ? [] : added.filter((p) => !_hasEmail(p));
-  const showNotify = !isEdit && added.length > 0 && noEmail.length < added.length;
-  const notifyHTML = `${showNotify ? `
-        <label class="check-label cb-notify${cb.panelBusy ? ' cb-notify--busy' : ''}">
-          <input type="checkbox" id="cbNotify"${cb.panelNotify ? ' checked' : ''}${cb.panelBusy ? ' disabled' : ''}>
-          <span>Notify the selected players by email</span>
-        </label>` : ''}${noEmail.length ? `
-        <span class="cb-hint${showNotify ? ' cb-notify-hint' : ''}">${esc(_noEmailHint(noEmail.map((p) => p.name), showNotify))}</span>` : ''}`;
+  // Added players are emailed if their Settings say so; the line says as
+  // much once anyone is added. Editing sends nothing, so it says nothing.
+  const notifyHTML = !isEdit && cb.panelPlayers.length > 0
+    ? '<span class="cb-hint">Players you add are emailed if they have chosen to be.</span>'
+    : '';
   const playerCount = 1 + cb.panelPlayers.length;
 
   const room = 3 - cb.panelPlayers.length;
@@ -1252,7 +1231,6 @@ function _attachPanelListeners() {
   });
   document.getElementById('cbConfirmCancel')?.addEventListener('click', _cancelBooking);
 
-  document.getElementById('cbNotify')?.addEventListener('change', (e) => { cb.panelNotify = e.target.checked; });
 
   document.getElementById('cbDurMinus')?.addEventListener('click', () => _stepDuration(-SLOT_MIN));
   document.getElementById('cbDurPlus')?.addEventListener('click', () => _stepDuration(SLOT_MIN));
@@ -1380,7 +1358,6 @@ async function _confirmBooking() {
       reservationId: cb.reservation.id,
       durationMinutes: cb.panelDuration,
       playerIds: cb.panelPlayers,
-      notifyPlayers: cb.panelNotify && cb.panelPlayers.length > 0,
     });
     if (cb.reservation?.timerId) clearInterval(cb.reservation.timerId);
     cb.reservation = null;

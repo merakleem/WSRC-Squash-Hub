@@ -168,6 +168,7 @@ function createApp() {
   });
 
   // ===== API ROUTES =====
+  app.use('/api', require('./routes/me'));
   app.use('/api', require('./routes/players'));
   app.use('/api', require('./routes/leagues'));
   app.use('/api', require('./routes/matches'));

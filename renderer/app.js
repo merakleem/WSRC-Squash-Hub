@@ -18,6 +18,7 @@ import { renderTournaments, renderTournamentDetail } from './pages/tournaments.j
 import { renderCreateTournament } from './pages/createTournament.js';
 import { renderEvents } from './pages/events.js';
 import { renderCourtBooking } from './pages/courtBooking.js';
+import { renderSettings } from './pages/settings.js';
 import { beginVisit, paintNav } from './unread.js';
 
 // ===== NAVIGATION =====
@@ -129,6 +130,8 @@ function renderPage() {
     // Members only, and admins are not players: the tab is hidden for them, so
     // a stale restored page must not be a way back onto it either.
     case 'courtBooking':     if (isAdmin() || !isMember()) { navigate('dashboard'); return; } renderCourtBooking(); break;
+    // A member's own settings; an admin account is not a player and has none.
+    case 'settings':         if (isAdmin()) { navigate('dashboard'); return; } renderSettings(); break;
   }
 }
 
@@ -193,9 +196,32 @@ function closeSidebar() {
   document.getElementById('sbMenuProfile')?.addEventListener('click', openMine);
   // The drawer header is the same action, without a popover in the way.
   document.getElementById('sbDrawerProfile')?.addEventListener('click', openMine);
+
+  const openSettings = (e) => {
+    e.preventDefault();
+    setOpen(false);
+    closeSidebar();
+    navigate('settings');
+  };
+  document.getElementById('sbMenuSettings')?.addEventListener('click', openSettings);
+  document.getElementById('sbDrawerSettings')?.addEventListener('click', openSettings);
 })();
 
+// The member's name and photo on the sidebar card and the drawer header.
+// Painted at start-up, and again when Settings saves either.
+function paintAccountCard() {
+  if (isAdmin() || !state.currentUser?.playerId) return;
+  const who = { name: state.currentUser.name, photo_path: state.currentUser.photo_path };
+  // avatarHTML has no id of its own; the card keeps its id so it can be painted again.
+  const withId = (id, cls) => avatarHTML(who, cls).replace('<div ', `<div id="${id}" `);
+  document.getElementById('sbProfileAvatar').outerHTML = withId('sbProfileAvatar', 'sb-profile-avatar');
+  document.getElementById('sbDrawerAvatar').outerHTML = withId('sbDrawerAvatar', 'sb-drawer-avatar');
+  document.getElementById('sbProfileName').textContent = who.name || 'My account';
+  document.getElementById('sbDrawerName').textContent = who.name || 'My account';
+}
+
 // Expose to window for onclick attributes in dynamically generated HTML
+window.paintAccountCard = paintAccountCard;
 window.modal = modal;
 window.navigate = navigate;
 window.openPlayerProfile = openPlayerProfile;
@@ -259,13 +285,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   sidebar.classList.toggle('sb-role-admin', isAdmin());
   sidebar.classList.toggle('sb-role-player', !isAdmin());
 
-  if (!isAdmin() && state.currentUser?.playerId) {
-    const who = { name: state.currentUser.name, photo_path: state.currentUser.photo_path };
-    document.getElementById('sbProfileAvatar').outerHTML = avatarHTML(who, 'sb-profile-avatar');
-    document.getElementById('sbDrawerAvatar').outerHTML = avatarHTML(who, 'sb-drawer-avatar');
-    document.getElementById('sbProfileName').textContent = who.name || 'My account';
-    document.getElementById('sbDrawerName').textContent = who.name || 'My account';
-  }
+  paintAccountCard();
 
   // Court booking is for members, and only for them: an admin account is not a
   // player, so it never gets the tab even though requireMember lets admins

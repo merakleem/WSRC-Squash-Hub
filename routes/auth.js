@@ -3,6 +3,8 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const { wrap, loginLimiter, signSession, setSessionCookie, clearSessionCookie, getSession } = require('../middleware');
+const { sendEmail, isConfigured: emailConfigured, emailChangedNoticeEmail } = require('../lib/email');
+const log = require('../lib/log');
 
 const router = express.Router();
 const ADMIN_PASSWORD = process.env.SITE_PASSWORD;
@@ -268,12 +270,12 @@ function loginPage(extra = {}) {
 
 // A page with a message instead of a form: expired links, and the
 // forgot-password note.
-function messagePage(title, heading, message) {
+function messagePage(title, heading, message, link = { href: '/login', text: 'Back to login' }) {
   return authPage({
     title,
     heading,
     body: `<p class="note">${message}</p>`,
-    link: { href: '/login', text: 'Back to login' },
+    link,
   });
 }
 
@@ -411,6 +413,37 @@ router.post('/reset-password/:token', wrap(async (req, res) => {
   db.prepare('UPDATE user_accounts SET password_hash = ?, reset_token = NULL, reset_expires = NULL WHERE player_id = ?').run(hash, account.player_id);
   setSessionCookie(res, { role: 'player', playerId: account.player_id });
   res.redirect('/');
+}));
+
+// ===== EMAIL CHANGE =====
+
+// The link a member was sent at the address they asked to change to. Opening
+// it is the confirmation: the new address becomes their sign-in, the old one
+// is told, and any password reset link sent to the old one stops working.
+router.get('/confirm-email/:token', wrap(async (req, res) => {
+  const db = getDB();
+  const expired = () => res.send(messagePage('Link Expired', 'Link expired',
+    'This confirmation link has expired or was already used. Your sign-in email has not changed. To try again, open Settings and request a new link.'));
+  const change = db.prepare('SELECT * FROM email_changes WHERE token = ?').get(req.params.token);
+  if (!change || new Date(change.expires_at) < new Date()) return expired();
+  const player = db.prepare('SELECT id, email FROM players WHERE id = ?').get(change.player_id);
+  // Someone else may have taken the address since the link was sent.
+  const taken = db.prepare('SELECT 1 FROM players WHERE LOWER(email) = LOWER(?) AND id != ?').get(change.new_email, change.player_id);
+  if (!player || taken) {
+    db.prepare('DELETE FROM email_changes WHERE player_id = ?').run(change.player_id);
+    return expired();
+  }
+  db.transaction(() => {
+    db.prepare('UPDATE players SET email = ? WHERE id = ?').run(change.new_email, player.id);
+    db.prepare('UPDATE user_accounts SET reset_token = NULL, reset_expires = NULL WHERE player_id = ?').run(player.id);
+    db.prepare('DELETE FROM email_changes WHERE player_id = ?').run(player.id);
+  })();
+  if (player.email && emailConfigured()) {
+    const result = await sendEmail({ to: player.email, ...emailChangedNoticeEmail({ newEmail: change.new_email }) });
+    if (!result.ok) log.warn({ playerId: player.id, error: result.error }, 'email change notice not sent');
+  }
+  res.send(messagePage('Email Confirmed', 'Email confirmed', `You now sign in with ${serverEsc(change.new_email)}.`,
+    { href: '/', text: 'Open Play WSRC' }));
 }));
 
 router.get('/forgot-password', (req, res) => {

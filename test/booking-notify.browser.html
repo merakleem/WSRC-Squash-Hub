@@ -1,6 +1,7 @@
-<!-- The booking panel's "Notify the selected players by email" checkbox
-     (design_handoff_booking_notify), driven through the real Book a Court page
-     at a phone width. The title becomes PASS or FAIL. -->
+<!-- The booking panel's line about emails (design_handoff_player_settings,
+     section 5), driven through the real Book a Court page at a phone width.
+     Whether anyone is emailed is now each player's own setting, so the panel
+     offers no choice. The title becomes PASS or FAIL. -->
 <!doctype html><html><head><meta charset="utf-8"><title>RUNNING</title><link rel="stylesheet" href="../renderer/styles.css"></head>
 <body><div class="app-container"><div class="main-wrapper">
 <header class="topbar"><h1 id="pageTitle"></h1><div id="topbarActions"></div></header>
@@ -25,14 +26,14 @@ try {
   const { state } = await import('../renderer/state.js');
   state.currentUser = { role: 'player', playerId: 42, name: 'Liam Gallagher' };
   state.players = [
-    { id: 42, name: 'Liam Gallagher', has_email: true },
-    { id: 7, name: 'Sofia Duarte', has_email: true },
-    { id: 8, name: 'Priya Raman', has_email: false },
-    { id: 9, name: 'Jon Reyes', has_email: false },
+    { id: 42, name: 'Liam Gallagher' },
+    { id: 7, name: 'Sofia Duarte' },
+    { id: 8, name: 'Priya Raman' },
   ];
   const courts = [{ id: 1, name: 'Court 1', active: 1, sort_order: 1 }];
   const mine = { id: 1, courtId: 1, startTime: '17:00', durationMinutes: 60, title: 'Liam Gallagher', source: 'custom', players: [{ id: 42, name: 'Liam Gallagher' }, { id: 7, name: 'Sofia Duarte' }], bookedBy: 42, name: 'Liam Gallagher', info: '', courtIds: [1] };
   const calls = [];
+  let notified = 0;
   window.api = {
     getCourts: async () => courts,
     getSchedule: async () => ({ courts, slots: [mine] }),
@@ -40,7 +41,7 @@ try {
     createReservation: async (d) => { calls.push(['reserve', d]); return { reservationId: 'r1', expiresAt: Date.now() + 300000 }; },
     releaseReservation: async () => ({}),
     deleteReservation: async () => ({}),
-    confirmBooking: async (d) => { calls.push(['confirm', d]); return { id: 99, notifiedCount: d.notifyPlayers ? 1 : 0 }; },
+    confirmBooking: async (d) => { calls.push(['confirm', d]); return { id: 99, notifiedCount: notified }; },
   };
   window.navigate = () => {};
   const { renderCourtBooking } = await import('../renderer/pages/courtBooking.js');
@@ -55,61 +56,49 @@ try {
     await tick();
   };
   const remove = async (id) => { $(`.cb-chip-x[data-remove="${id}"]`).click(); await tick(); };
-  const hint = () => $('.cb-section .cb-hint:not(.cb-range)')?.textContent.trim() || '';
+  const LINE = 'Players you add are emailed if they have chosen to be.';
+  const hint = () => $$('.cb-section .cb-hint').map((h) => h.textContent.trim()).find((t) => t === LINE) || '';
+  const lastToast = () => $('#toastContainer').lastElementChild?.textContent || '';
 
   renderCourtBooking(); await tick(300);
   $('.cb-mslot[data-mstart]').click(); await tick(250);
   ok('the panel opens on an open slot', !!$('#cbPanelConfirm'));
 
-  // 1. No one added
-  ok('with no one added there is no checkbox', !$('#cbNotify'));
+  console.log('NO ONE ADDED');
+  ok('there is no line about emails', hint() === '');
+  ok('and no checkbox anywhere', !$('.cb-panel input[type=checkbox]'));
 
-  // 2. One added, ticked by default
   await add('Sofia');
-  ok('adding a player brings the checkbox', !!$('#cbNotify'));
-  ok('ticked by default', $('#cbNotify')?.checked === true);
-  ok('labelled as agreed', $('.cb-notify')?.textContent.trim() === 'Notify the selected players by email');
-  ok('it sits at the end of Playing with', $('.cb-notify')?.closest('.cb-section')?.querySelector('.cb-label')?.textContent === 'Playing with');
-
-  // 4. One without an email
+  ok('adding a player brings the line', hint() === LINE, hint());
+  ok('at the end of Playing with', $$('.cb-section').find((s) => s.querySelector('.cb-label')?.textContent === 'Playing with')?.lastElementChild?.textContent.trim() === LINE);
+  ok('still no checkbox', !$('.cb-panel input[type=checkbox]'));
   await add('Priya');
-  ok('a player with no email is named in a hint', hint() === 'Priya Raman has no email on file and will not be notified.', hint());
-  ok('indented under the label', !!$('.cb-notify-hint'));
-  await add('Jon');
-  ok('two are listed together', hint() === 'Priya Raman and Jon Reyes have no email on file and will not be notified.', hint());
-
-  // 5. Nobody can be emailed
-  await remove(7);
-  ok('with no one to email the checkbox goes', !$('#cbNotify'));
-  ok('and the hint says no one can be notified, flush left', hint() === 'Priya Raman and Jon Reyes have no email on file, so no one can be notified.' && !$('.cb-notify-hint'), hint());
-  await remove(9);
-  await add('Sofia');
-
-  // 3. Unticked, kept across re-renders
-  $('#cbNotify').click(); await tick();
+  ok('it stays one line with two added', $$('.cb-section .cb-hint').filter((h) => h.textContent.trim() === LINE).length === 1);
   await remove(8);
-  ok('unticking survives the panel redrawing', $('#cbNotify')?.checked === false);
+  await remove(7);
+  ok('removing everyone takes it away', hint() === '');
+
+  console.log('CONFIRMING');
+  await add('Sofia');
+  notified = 1;
   $('#cbPanelConfirm').click(); await tick(300);
   let sent = calls.filter((c) => c[0] === 'confirm').pop();
-  ok('confirming unticked asks for no emails', sent && sent[1].notifyPlayers === false, JSON.stringify(sent && sent[1]));
-  ok('and the toast is as it was', /^Court booked · [^·]+$/.test($('#toastContainer').lastElementChild?.textContent || ''), $('#toastContainer').lastElementChild?.textContent);
+  ok('the booking asks for nothing about emails', sent && !('notifyPlayers' in sent[1]) && JSON.stringify(sent[1].playerIds) === '[7]', JSON.stringify(sent && sent[1]));
+  ok('the toast says who was notified', / · 1 player notified$/.test(lastToast()), lastToast());
 
-  // 7. Ticked: the toast counts who was emailed
   await tick(500);
+  notified = 0;
   $('.cb-mslot[data-mstart]').click(); await tick(250);
-  ok('a new panel starts ticked again', !$('#cbNotify') || $('#cbNotify').checked);
   await add('Sofia');
-  ok('it is ticked after a fresh open', $('#cbNotify')?.checked === true);
   $('#cbPanelConfirm').click(); await tick(300);
   sent = calls.filter((c) => c[0] === 'confirm').pop();
-  ok('confirming ticked asks for the emails', sent && sent[1].notifyPlayers === true && JSON.stringify(sent[1].playerIds) === '[7]');
-  ok('and the toast says who was notified', / · 1 player notified$/.test($('#toastContainer').lastElementChild?.textContent || ''), $('#toastContainer').lastElementChild?.textContent);
+  ok('when no one wanted it the toast is as it was', /^Court booked · [^·]+$/.test(lastToast()), lastToast());
 
-  // 8. Editing sends nothing, so it offers nothing
+  console.log('EDITING');
   await tick(500);
   $('.cb-mslot[data-mbid]')?.click(); await tick(250);
   ok('the edit panel opens', /Your booking/.test($('.cb-panel-kicker')?.textContent || ''));
-  ok('with no checkbox and no note', !$('#cbNotify') && !$('.cb-notify-hint'));
+  ok('and, sending nothing, says nothing about emails', hint() === '');
 } catch (e) { ok('no exception: ' + e.message, false, e.stack); }
 document.getElementById('log').textContent = out.join('\n');
 document.title = fails ? `FAIL ${fails}` : 'PASS';

@@ -571,6 +571,29 @@ const MIGRATIONS = [
       )`);
     },
   },
+  {
+    id: 33, name: 'player settings: email notifications and confirmed email changes',
+    // What each member wants emailed to them. Being added to a court booking
+    // is on for everyone, the rest off, as the Settings page shows them.
+    //
+    // An email change waits here until the link sent to the new address is
+    // clicked: the email is also the sign-in, so a typo must never take
+    // effect. One pending change per member; asking again replaces it.
+    up: (db, h) => {
+      h.addColumn('players', 'notify_booking_added', `INTEGER NOT NULL DEFAULT 1`);
+      h.addColumn('players', 'notify_league_new', `INTEGER NOT NULL DEFAULT 0`);
+      h.addColumn('players', 'notify_tournament_new', `INTEGER NOT NULL DEFAULT 0`);
+      h.addColumn('players', 'notify_event_new', `INTEGER NOT NULL DEFAULT 0`);
+      h.addColumn('players', 'notify_score_reported', `INTEGER NOT NULL DEFAULT 0`);
+      h.createTable(`CREATE TABLE email_changes (
+        player_id INTEGER PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+        new_email TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+    },
+  },
 ];
 
 /**

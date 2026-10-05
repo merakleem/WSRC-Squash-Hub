@@ -1,0 +1,167 @@
+<!-- A member's Settings page (design_handoff_player_settings) against a fake
+     API: saving the profile, the switches, the email change and its waiting
+     state, the reset link, and an account with no email. The title becomes
+     PASS or FAIL. -->
+<!doctype html><html><head><meta charset="utf-8"><title>RUNNING</title><link rel="stylesheet" href="../renderer/styles.css"></head>
+<body><div class="app-container"><div class="main-wrapper">
+<header class="topbar"><h1 id="pageTitle"></h1><div id="topbarActions"></div></header>
+<main class="content" id="mainContent"></main></div></div>
+<div class="modal-overlay" id="modalOverlay"><div class="modal" id="modal" tabindex="-1"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose"></button></div><div class="modal-body" id="modalBody"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log" style="position:fixed;inset:0;background:#fff;z-index:999;font:12px monospace;padding:12px;white-space:pre-wrap;overflow:auto"></pre>
+<script type="module">
+const out = []; let fails = 0;
+const ok = (n, c, x = '') => { if (!c) fails++; out.push((c ? '  PASS  ' : '  FAIL  ') + n + (x !== '' ? '  [' + x + ']' : '')); };
+try {
+  const { state } = await import('../renderer/state.js');
+  state.currentUser = { role: 'player', playerId: 5, name: 'Liam Gallagher' };
+  state.players = [{ id: 5, name: 'Liam Gallagher' }];
+  state.page = 'settings';
+
+  const fresh = () => ({
+    id: 5, name: 'Liam Gallagher', email: 'liam.gallagher@example.com', phone: '', member_number: '1068', is_member: true, photo_path: null, pending_email: null,
+    notifications: { notify_booking_added: true, notify_league_new: false, notify_tournament_new: false, notify_event_new: false, notify_score_reported: false },
+  });
+  let me = fresh();
+  const calls = [];
+  let failNext = null; // an Error the next write throws
+  let painted = 0;
+  window.paintAccountCard = () => { painted++; };
+  const fieldError = (field, message) => Object.assign(new Error(message), { field });
+  const write = async (name, args, apply) => {
+    calls.push([name, args]);
+    await new Promise((r) => setTimeout(r, 30));
+    if (failNext) { const e = failNext; failNext = null; throw e; }
+    return apply();
+  };
+  window.api = {
+    getMySettings: async () => structuredClone(me),
+    saveMyProfile: (d) => write('profile', d, () => { me = { ...me, name: d.name.trim(), phone: d.phone.trim() }; return structuredClone(me); }),
+    setMyNotification: (key, value) => write('notify', { key, value }, () => { me.notifications[key] = value; return { key, value }; }),
+    changeMyEmail: (email) => write('email', email, () => { me.pending_email = email; return structuredClone(me); }),
+    resendMyEmailChange: () => write('resend', null, () => structuredClone(me)),
+    cancelMyEmailChange: () => write('cancel', null, () => { me.pending_email = null; return structuredClone(me); }),
+    sendMyPasswordReset: () => write('reset', null, () => ({ ok: true })),
+  };
+  const { renderSettings } = await import('../renderer/pages/settings.js');
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+  const tick = (ms = 120) => new Promise((r) => setTimeout(r, ms));
+  const type = (sel, v) => { const el = $(sel); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+  const lastToast = () => $('#toastContainer').lastElementChild?.textContent || '';
+  const narrow = innerWidth < 768;
+
+  await renderSettings(); await tick();
+  ok('the title is Settings', $('#pageTitle').textContent === 'Settings');
+  ok('three cards in order', $$('.ps-card .section-label').map((e) => e.textContent).join('|') === 'Profile|Sign-in and security|Email notifications');
+  ok('initials stand in for a photo', $('.ps-avatar')?.textContent === 'LG');
+  ok('member number and status are read-only', $('.ps-readonly-val')?.textContent === '1068' && $('.ps-readonly .pill--green')?.textContent === 'Active' && !$('.ps-readonly input'));
+  ok('the page is no wider than 760px', $('.ps-page').getBoundingClientRect().width <= 760);
+  ok('nothing runs off the side', document.documentElement.scrollWidth <= innerWidth, `${document.documentElement.scrollWidth} > ${innerWidth}`);
+  ok(narrow ? 'name and phone stack on a phone' : 'name and phone sit side by side',
+    narrow ? $('#psPhone').getBoundingClientRect().top > $('#psName').getBoundingClientRect().bottom
+           : Math.abs($('#psPhone').getBoundingClientRect().top - $('#psName').getBoundingClientRect().top) < 2);
+
+  console.log('PROFILE');
+  ok('Save is disabled until something changes', $('#psProfileSave').disabled && !$('.ps-dirty') && !$('#psProfileCancel'));
+  type('#psPhone', '519 555 0101');
+  ok('a change shows Unsaved changes, Cancel and an enabled Save', !!$('.ps-dirty') && !!$('#psProfileCancel') && !$('#psProfileSave').disabled);
+  $('#psProfileCancel').click(); await tick();
+  ok('Cancel puts the saved value back', $('#psPhone').value === '' && $('#psProfileSave').disabled);
+
+  type('#psName', '   ');
+  $('#psProfileSave').click(); await tick();
+  ok('a blank name is caught on the field', $('#psName').closest('.form-group').querySelector('.form-error')?.textContent === 'Name is required.' && $('#psName').classList.contains('ps-invalid'));
+  ok('without asking the server', !calls.some((c) => c[0] === 'profile'));
+  type('#psName', 'Liam G');
+  ok('typing clears the mark', !$('#psName').classList.contains('ps-invalid') && !$('#psName').closest('.form-group').querySelector('.form-error'));
+
+  type('#psPhone', 'call me');
+  failNext = fieldError('phone', 'That phone number does not look right.');
+  $('#psProfileSave').click();
+  await tick(5);
+  ok('while saving, Save reads Saving… and the fields are disabled', $('#psProfileSave').textContent === 'Saving…' && $('#psName').disabled);
+  await tick();
+  ok('the server\'s phone error lands on the phone field', $('#psPhone').closest('.form-group').querySelector('.form-error')?.textContent === 'That phone number does not look right.');
+  ok('and what was typed is kept', $('#psName').value === 'Liam G' && $('#psPhone').value === 'call me' && !!$('.ps-dirty'));
+
+  type('#psPhone', '519 555 0101');
+  $('#psProfileSave').click(); await tick();
+  ok('a good save says so', lastToast() === 'Profile saved');
+  ok('and settles back to clean', $('#psProfileSave').disabled && !$('.ps-dirty') && $('#psName').value === 'Liam G');
+  ok('the sidebar card is told the new name', painted === 1 && state.currentUser.name === 'Liam G' && state.players[0].name === 'Liam G');
+
+  type('#psName', 'Liam Gallagher');
+  failNext = new Error('boom');
+  $('#psProfileSave').click(); await tick();
+  ok('any other failure is a toast', lastToast() === 'Could not save your profile. Try again.');
+  $('#psProfileCancel').click(); await tick();
+
+  console.log('NOTIFICATIONS');
+  const sw = (key) => $(`input[data-pref="${key}"]`);
+  const status = (key) => sw(key).closest('.ps-switch-row').querySelector('.ps-switch-status');
+  ok('booking emails start on, the rest off', sw('notify_booking_added').checked && !sw('notify_league_new').checked && !sw('notify_score_reported').checked);
+  ok('the five rows are labelled as agreed', $$('.ps-switch-label').map((e) => e.textContent).join('|') ===
+    'Someone adds me to a court booking|A new league is announced|A new tournament is announced|A new event is posted|Someone reports a score for my match');
+  ok('the card says where they go', $$('.ps-card-sub')[2].textContent === 'Sent to liam.gallagher@example.com.');
+  sw('notify_league_new').click();
+  await tick(5);
+  ok('flipping shows Saving…', status('notify_league_new').textContent === 'Saving…' && sw('notify_league_new').closest('.ps-switch-row').classList.contains('ps-switch-row--saving'));
+  await tick();
+  ok('then Saved', status('notify_league_new').textContent === 'Saved' && status('notify_league_new').classList.contains('ps-switch-status--ok'));
+  ok('and it was sent', JSON.stringify(calls.at(-1)) === JSON.stringify(['notify', { key: 'notify_league_new', value: true }]));
+  await tick(2100);
+  ok('Saved goes after two seconds', status('notify_league_new').textContent === '');
+  failNext = new Error('down');
+  sw('notify_event_new').click(); await tick();
+  ok('a failed save flips the switch back', !sw('notify_event_new').checked && lastToast() === 'Could not save that setting. Try again.');
+
+  console.log('EMAIL');
+  type('#psName', 'Typed but not saved');
+  $('#psChangeEmail').click(); await tick();
+  ok('Change opens the modal', $('#modalTitle').textContent === 'Change email' && /you keep signing in with liam.gallagher@example.com in the meantime\./.test($('.ps-modal-intro').textContent));
+  const tryEmail = async (v) => { $('#psNewEmail').value = v; $('#psEmailSend').click(); await tick(); return $('#psEmailError').hidden ? '' : $('#psEmailError').textContent; };
+  ok('blank', await tryEmail('') === 'Enter an email address.');
+  ok('not an address', await tryEmail('liam.gmail') === 'That does not look like an email address.');
+  ok('the same as now', await tryEmail('Liam.Gallagher@example.com') === 'That is already your email.');
+  failNext = fieldError('email', 'That email is already used by another member.');
+  ok('taken, from the server', await tryEmail('priya@example.com') === 'That email is already used by another member.');
+  await tryEmail('liam.g@gmail.com');
+  ok('a good address closes the modal with a toast', !$('#modalOverlay').classList.contains('open') && lastToast() === 'Confirmation link sent to liam.g@gmail.com');
+  ok('the row shows it waiting', /Waiting for you to confirm liam\.g@gmail\.com\. Check that inbox\./.test($('.ps-notice--pending')?.textContent.replace(/\s+/g, ' ') || ''));
+  ok('says the old one still works', [...$$('.ps-row-sub')].some((e) => e.textContent === 'You still sign in with this address.'));
+  ok('and Change is hidden meanwhile', !$('#psChangeEmail'));
+  ok('the unsaved name survived the redraw', $('#psName').value === 'Typed but not saved' && !!$('.ps-dirty'));
+  $('#psResend').click(); await tick();
+  ok('Resend link', calls.at(-1)[0] === 'resend' && lastToast() === 'Confirmation link sent again');
+  $('#psCancelChange').click(); await tick();
+  ok('Cancel change', calls.at(-1)[0] === 'cancel' && lastToast() === 'Email change cancelled' && !$('.ps-notice--pending') && !!$('#psChangeEmail'));
+  $('#psProfileCancel').click(); await tick();
+
+  console.log('PASSWORD');
+  ok('the reset row names the address', [...$$('.ps-row-sub')].some((e) => e.textContent === 'Send a link to liam.gallagher@example.com.'));
+  failNext = new Error('down');
+  $('#psSendReset').click(); await tick();
+  ok('a failed send is a toast and the button comes back', lastToast() === 'Could not send the reset email. Try again.' && !$('#psSendReset').disabled);
+  $('#psSendReset').click(); await tick();
+  ok('a sent link says so and disables the button', /Reset link sent/.test($('.ps-row-ok')?.textContent || '') && $('#psSendReset').disabled
+    && [...$$('.ps-row-sub')].some((e) => e.textContent === 'Check liam.gallagher@example.com. The link works once.'));
+
+  console.log('NO EMAIL ON FILE');
+  me = { ...fresh(), email: null };
+  await renderSettings(); await tick();
+  ok('a warning takes the email row', $('.ps-notice--warn .ps-notice-title')?.textContent === 'No email on file' && !!$('#psAddEmail'));
+  ok('the reset button is off and says why', $('#psSendReset').disabled && [...$$('.ps-row-sub')].some((e) => e.textContent === 'Add an email first, then we can send you a reset link.'));
+  ok('every switch is locked', $$('.ps-switch-row').every((r) => r.classList.contains('ps-switch-row--locked')) && $$('input[data-pref]').every((i) => i.disabled));
+  ok('and the card says how to unlock them', $$('.ps-card-sub')[2].textContent === 'Add an email under Sign-in and security to turn these on.');
+  $('#psAddEmail').click(); await tick();
+  ok('Add an email opens the same modal, worded for adding', $('#modalTitle').textContent === 'Add an email' && $('label[for=psNewEmail]').textContent === 'Email'
+    && $('.ps-modal-intro').textContent === 'We will send a confirmation link to this address. Your email is set as soon as you click it.');
+  await tryEmail('liam@example.com');
+  ok('while it waits the warning stays, with the waiting note under it', !!$('.ps-notice--warn') && /liam@example\.com/.test($('.ps-notice--pending')?.textContent || ''));
+
+  ok('no em dash anywhere on the page', !/—/.test(document.getElementById('mainContent').textContent));
+} catch (e) { ok('no exception: ' + e.message, false, e.stack); }
+document.getElementById('log').textContent = out.join('\n');
+document.title = fails ? `FAIL ${fails}` : 'PASS';
+</script></body></html>

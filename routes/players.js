@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { getDB } = require('../database/db');
 const { wrap, requireAdmin, requireAuth, emailLimiter } = require('../middleware');
 const { sendEmail, isConfigured: emailConfigured, appUrl, inviteEmail } = require('../lib/email');
+const { sendPasswordReset } = require('../lib/passwordReset');
 const playerService = require('../services/playerService');
 const playerModel = require('../models/playerModel');
 const seasonModel = require('../models/seasonModel');
@@ -28,9 +29,9 @@ function _daysBefore(iso, n) {
 // themselves are never left out: only these fields are.
 function _stripContact(player) {
   const { email, phone, member_number, is_member, is_tester, account_status, ...rest } = player;
-  // Whether there is an address, never the address: booking a court offers to
-  // email the players added, and says who cannot be reached.
-  return { ...rest, has_email: !!(email && String(email).trim()) };
+  // Which emails someone wants is theirs alone, like the address itself.
+  for (const k of Object.keys(rest)) if (k.startsWith('notify_')) delete rest[k];
+  return rest;
 }
 
 router.get('/players', wrap(async (req, res) => {
@@ -298,27 +299,9 @@ router.post('/players/:id/send-reset', requireAdmin, emailLimiter, wrap(async (r
   const account = db.prepare('SELECT * FROM user_accounts WHERE player_id = ?').get(playerId);
   if (!account || !account.password_hash) return res.status(400).json({ error: 'This player has not activated their account yet. Send an invite instead.' });
 
-  const token = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-  db.prepare('UPDATE user_accounts SET reset_token = ?, reset_expires = ? WHERE player_id = ?').run(token, expires, playerId);
-
-  const resetUrl = `${appUrl(req)}/reset-password/${token}`;
-
-  if (emailConfigured() && player.email) {
-    const result = await sendEmail({
-      to: player.email,
-      subject: 'Reset your Play WSRC password',
-      html: `<p>Hi ${player.name},</p>
-<p>A password reset was requested for your Play WSRC account.</p>
-<p><a href="${resetUrl}">Click here to reset your password</a></p>
-<p>This link expires in 24 hours. If you did not request this, you can ignore this email.</p>`,
-    });
-    if (!result.ok) return res.status(502).json({ error: result.error, resetUrl });
-    return res.json({ ok: true, emailSent: true, resetUrl });
-  }
-
-  res.json({ ok: true, emailSent: false, resetUrl });
+  const result = await sendPasswordReset(req, player);
+  if (result.error) return res.status(502).json({ error: result.error, resetUrl: result.resetUrl });
+  res.json({ ok: true, emailSent: result.emailSent, resetUrl: result.resetUrl });
 }));
 
 router.post('/players/:id/message', requireAuth, emailLimiter, wrap(async (req, res) => {

@@ -72,7 +72,8 @@ export function renderPlayerProfile() {
         <button class="options-item options-item-danger" data-action="delete-player" data-id="${p.id}" data-name="${esc(p.name)}">Delete Player</button>
       </div>
     </div>`
-  : !isOwnProfile ? `<button class="btn btn-outline" id="btnMessagePlayer">Message</button>` : '';
+  : !isOwnProfile ? `<button class="btn btn-outline" id="btnMessagePlayer">Message</button>`
+  : `<button class="btn btn-outline" id="btnOwnSettings">Settings</button>`;
 
   if (adminMode) {
     document.getElementById('optionsBtn').addEventListener('click', (e) => {
@@ -131,6 +132,8 @@ export function renderPlayerProfile() {
     document.getElementById('btnMessagePlayer')?.addEventListener('click', () => {
       openMessagePlayerModal(p.id, p.name);
     });
+  } else {
+    document.getElementById('btnOwnSettings')?.addEventListener('click', () => window.navigate('settings'));
   }
 
   // ===== DATA =====
