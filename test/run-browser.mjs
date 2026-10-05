@@ -39,6 +39,7 @@ const WIDTHS = {
   'unread-markers': [1280, 390],
   'event-add-member': [1280, 390],
   'tournaments-knockout': [1280, 390],
+  'booking-notify': [390],
 };
 
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };

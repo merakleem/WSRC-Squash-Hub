@@ -5,6 +5,8 @@ const bookingModel = require('../models/bookingModel');
 const { hasBookingConflict, createReservation, getReservation, deleteReservation } = require('../lib/reservations');
 const { suggestSlot } = require('../lib/courtSuggestion');
 const { wrap, requireAdmin, requireAuth, requireMember } = require('../middleware');
+const { isConfigured: emailConfigured, sendMany, bookingNoticeEmail, appUrl } = require('../lib/email');
+const log = require('../lib/log');
 
 const router = express.Router();
 
@@ -36,7 +38,7 @@ router.delete('/reservations/:id', requireAuth, requireMember, wrap(async (req, 
 // ===== PLAYER BOOKINGS =====
 
 router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res) => {
-  const { reservationId, durationMinutes, playerIds } = req.body;
+  const { reservationId, durationMinutes, playerIds, notifyPlayers } = req.body;
   const rsv = reservationId ? getReservation(reservationId) : null;
   if (!rsv) return res.status(400).json({ error: 'Reservation not found or expired. Please try again.' });
   if (rsv.playerId !== req.session.playerId) return res.status(403).json({ error: 'Not your reservation.' });
@@ -69,8 +71,44 @@ router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res
     bookedBy: req.session.playerId,
   });
   deleteReservation(reservationId);
-  res.json(booking);
+  const notifiedCount = notifyPlayers ? await _notifyAdded(req, {
+    bookerName: player?.name || 'A club member', guestIds, rsv, durationMinutes: finalDuration,
+  }) : 0;
+  res.json({ ...booking, notifiedCount });
 }));
+
+/**
+ * Email each added player that the booker booked a court with them. Returns
+ * how many were sent. A booking stands whatever happens here: a failed send
+ * is logged and counted as not notified, never an error for the booker.
+ */
+async function _notifyAdded(req, { bookerName, guestIds, rsv, durationMinutes }) {
+  if (!guestIds.length || !emailConfigured()) return 0;
+  const db = getDB();
+  const guests = guestIds.map((id) => db.prepare('SELECT id, name, email FROM players WHERE id = ?').get(id)).filter(Boolean);
+  const courtName = db.prepare('SELECT name FROM courts WHERE id = ?').get(rsv.courtId)?.name || 'Your court';
+  const url = appUrl(req);
+  const messages = guests.filter((g) => g.email).map((g) => ({
+    to: [g.email],
+    ...bookingNoticeEmail({
+      recipientName: g.name,
+      bookerName,
+      others: guests.filter((o) => o.id !== g.id).map((o) => o.name),
+      courtName,
+      date: rsv.date,
+      startTime: rsv.startTime,
+      durationMinutes,
+      url,
+    }),
+  }));
+  if (!messages.length) return 0;
+  try {
+    return (await sendMany(messages)).sent;
+  } catch (err) {
+    log.error({ err }, 'booking notice failed');
+    return 0;
+  }
+}
 
 router.get('/my-bookings', requireAuth, requireMember, wrap(async (req, res) => {
   // Club time, not the container's and not the client's. The container runs UTC,

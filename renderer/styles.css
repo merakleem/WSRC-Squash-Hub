@@ -7336,6 +7336,12 @@ span.match-court-label.timing-btn-empty:hover { color: var(--accent); }
 }
 .cb-room { margin-left: auto; font-size: 12px; color: #93a2b5; }
 .cb-hint { font-size: 12px; color: #93a2b5; }
+/* Notify by email (design_handoff_booking_notify): the app's own .check-label
+   row at the end of Playing with. While the booking is sent it dims like the
+   Confirm button does; a hint under it indents to the label text (15px box +
+   8px gap). */
+.cb-notify--busy { opacity: .6; pointer-events: none; }
+.cb-notify-hint { margin-top: -5px; padding-left: 23px; line-height: 1.45; }
 
 .cb-stepper { display: flex; align-items: center; height: 52px; border: 1px solid #dce3ed; border-radius: 11px; overflow: hidden; }
 .cb-step {

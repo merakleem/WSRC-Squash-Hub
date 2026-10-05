@@ -28,7 +28,9 @@ function _daysBefore(iso, n) {
 // themselves are never left out: only these fields are.
 function _stripContact(player) {
   const { email, phone, member_number, is_member, is_tester, account_status, ...rest } = player;
-  return rest;
+  // Whether there is an address, never the address: booking a court offers to
+  // email the players added, and says who cannot be reached.
+  return { ...rest, has_email: !!(email && String(email).trim()) };
 }
 
 router.get('/players', wrap(async (req, res) => {
