@@ -1025,6 +1025,7 @@ function _openPanel(mode, opts = {}) {
   cb.panelSearch    = '';
   cb.panelBusy      = false;
   cb.panelAskCancel = false;
+  // Ticked every time a panel opens; unticking lasts for that panel only.
   _renderPanel();
   _renderBody();
 }
@@ -1092,6 +1093,12 @@ function _buildPanelInner() {
     </div>` : '';
 
   const others = isEdit ? _otherNames(booking || {}) : [];
+
+  // Added players are emailed if their Settings say so; the line says as
+  // much once anyone is added. Editing sends nothing, so it says nothing.
+  const notifyHTML = !isEdit && cb.panelPlayers.length > 0
+    ? '<span class="cb-hint">Players you add are emailed if they have chosen to be.</span>'
+    : '';
   const playerCount = 1 + cb.panelPlayers.length;
 
   const room = 3 - cb.panelPlayers.length;
@@ -1149,6 +1156,7 @@ function _buildPanelInner() {
             <input class="cb-search-input" id="cbPlayerSearch" type="text" placeholder="Search club players…" value="${esc(cb.panelSearch)}" autocomplete="off">
             ${searchDropdown}
           </div>` : ''}
+        ${notifyHTML}
       </div>
     </div>
 
@@ -1222,6 +1230,7 @@ function _attachPanelListeners() {
     _renderPanel();
   });
   document.getElementById('cbConfirmCancel')?.addEventListener('click', _cancelBooking);
+
 
   document.getElementById('cbDurMinus')?.addEventListener('click', () => _stepDuration(-SLOT_MIN));
   document.getElementById('cbDurPlus')?.addEventListener('click', () => _stepDuration(SLOT_MIN));
@@ -1345,7 +1354,7 @@ async function _confirmBooking() {
   cb.panelBusy = true;
   _renderPanel();
   try {
-    await window.api.confirmBooking({
+    const result = await window.api.confirmBooking({
       reservationId: cb.reservation.id,
       durationMinutes: cb.panelDuration,
       playerIds: cb.panelPlayers,
@@ -1355,7 +1364,8 @@ async function _confirmBooking() {
     const bookedStart = cb.panelStartMin;
     const bookedDur   = cb.panelDuration;
     _closePanel('confirmed');
-    toast(`Court booked · ${fmtRange(bookedStart, bookedDur)}`, 'success');
+    const n = result?.notifiedCount ?? 0;
+    toast(`Court booked · ${fmtRange(bookedStart, bookedDur)}${n ? ` · ${n} player${n === 1 ? '' : 's'} notified` : ''}`, 'success');
     delete cb.scheduleCache[cb.date];
     await Promise.all([_loadSchedule(cb.date), _loadMyBookings()]);
     _renderBody();

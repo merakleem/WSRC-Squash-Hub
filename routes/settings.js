@@ -1,7 +1,8 @@
 const express = require('express');
 const settingsModel = require('../models/settingsModel');
 const elo = require('../lib/elo');
-const { wrap, requireAdmin } = require('../middleware');
+const { wrap, hasPerm } = require('../middleware');
+const { audit, describeSettings } = require('../lib/audit');
 
 // Bounds for the ladder's tuning values. A number outside these does not break
 // the maths so much as make the ladder nonsense, and it is easier to refuse
@@ -23,7 +24,23 @@ router.get('/settings', wrap(async (req, res) => {
   res.json({ ...settings, ladder: elo.config(settings) });
 }));
 
-router.put('/settings', requireAdmin, wrap(async (req, res) => {
+// Which permission each setting needs. Anything not listed is the admin
+// account's alone.
+const SETTING_AREA = {
+  club_timezone: 'club',
+  elo_club_locker_pivot: 'ladder',
+  elo_club_locker_scale: 'ladder',
+  elo_margin_weight: 'ladder',
+};
+function requireSettingPerms(req, res, next) {
+  const keys = Object.keys(req.body && typeof req.body === 'object' ? req.body : {});
+  const ok = req.session?.role === 'admin' || (keys.length > 0 && keys.every((k) => SETTING_AREA[k] && hasPerm(req.session, SETTING_AREA[k])));
+  if (!ok) return res.status(403).json({ error: "You don't have permission to do that." });
+  next();
+}
+const settingsArea = (req) => SETTING_AREA[Object.keys(req.body || {})[0]] || 'club';
+
+router.put('/settings', requireSettingPerms, (req, res, next) => audit(settingsArea(req), describeSettings(req.body))(req, res, next), wrap(async (req, res) => {
   const updates = req.body;
   if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
     return res.status(400).json({ error: 'Expected an object of key/value pairs' });

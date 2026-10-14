@@ -520,6 +520,143 @@ const MIGRATIONS = [
       )`);
     },
   },
+  {
+    id: 31, name: 'retire the groups tournament format',
+    // Tournaments become single-elimination knockouts (migration 32). The old
+    // format - sixteen players in four groups, then a fixed eight-player
+    // bracket - has no place in that model, so its tournaments go, and with
+    // them (by cascade) their matches, players, groups and courts. An event
+    // that linked to one keeps itself and loses the link (ON DELETE SET NULL).
+    up: (db) => {
+      db.prepare(`DELETE FROM tournaments WHERE type = 'groups_16'`).run();
+      db.prepare(`DELETE FROM matches WHERE type = 'tournament' AND tournament_id NOT IN (SELECT id FROM tournaments)`).run();
+    },
+  },
+  {
+    id: 32, name: 'knockout tournaments',
+    // A tournament is announced (status 'upcoming'), members sign up, and the
+    // admin builds the draw, which makes it 'active' and then 'completed' when
+    // the final is played. The same row throughout, as with leagues, so the
+    // signups stay attached to the tournament people joined.
+    //
+    // championship_date keeps meaning "the day it all ends": the tentative
+    // first-round date while announced, the final's date once built.
+    up: (db, h) => {
+      h.addColumn('tournaments', 'draw_cap', `INTEGER NOT NULL DEFAULT 16`);  // 8 or 16, set when announced
+      h.addColumn('tournaments', 'draw_size', `INTEGER`);                     // 8 or 16, set when built
+      h.addColumn('tournaments', 'seeding', `TEXT NOT NULL DEFAULT 'ladder'`); // ladder | manual
+      h.addColumn('tournaments', 'description', `TEXT NOT NULL DEFAULT ''`);
+      h.addColumn('tournaments', 'first_round_date', `TEXT`);
+      h.addColumn('tournaments', 'signup_deadline', `TEXT`);                  // null = no deadline
+      // Ladder rank when the draw was seeded, so "#12 at seeding" never moves.
+      h.addColumn('tournament_players', 'ladder_rank', `INTEGER`);
+      // Withdrawn after the draw was built: they keep their line in the draw,
+      // and whoever meets them next gets a walkover.
+      h.addColumn('tournament_players', 'withdrawn', `INTEGER NOT NULL DEFAULT 0`);
+      h.createTable(`CREATE TABLE tournament_signups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tournament_id, player_id)
+      )`);
+      h.createIndex(`CREATE INDEX IF NOT EXISTS idx_tournament_signups_tournament ON tournament_signups (tournament_id)`);
+      // One date and start time per round; round_index 0 is the first round.
+      h.createTable(`CREATE TABLE tournament_rounds (
+        tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+        round_index INTEGER NOT NULL,
+        round_date TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        PRIMARY KEY (tournament_id, round_index)
+      )`);
+    },
+  },
+  {
+    id: 33, name: 'player settings: email notifications and confirmed email changes',
+    // What each member wants emailed to them. Being added to a court booking
+    // is on for everyone, the rest off, as the Settings page shows them.
+    //
+    // An email change waits here until the link sent to the new address is
+    // clicked: the email is also the sign-in, so a typo must never take
+    // effect. One pending change per member; asking again replaces it.
+    up: (db, h) => {
+      h.addColumn('players', 'notify_booking_added', `INTEGER NOT NULL DEFAULT 1`);
+      h.addColumn('players', 'notify_league_new', `INTEGER NOT NULL DEFAULT 0`);
+      h.addColumn('players', 'notify_tournament_new', `INTEGER NOT NULL DEFAULT 0`);
+      h.addColumn('players', 'notify_event_new', `INTEGER NOT NULL DEFAULT 0`);
+      h.addColumn('players', 'notify_score_reported', `INTEGER NOT NULL DEFAULT 0`);
+      h.createTable(`CREATE TABLE email_changes (
+        player_id INTEGER PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+        new_email TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+    },
+  },
+  {
+    id: 34, name: 'staff accounts and the activity log',
+    // Staff accounts sit beside the admin login (blank email and the club
+    // password), which is unchanged. Each staff member has their own email
+    // and password, a set of permissions and, if the admin account requires
+    // it, an authenticator app. They are not players and never appear as one.
+    //
+    // Link tokens are stored as SHA-256 hashes and backup codes as bcrypt
+    // hashes, so a copy of the database cannot be used to sign in.
+    // session_version is in every staff session cookie: raising it signs
+    // that person out everywhere (disable, password change, "sign out of all
+    // devices").
+    //
+    // The activity log records what the admin account and staff change.
+    // staff_id is null for the admin account. The text is written at the time,
+    // so it still reads right after the things it names are renamed or gone.
+    up: (db, h) => {
+      h.createTable(`CREATE TABLE staff_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT,
+        status TEXT NOT NULL DEFAULT 'invited' CHECK (status IN ('invited', 'active', 'disabled')),
+        permissions TEXT NOT NULL DEFAULT '[]',
+        require_two_step INTEGER NOT NULL DEFAULT 0,
+        totp_secret TEXT,
+        totp_enabled_at TEXT,
+        totp_last_step INTEGER,
+        two_step_failures INTEGER NOT NULL DEFAULT 0,
+        two_step_locked_until TEXT,
+        invite_token_hash TEXT,
+        invite_expires TEXT,
+        invited_at TEXT,
+        reset_token_hash TEXT,
+        reset_expires TEXT,
+        session_version INTEGER NOT NULL DEFAULT 0,
+        password_changed_at TEXT,
+        last_signed_in_at TEXT,
+        disabled_at TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      h.createTable(`CREATE TABLE staff_backup_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        staff_id INTEGER NOT NULL REFERENCES staff_accounts(id) ON DELETE CASCADE,
+        code_hash TEXT NOT NULL,
+        used_at TEXT
+      )`);
+      h.createTable(`CREATE TABLE staff_email_changes (
+        staff_id INTEGER PRIMARY KEY REFERENCES staff_accounts(id) ON DELETE CASCADE,
+        new_email TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL
+      )`);
+      h.createTable(`CREATE TABLE activity_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        staff_id INTEGER REFERENCES staff_accounts(id),
+        area TEXT NOT NULL,
+        text TEXT NOT NULL
+      )`);
+      h.createIndex('CREATE INDEX idx_activity_log_at ON activity_log (at)');
+    },
+  },
 ];
 
 /**

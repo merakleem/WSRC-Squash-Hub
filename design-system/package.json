@@ -1,0 +1,25 @@
+{
+  "name": "playwsrc-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "React mirror of the Play WSRC app's component vocabulary (renderer/styles.css), for Claude Design. The app itself does not use this package.",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.25.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.6.0"
+  }
+}

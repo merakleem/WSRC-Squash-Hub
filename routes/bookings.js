@@ -4,7 +4,10 @@ const { clubNow } = require('../lib/clock');
 const bookingModel = require('../models/bookingModel');
 const { hasBookingConflict, createReservation, getReservation, deleteReservation } = require('../lib/reservations');
 const { suggestSlot } = require('../lib/courtSuggestion');
-const { wrap, requireAdmin, requireAuth, requireMember } = require('../middleware');
+const { wrap, requireAuth, requireMember, requirePerm } = require('../middleware');
+const { audit } = require('../lib/audit');
+const { isConfigured: emailConfigured, sendMany, bookingNoticeEmail, appUrl } = require('../lib/email');
+const log = require('../lib/log');
 
 const router = express.Router();
 
@@ -69,8 +72,45 @@ router.post('/player-bookings', requireAuth, requireMember, wrap(async (req, res
     bookedBy: req.session.playerId,
   });
   deleteReservation(reservationId);
-  res.json(booking);
+  const notifiedCount = await _notifyAdded(req, {
+    bookerName: player?.name || 'A club member', guestIds, rsv, durationMinutes: finalDuration,
+  });
+  res.json({ ...booking, notifiedCount });
 }));
+
+/**
+ * Email each added player who wants it (their Settings, on unless turned off)
+ * that the booker booked a court with them. Returns how many were sent. A
+ * booking stands whatever happens here: a failed send is logged and counted
+ * as not notified, never an error for the booker.
+ */
+async function _notifyAdded(req, { bookerName, guestIds, rsv, durationMinutes }) {
+  if (!guestIds.length || !emailConfigured()) return 0;
+  const db = getDB();
+  const guests = guestIds.map((id) => db.prepare('SELECT id, name, email, notify_booking_added FROM players WHERE id = ?').get(id)).filter(Boolean);
+  const courtName = db.prepare('SELECT name FROM courts WHERE id = ?').get(rsv.courtId)?.name || 'Your court';
+  const url = appUrl(req);
+  const messages = guests.filter((g) => g.email && g.notify_booking_added).map((g) => ({
+    to: [g.email],
+    ...bookingNoticeEmail({
+      recipientName: g.name,
+      bookerName,
+      others: guests.filter((o) => o.id !== g.id).map((o) => o.name),
+      courtName,
+      date: rsv.date,
+      startTime: rsv.startTime,
+      durationMinutes,
+      url,
+    }),
+  }));
+  if (!messages.length) return 0;
+  try {
+    return (await sendMany(messages)).sent;
+  } catch (err) {
+    log.error({ err }, 'booking notice failed');
+    return 0;
+  }
+}
 
 router.get('/my-bookings', requireAuth, requireMember, wrap(async (req, res) => {
   // Club time, not the container's and not the client's. The container runs UTC,
@@ -150,28 +190,28 @@ router.get('/booking-types', wrap(async (req, res) => {
   res.json(await bookingModel.getAllBookingTypes());
 }));
 
-router.post('/booking-types', requireAdmin, wrap(async (req, res) => {
+router.post('/booking-types', requirePerm('courts'), audit('courts'), wrap(async (req, res) => {
   const { name, color } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!color?.trim()) return res.status(400).json({ error: 'Color is required' });
   res.json(await bookingModel.addBookingType({ name: name.trim(), color: color.trim() }));
 }));
 
-router.put('/booking-types/:id', requireAdmin, wrap(async (req, res) => {
+router.put('/booking-types/:id', requirePerm('courts'), audit('courts'), wrap(async (req, res) => {
   const { name, color } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!color?.trim()) return res.status(400).json({ error: 'Color is required' });
   res.json(await bookingModel.updateBookingType({ id: req.params.id, name: name.trim(), color: color.trim() }));
 }));
 
-router.delete('/booking-types/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/booking-types/:id', requirePerm('courts'), audit('courts'), wrap(async (req, res) => {
   await bookingModel.deleteBookingType(req.params.id);
   res.json({ ok: true });
 }));
 
 // ===== BOOKINGS =====
 
-router.post('/bookings', requireAdmin, wrap(async (req, res) => {
+router.post('/bookings', requirePerm('schedule'), audit('schedule'), wrap(async (req, res) => {
   const { courtId, courtIds, date, startTime, durationMinutes, bookingTypeId, name, info, playerIds } = req.body;
   const hasCourtId = courtId || (Array.isArray(courtIds) && courtIds.length > 0);
   if (!hasCourtId) return res.status(400).json({ error: 'Court is required' });
@@ -181,7 +221,7 @@ router.post('/bookings', requireAdmin, wrap(async (req, res) => {
   res.json(await bookingModel.addBooking({ courtId, courtIds, date, startTime, durationMinutes, bookingTypeId, name, info, playerIds }));
 }));
 
-router.post('/bookings/repeat', requireAdmin, wrap(async (req, res) => {
+router.post('/bookings/repeat', requirePerm('schedule'), audit('schedule'), wrap(async (req, res) => {
   const { courtId, courtIds, startTime, durationMinutes, bookingTypeId, name, info, playerIds, repeat } = req.body;
   const { startDate, daysOfWeek, weeks, conflictMode } = repeat || {};
   const hasCourtId = courtId || (Array.isArray(courtIds) && courtIds.length > 0);
@@ -197,12 +237,12 @@ router.post('/bookings/repeat', requireAdmin, wrap(async (req, res) => {
   res.json(result);
 }));
 
-router.put('/bookings/:id', requireAdmin, wrap(async (req, res) => {
+router.put('/bookings/:id', requirePerm('schedule'), audit('schedule'), wrap(async (req, res) => {
   const { courtId, courtIds, date, startTime, durationMinutes, bookingTypeId, name, info, playerIds, excludeIds } = req.body;
   res.json(await bookingModel.updateBooking({ id: req.params.id, courtId, courtIds, date, startTime, durationMinutes, bookingTypeId, name, info, playerIds, excludeIds }));
 }));
 
-router.delete('/bookings/:id', requireAdmin, wrap(async (req, res) => {
+router.delete('/bookings/:id', requirePerm('schedule'), audit('schedule'), wrap(async (req, res) => {
   const { scope, groupId, date } = req.query;
   if ((scope === 'future' || scope === 'all') && groupId) {
     await bookingModel.deleteRepeatGroup(Number(groupId), scope, date);

@@ -13,3 +13,7 @@ docs
 .DS_Store
 avatars
 squash.db.backup*
+design-system
+.design-sync
+.ds-sync
+ds-bundle

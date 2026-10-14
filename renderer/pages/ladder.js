@@ -1,4 +1,4 @@
-import { state, isAdmin } from '../state.js';
+import { state, can } from '../state.js';
 import { esc, modal, avatarHTML } from '../utils.js';
 
 // Which ladder: the singles rating ladder, or the doubles one beside it. Kept
@@ -38,7 +38,7 @@ export function resetLadderSeason() {
 // neither could produce a valid submission.
 function _fabHTML(frozen) {
   if (frozen) return '';
-  if (!state.currentUser?.playerId && !isAdmin()) return '';
+  if (!state.currentUser?.playerId && !can('scores')) return '';
   return `
     <button class="em-fab" id="ldrEnterMatch" aria-label="Enter a match">
       <svg class="em-fab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"

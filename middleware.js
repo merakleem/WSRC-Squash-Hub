@@ -17,8 +17,8 @@ function wrap(fn) {
 
 // ===== SESSION TOKENS =====
 
-function signSession(payload) {
-  const withExp = { ...payload, exp: Date.now() + SESSION_TTL_MS };
+function signSession(payload, ttlMs = SESSION_TTL_MS) {
+  const withExp = { ...payload, exp: Date.now() + ttlMs };
   const data = Buffer.from(JSON.stringify(withExp)).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('hex');
   return `${data}.${sig}`;
@@ -51,18 +51,50 @@ function parseCookies(req) {
 function getSession(req) {
   // Mobile clients send Authorization: Bearer <token> instead of a cookie
   const auth = req.headers.authorization;
-  if (auth && auth.startsWith('Bearer ')) return verifySession(auth.slice(7));
-  return verifySession(parseCookies(req)[COOKIE_NAME]);
+  const session = auth && auth.startsWith('Bearer ')
+    ? verifySession(auth.slice(7))
+    : verifySession(parseCookies(req)[COOKIE_NAME]);
+  return session?.role === 'staff' ? _withStaff(session) : session;
+}
+
+// A staff session is only as good as the account behind it, read fresh on
+// every request: a disabled account, a changed password or "sign out of all
+// devices" (each raises session_version) ends it at once, and permission
+// changes apply on the next request.
+function _withStaff(session) {
+  const row = require('./database/db').getDB()
+    .prepare('SELECT id, name, email, status, permissions, session_version FROM staff_accounts WHERE id = ?').get(session.staffId);
+  if (!row || row.status !== 'active' || row.session_version !== session.sv) return null;
+  const { parsePermissions } = require('./lib/staff');
+  return { ...session, staff: { id: row.id, name: row.name, email: row.email, permissions: parsePermissions(row) } };
+}
+
+// ===== A SIGN-IN WAITING ON ITS SECOND STEP =====
+// After a staff member's password, before their authenticator code: a short
+// signed cookie of its own, never a session.
+const PENDING_COOKIE = 'wsrc_pending';
+const PENDING_TTL_MS = 10 * 60 * 1000;
+
+function setPendingSignIn(res, payload) {
+  res.append('Set-Cookie', `${PENDING_COOKIE}=${signSession(payload, PENDING_TTL_MS)}; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}; Max-Age=${PENDING_TTL_MS / 1000}`);
+}
+
+function getPendingSignIn(req) {
+  return verifySession(parseCookies(req)[PENDING_COOKIE]);
+}
+
+function clearPendingSignIn(res) {
+  res.append('Set-Cookie', `${PENDING_COOKIE}=; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}; Max-Age=0`);
 }
 
 function setSessionCookie(res, payload) {
   const csrf = crypto.randomBytes(16).toString('hex');
   const token = signSession({ ...payload, csrf });
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}`);
+  res.append('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}`);
 }
 
 function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}; Max-Age=0`);
+  res.append('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${SECURE_FLAG}; Max-Age=0`);
 }
 
 // ===== AUTH MIDDLEWARE =====
@@ -78,9 +110,30 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// The admin account only: managing staff, and anything no permission covers.
 function requireAdmin(req, res, next) {
   if (req.session?.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
   next();
+}
+
+/** True for the admin account, and for a staff member with `perm`. */
+function hasPerm(session, perm) {
+  if (session?.role === 'admin') return true;
+  return session?.role === 'staff' && !!session.staff?.permissions.includes(perm);
+}
+
+/** The admin account and staff, whatever their permissions: the club side. */
+function isClubSide(session) {
+  return session?.role === 'admin' || session?.role === 'staff';
+}
+
+// The admin account, or a staff member with the permission (any of them,
+// when given several). Every admin-side write goes through one of these.
+function requirePerm(...perms) {
+  return (req, res, next) => {
+    if (perms.some((p) => hasPerm(req.session, p))) return next();
+    return res.status(403).json({ error: "You don't have permission to do that." });
+  };
 }
 
 // Court booking is a members-only feature. Admins pass; a player passes only
@@ -88,7 +141,7 @@ function requireAdmin(req, res, next) {
 // item in the client is cosmetic, this is the boundary. The flag is read
 // fresh per request, so revoking membership takes effect immediately.
 function requireMember(req, res, next) {
-  if (req.session?.role === 'admin') return next();
+  if (isClubSide(req.session)) return next();
   const playerId = req.session?.playerId;
   if (playerId) {
     const row = require('./database/db').getDB()
@@ -144,6 +197,12 @@ module.exports = {
   clearSessionCookie,
   requireAuth,
   requireAdmin,
+  requirePerm,
+  hasPerm,
+  isClubSide,
+  setPendingSignIn,
+  getPendingSignIn,
+  clearPendingSignIn,
   requireMember,
   requireAdminPage,
   requireCsrf,

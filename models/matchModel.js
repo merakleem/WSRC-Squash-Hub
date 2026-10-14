@@ -435,11 +435,12 @@ function getMatchCard(matchId, viewerId = null) {
     tournament_name: m.tournament_name,
     round: m.round,
     head_to_head: h2h,
-    // Tournament scores are entered by the club through the bracket, so a
-    // participant is never offered the button for one.
+    // A tournament match can be reported once both players are known - before
+    // that it is a slot in the bracket, not a match anyone can have played.
     // A skipped match is one the club decided would not be played, so there is
     // nothing to report on it.
-    can_submit_score: viewer != null && !isPlayed && m.type !== 'tournament' && !m.skipped
+    can_submit_score: viewer != null && !isPlayed && !m.skipped
+      && (m.type !== 'tournament' || (players[0].id != null && players[1].id != null))
       && players.some((p) => p.id === viewer),
     skipped: !!m.skipped,
     ...doubles,

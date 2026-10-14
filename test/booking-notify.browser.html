@@ -1,0 +1,105 @@
+<!-- The booking panel's line about emails (design_handoff_player_settings,
+     section 5), driven through the real Book a Court page at a phone width.
+     Whether anyone is emailed is now each player's own setting, so the panel
+     offers no choice. The title becomes PASS or FAIL. -->
+<!doctype html><html><head><meta charset="utf-8"><title>RUNNING</title><link rel="stylesheet" href="../renderer/styles.css"></head>
+<body><div class="app-container"><div class="main-wrapper">
+<header class="topbar"><h1 id="pageTitle"></h1><div id="topbarActions"></div></header>
+<main class="content" id="mainContent" style="height:800px;display:flex;flex-direction:column"></main></div></div>
+<div id="modalOverlay" style="display:none"><div id="modal"><div id="modalTitle"></div><div id="modalBody"></div><button id="modalClose"></button></div></div>
+<div id="toastContainer"></div>
+<pre id="log" style="position:fixed;inset:0;background:#fff;z-index:999;font:12px monospace;padding:12px;white-space:pre-wrap;overflow:auto"></pre>
+<script type="module">
+const out = []; let fails = 0;
+const ok = (n, c, x = '') => { if (!c) fails++; out.push((c ? '  PASS  ' : '  FAIL  ') + n + (x !== '' ? '  [' + x + ']' : '')); };
+try {
+  // Nine in the morning, so every open slot of the day is still bookable.
+  {
+    const RealDate = Date;
+    const fixed = new RealDate(); fixed.setHours(9, 0, 0, 0);
+    const FIXED = fixed.getTime();
+    window.Date = class extends RealDate {
+      constructor(...a) { a.length ? super(...a) : super(FIXED); }
+      static now() { return FIXED; }
+    };
+  }
+  const { state } = await import('../renderer/state.js');
+  state.currentUser = { role: 'player', playerId: 42, name: 'Liam Gallagher' };
+  state.players = [
+    { id: 42, name: 'Liam Gallagher' },
+    { id: 7, name: 'Sofia Duarte' },
+    { id: 8, name: 'Priya Raman' },
+  ];
+  const courts = [{ id: 1, name: 'Court 1', active: 1, sort_order: 1 }];
+  const mine = { id: 1, courtId: 1, startTime: '17:00', durationMinutes: 60, title: 'Liam Gallagher', source: 'custom', players: [{ id: 42, name: 'Liam Gallagher' }, { id: 7, name: 'Sofia Duarte' }], bookedBy: 42, name: 'Liam Gallagher', info: '', courtIds: [1] };
+  const calls = [];
+  let notified = 0;
+  window.api = {
+    getCourts: async () => courts,
+    getSchedule: async () => ({ courts, slots: [mine] }),
+    getMyBookings: async () => [{ ...mine, courtName: 'Court 1', courtCount: 1 }],
+    createReservation: async (d) => { calls.push(['reserve', d]); return { reservationId: 'r1', expiresAt: Date.now() + 300000 }; },
+    releaseReservation: async () => ({}),
+    deleteReservation: async () => ({}),
+    confirmBooking: async (d) => { calls.push(['confirm', d]); return { id: 99, notifiedCount: notified }; },
+  };
+  window.navigate = () => {};
+  const { renderCourtBooking } = await import('../renderer/pages/courtBooking.js');
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+  const tick = (ms = 150) => new Promise((r) => setTimeout(r, ms));
+  const add = async (name) => {
+    const input = $('#cbPlayerSearch');
+    input.value = name; input.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    $$('.cb-search-result').find((r) => r.textContent.includes(name)).click();
+    await tick();
+  };
+  const remove = async (id) => { $(`.cb-chip-x[data-remove="${id}"]`).click(); await tick(); };
+  const LINE = 'Players you add are emailed if they have chosen to be.';
+  const hint = () => $$('.cb-section .cb-hint').map((h) => h.textContent.trim()).find((t) => t === LINE) || '';
+  const lastToast = () => $('#toastContainer').lastElementChild?.textContent || '';
+
+  renderCourtBooking(); await tick(300);
+  $('.cb-mslot[data-mstart]').click(); await tick(250);
+  ok('the panel opens on an open slot', !!$('#cbPanelConfirm'));
+
+  console.log('NO ONE ADDED');
+  ok('there is no line about emails', hint() === '');
+  ok('and no checkbox anywhere', !$('.cb-panel input[type=checkbox]'));
+
+  await add('Sofia');
+  ok('adding a player brings the line', hint() === LINE, hint());
+  ok('at the end of Playing with', $$('.cb-section').find((s) => s.querySelector('.cb-label')?.textContent === 'Playing with')?.lastElementChild?.textContent.trim() === LINE);
+  ok('still no checkbox', !$('.cb-panel input[type=checkbox]'));
+  await add('Priya');
+  ok('it stays one line with two added', $$('.cb-section .cb-hint').filter((h) => h.textContent.trim() === LINE).length === 1);
+  await remove(8);
+  await remove(7);
+  ok('removing everyone takes it away', hint() === '');
+
+  console.log('CONFIRMING');
+  await add('Sofia');
+  notified = 1;
+  $('#cbPanelConfirm').click(); await tick(300);
+  let sent = calls.filter((c) => c[0] === 'confirm').pop();
+  ok('the booking asks for nothing about emails', sent && !('notifyPlayers' in sent[1]) && JSON.stringify(sent[1].playerIds) === '[7]', JSON.stringify(sent && sent[1]));
+  ok('the toast says who was notified', / · 1 player notified$/.test(lastToast()), lastToast());
+
+  await tick(500);
+  notified = 0;
+  $('.cb-mslot[data-mstart]').click(); await tick(250);
+  await add('Sofia');
+  $('#cbPanelConfirm').click(); await tick(300);
+  sent = calls.filter((c) => c[0] === 'confirm').pop();
+  ok('when no one wanted it the toast is as it was', /^Court booked · [^·]+$/.test(lastToast()), lastToast());
+
+  console.log('EDITING');
+  await tick(500);
+  $('.cb-mslot[data-mbid]')?.click(); await tick(250);
+  ok('the edit panel opens', /Your booking/.test($('.cb-panel-kicker')?.textContent || ''));
+  ok('and, sending nothing, says nothing about emails', hint() === '');
+} catch (e) { ok('no exception: ' + e.message, false, e.stack); }
+document.getElementById('log').textContent = out.join('\n');
+document.title = fails ? `FAIL ${fails}` : 'PASS';
+</script></body></html>

@@ -1,0 +1,217 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<link rel="stylesheet" href="../renderer/styles.css">
+<style>#log{position:fixed;inset:0;background:#fff;color:#111;font:12px/1.5 monospace;padding:14px;overflow:auto;z-index:9999;margin:0;white-space:pre-wrap}</style>
+</head>
+<body>
+<div class="app-container">
+  <div class="main-wrapper">
+    <header class="topbar"><div class="topbar-left"><h1 class="topbar-title" id="pageTitle"></h1></div><div class="topbar-actions" id="topbarActions"></div></header>
+    <main class="content" id="mainContent"></main>
+  </div>
+</div>
+<div id="modalOverlay" class="modal-overlay"><div id="modal" class="modal"><div class="modal-header"><span id="modalTitle"></span><button id="modalClose" class="modal-close">&times;</button></div><div id="modalBody" class="modal-body"></div></div></div>
+<div id="toastContainer"></div>
+<pre id="log"></pre>
+<script type="module">
+// Knockout tournaments in the browser: the list, an announced tournament's
+// page, the bracket and entrants of a built one, and the build wizard.
+const log = document.getElementById('log');
+let failed = 0;
+const ok = (name, cond, extra = '') => {
+  log.textContent += (cond ? 'PASS ' : 'FAIL ') + name + (extra !== '' ? ` [${extra}]` : '') + '\n';
+  if (!cond) failed++;
+};
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+const settle = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+const day = (n) => { const d = new Date(Date.now() + n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const mobile = window.innerWidth <= 768;
+
+const K = await import('../renderer/knockout.js');
+const NAMES = ['Priya Nair', 'Marcus Chen', 'Daniel Okonkwo', 'Sophie Tremblay', 'Liam Gallagher', 'Aiden Kowalski', 'Emma Rousseau', 'Noah Friesen',
+  'Olivia Penner', 'Ethan Dyck', 'Chloe Wiebe', 'Ben Schroeder', 'Hannah Lefebvre', 'Jack Morrissey'];
+const PLAYERS = NAMES.map((name, i) => ({ id: i + 1, name, member_number: String(1000 + i) }));
+const LADDER = PLAYERS.slice(0, 10).map((p, i) => ({ id: p.id, name: p.name, position: i + 1 }));
+const ME = 5;
+const COURTS = [{ id: 1, name: 'Court 1', active: 1 }, { id: 2, name: 'Court 2', active: 1 }, { id: 3, name: 'Court 3', active: 1 }];
+const ROUNDS = [{ date: day(-7), time: '18:00' }, { date: day(1), time: '18:00' }, { date: day(15), time: '14:00' }, { date: day(15), time: '17:00' }];
+
+// A built 11-player draw, as the API sends it: the rows the server would have
+// written for the preview bracket, then two first-round results.
+function builtTournament() {
+  const entrants = PLAYERS.slice(0, 11).map((p) => ({ id: p.id, name: p.name }));
+  const b = K.buildBracket({ draw: 16, entrants, rounds: ROUNDS.map((r) => ({ date: r.date, time: K.toMin(r.time) })), courts: COURTS, len: 40, buffer: 10 });
+  let id = 100;
+  const matches = b.rounds.flat().filter((m) => !m.bye).map((m) => ({
+    id: id++, round: m.roundKey, bracket_slot: m.key, player1_id: m.p1?.id ?? null, player2_id: m.p2?.id ?? null,
+    winner_id: null, player1_score: null, player2_score: null, skipped: 0,
+    scheduled_date: m.date, scheduled_time: K.toHHMM(m.time), court_id: m.court?.id ?? null, court_name: m.court?.name ?? null,
+  }));
+  const at = (s) => matches.find((m) => m.bracket_slot === s);
+  Object.assign(at('0-1'), { winner_id: 8, player1_score: 3, player2_score: 1 }); // 8 beats 9
+  at('1-0').player2_id = 8;
+  Object.assign(at('0-4'), { winner_id: 11, player1_score: 1, player2_score: 3 }); // 11 beats 6
+  at('1-2').player1_id = 11;
+  return {
+    id: 2, name: 'Autumn A/B Knockout', status: 'active', draw_cap: 16, draw_size: 16, created_at: day(-20),
+    courts: COURTS.map(({ id: cid, name }) => ({ id: cid, name })), rounds: ROUNDS,
+    players: entrants.map((p, k) => ({ player_id: p.id, seed: k + 1, ladder_rank: k < 10 ? k + 1 : null, withdrawn: 0, name: p.name, photo_path: null, email: `p${p.id}@x.invalid` })),
+    matches,
+  };
+}
+
+const UPCOMING = {
+  id: 1, name: 'October C/D Knockout', status: 'upcoming', draw_cap: 16, first_round_date: day(10), signup_deadline: day(3),
+  description: 'Best of five, one round a week.', created_at: day(-5),
+  signup_count: 6, spots_left: 10, full: false, signups_closed: false, deadline_passed: false, i_signed_up: false,
+  signup_preview: [{ id: 1, name: 'Priya Nair' }, { id: 2, name: 'Marcus Chen' }],
+};
+const UP_SIGNUPS = [1, 2, 3, 4, 12, 13].map((pid, k) => ({ player_id: pid, name: NAMES[pid - 1], photo_path: null, signed_up_at: day(-4), rank: pid <= 10 ? pid : null, member_number: String(999 + pid) }));
+const BUILT = builtTournament();
+const LIST = [
+  UPCOMING,
+  { id: 2, name: BUILT.name, status: 'active', created_at: day(-20), draw_size: 16, entrant_count: 11, current_round: 'round_of_16', current_round_date: day(-7),
+    played: 2, total: 10, left_in_round: 1, first_round_date: day(-7), final_date: day(15),
+    my_next: { label: 'QF 2', opponent: 'Sophie Tremblay', date: day(1), time: '18:00', court: 'Court 2' } },
+  { id: 3, name: 'Summer Open Knockout', status: 'completed', created_at: day(-90), draw_size: 8, entrant_count: 8, first_round_date: day(-60), final_date: day(-53),
+    played: 7, total: 7, champion: { id: 12, name: 'Ben Schroeder' }, runner_up: { id: 13, name: 'Hannah Lefebvre' }, final_score: '3–1' },
+];
+
+const calls = [];
+window.api = {
+  getTournaments: async () => JSON.parse(JSON.stringify(LIST)),
+  getTournament: async (id) => JSON.parse(JSON.stringify(Number(id) === 1 ? { ...UPCOMING, players: [], signups: UP_SIGNUPS } : BUILT)),
+  getPlayers: async () => PLAYERS,
+  getLadder: async () => LADDER,
+  getCourts: async () => COURTS,
+  signUpForTournament: async (id) => { calls.push(['signup', id]); return { ok: true }; },
+  withdrawFromTournament: async (id) => { calls.push(['withdraw', id]); return { ok: true }; },
+  checkTournamentSchedule: async (d) => { calls.push(['check', d]); return { conflicts: d.rounds.map((_, k) => (k === 1 ? [{ court: 'Court 2', courtId: 2, from: '18:30', to: '19:30', what: 'Clinic' }] : [])) }; },
+  createTournament: async (d) => { calls.push(['create', d]); return { id: 77 }; },
+  getMatchCard: async () => null,
+};
+window.navigate = (page, params) => { calls.push(['navigate', page, params]); };
+
+const { state } = await import('../renderer/state.js');
+const pages = await import('../renderer/pages/tournaments.js');
+const wizard = await import('../renderer/pages/createTournament.js');
+
+try {
+  log.textContent += 'A MEMBER ON THE LIST\n';
+  state.currentUser = { role: 'player', playerId: ME, unread: {}, opened: {} };
+  state.page = 'tournaments';
+  await pages.renderTournaments();
+  await settle();
+  ok('three groups, in order', $$('.lgl-group-label').map(txt).join('|') === 'Open for signups|In progress|Completed', $$('.lgl-group-label').map(txt).join('|'));
+  const upCard = $$('.lgl-card--upcoming')[0];
+  ok('the announced card counts against the draw', /6 of 16 signed up/.test(txt(upCard)) && /16-draw · single elimination · best of five/.test(txt(upCard)));
+  ok('it is a knockout, open for signups', txt(upCard.querySelector('.lgl-fmt')) === 'Knockout' && txt(upCard.querySelector('.lgl-status')) === 'Signups open');
+  ok('a member is offered Sign up', !!upCard.querySelector('[data-signup]'));
+  click(upCard.querySelector('[data-signup]'));
+  await settle();
+  ok('which signs them up', calls.some((c) => c[0] === 'signup' && c[1] === 1));
+  const midCard = $$('.lgl-card').find((c) => /Autumn/.test(txt(c)));
+  ok('the running card names the round', txt(midCard.querySelector('.lgl-status')) === 'Round of 16');
+  ok('and the member\'s next match', /Your next match/i.test(txt(midCard)) && /QF 2 · vs Sophie Tremblay/.test(txt(midCard)), txt(midCard.querySelector('.ko-strip')));
+  ok('with progress in the footer', /2 of 10 matches played/.test(txt(midCard)));
+  const doneCard = $$('.lgl-card--done')[0];
+  ok('the finished card crowns its champion', /Champion/i.test(txt(doneCard)) && /Ben Schroeder · def. Hannah Lefebvre 3–1/.test(txt(doneCard)), txt(doneCard.querySelector('.ko-strip')));
+
+  log.textContent += '\nAN ANNOUNCED TOURNAMENT\n';
+  state.currentTournamentId = 1;
+  state.page = 'tournamentDetail';
+  await pages.renderTournamentDetail();
+  await settle();
+  ok('the hero says knockout and the cap', /Knockout · 16-draw/.test(txt($('.lgu-hero-pills'))));
+  ok('the roster explains the seeding', /Listed by ladder rank/.test(txt($('.lgu-roster'))));
+  ok('ranked players show their rank, the rest say Unranked', /#1/.test(txt($('.lgu-rows'))) && /Unranked/.test(txt($('.lgu-rows'))));
+  ok('the facts show spots left of the cap', /10 of 16/.test(txt($('.lgu-facts'))));
+  ok('and a Sign up button', !!$('#lguSignUp'));
+
+  log.textContent += '\nA BUILT TOURNAMENT\n';
+  state.currentTournamentId = 2;
+  await pages.renderTournamentDetail();
+  await settle();
+  ok('the hero says where it is', txt($('.lg-status')) === 'ROUND OF 16' && /16-draw · 11 entrants · 5 byes/.test(txt($('.lg-hero-meta'))), txt($('.lg-hero-meta')));
+  ok('fifteen matches in a 16-draw', $$('.ko-card').length === 15);
+  ok('five of them byes, all in the first round', $$('.ko-card--bye').length === 5 && $$('.ko-card--bye').every((c) => c.dataset.key.startsWith('0-')));
+  ok('the top seed has the first bye', /Priya Nair/.test(txt($('.ko-card[data-key="0-0"]'))) && /Bye/.test(txt($('.ko-card[data-key="0-0"]'))));
+  ok('a played match shows its games', txt($('.ko-card[data-key="0-1"] .ko-slot--won .ko-games')) === '3');
+  ok('a later slot waits for its feeder', /Winner of R16 3/.test(txt($('.ko-card[data-key="1-1"]'))) || /Liam Gallagher/.test(txt($('.ko-card[data-key="1-1"]'))));
+  ok('the member is marked YOU', $$('.ko-you').length >= 1 && $$('.ko-slot--me').every((s) => s.dataset.player === String(ME)));
+  const scoreLinks = $$('.ko-score-btn');
+  ok('a member can score only their own unplayed match', scoreLinks.length === 1 && $(`.ko-card[data-key="1-1"] .ko-score-btn`) !== null, scoreLinks.map((b) => b.closest('.ko-card').dataset.key).join(','));
+  ok('there is a champion column, still TBD', txt($('.ko-champ-name')) === 'TBD');
+  ok('connectors are drawn, one per feeder plus the final', $$('.ko-lines path').length === 15);
+  if (!mobile) {
+    const card = $('.ko-card[data-key="2-0"]');
+    card.dispatchEvent(new MouseEvent('mouseenter'));
+    await settle(20);
+    ok('hovering a match dims the unrelated ones', $('.ko-card[data-key="0-6"]').style.opacity === '0.45' && card.style.opacity === '', $('.ko-card[data-key="0-6"]').style.opacity);
+    card.dispatchEvent(new MouseEvent('mouseleave'));
+    await settle(20);
+    ok('and leaving restores them', $('.ko-card[data-key="0-6"]').style.opacity === '');
+  }
+  click($('[data-ko-tab="entrants"]'));
+  await settle();
+  ok('the entrants tab lists the draw in seed order', $$('.ko-entrants .lg-std-row').length === 11 && txt($('.ko-entrants .lg-std-row .lg-std-rank')) === '1');
+  ok('a first-round loser is out, with the score', /Out in R16/.test(txt($$('.ko-entrants .lg-std-row')[8])) && /1–3 v Nair|1–3 v Friesen/.test(txt($$('.ko-entrants .lg-std-row')[8])), txt($$('.ko-entrants .lg-std-row')[8]));
+  ok('a bye is marked', /Bye/.test(txt($$('.ko-entrants .lg-std-row')[0])));
+  ok('a member gets no Replace or Withdraw', !$('[data-replace]'));
+
+  log.textContent += '\nTHE ADMIN BUILDS ONE\n';
+  state.currentUser = { role: 'admin', playerId: null };
+  state.ladder = [];
+  state.players = PLAYERS;
+  window.navigate = (page) => { calls.push(['navigate', page]); state.page = page; if (page === 'createTournament') wizard.renderCreateTournament(); };
+  await wizard.startCreateTournament({ fromUpcoming: { ...UPCOMING, signups: UP_SIGNUPS } });
+  await settle(150);
+  ok('step 1 carries the name and locks the cap', $('#koName').value === 'October C/D Knockout' && /set when announced/.test(txt($('.wz-card'))));
+  click($('#wNext'));
+  await settle(150);
+  ok('the signups are seeded by ladder, unranked last', $$('#koEntrants .ko-erow-name').map(txt).join('|') === 'Priya Nair|Marcus Chen|Daniel Okonkwo|Sophie Tremblay|Ben Schroeder|Hannah Lefebvre',
+    $$('#koEntrants .ko-erow-name').map(txt).join('|'));
+  ok('six players make an 8-draw, two byes', /6 entrants · 8-draw · seeds 1–2 get byes/.test(txt($('.ko-drawline'))), txt($('.ko-drawline')));
+  ok('the top two seeds carry a Bye pill', $$('#koEntrants .pill').length === 2);
+  click($('#koEntrants [data-move="1"][data-dir="1"]'));
+  await settle();
+  ok('moving a player switches to manual seeding', $('#koSeeding [data-seeding="manual"]').classList.contains('lgl-seg-b--on') && $$('#koEntrants .ko-erow-name').map(txt)[1] === 'Daniel Okonkwo');
+  click($('#koSeeding [data-seeding="ladder"]'));
+  await settle();
+  ok('By ladder puts it back', $$('#koEntrants .ko-erow-name').map(txt)[1] === 'Marcus Chen');
+  for (let i = 0; i < 2; i++) { click($('#koAvail [data-add]')); await settle(); }
+  ok('adding two more makes an 8-draw with no byes', /8 entrants · 8-draw · no byes/.test(txt($('.ko-drawline'))), txt($('.ko-drawline')));
+  for (let i = 0; i < 1; i++) { click($('#koAvail [data-add]')); await settle(); }
+  ok('a ninth grows it to a 16-draw', /9 entrants · 16-draw · seeds 1–7 get byes/.test(txt($('.ko-drawline'))), txt($('.ko-drawline')));
+  // Each removal redraws the list, so the button is looked up afresh each time.
+  for (let i = 0; i < 3; i++) { click($$('#koEntrants [data-remove]').pop()); await settle(); }
+  ok('removing them takes it back to six', /6 entrants · 8-draw/.test(txt($('.ko-drawline'))), txt($('.ko-drawline')));
+  click($('#wNext'));
+  await settle(400);
+  ok('the schedule has three rounds for an 8-draw', $$('.ko-roundcard').length === 3 && txt($('.ko-roundcard-name')) === 'Quarterfinals', $$('.ko-roundcard-name').map(txt).join('|'));
+  ok('each round reads out its plan', /2 matches · 3 courts · all at 6:00 PM/.test(txt($('.ko-readout'))), txt($('.ko-readout')));
+  ok('a court conflict from the server is flagged on its round', /Court 2 is booked 6:30 PM–7:30 PM/.test(txt($$('.ko-roundcard')[1])) && $$('.ko-roundcard')[1].classList.contains('ko-roundcard--warn'), txt($$('.ko-roundcard')[1]));
+  click($('#wNext'));
+  await settle(150);
+  ok('the preview draws the bracket', $$('.ko-treepad .ko-card').length === 7 && $$('.ko-treepad .ko-card--bye').length === 2);
+  ok('with one schedule row per round', $$('.ko-prevrow').length === 3);
+  click($('#koCreate'));
+  await settle();
+  const made = calls.find((c) => c[0] === 'create');
+  // Players 5-7 came in at their ladder places, so taking the bottom three off
+  // dropped the two unranked signups and the seventh seed.
+  ok('Create posts the entrants in seed order', made && JSON.stringify(made[1].entrants) === JSON.stringify([1, 2, 3, 4, 5, 6]) && made[1].tournamentId === 1 && made[1].drawCap === 16, JSON.stringify(made && made[1].entrants));
+  ok('and three rounds', made && made[1].rounds.length === 3);
+} catch (e) {
+  ok(`no exception: ${e.message}`, false, e.stack);
+}
+document.title = failed ? `FAIL ${failed}` : 'PASS';
+</script>
+</body>
+</html>

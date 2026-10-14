@@ -24,7 +24,12 @@ if (typeof window !== 'undefined' && !window.api) {
     }
     const r = await fetch(url, opts);
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Request failed');
+    if (!r.ok) {
+      // `field` names the input a validation error belongs to, when it has one.
+      const err = new Error(data.error || 'Request failed');
+      if (data.field) err.field = data.field;
+      throw err;
+    }
     return data;
   }
 
@@ -72,10 +77,41 @@ if (typeof window !== 'undefined' && !window.api) {
     getPlayerRecords:       ()  => _apiFetch('GET', '/api/players/records'),
     getVerifiedPlayerCount: ()  => _apiFetch('GET', '/api/players/verified-count'),
     replacePlayer:    (d)   => _apiFetch('POST', `/api/leagues/${d.leagueId}/replace-player`, d),
+    previewAddPair: (leagueId, d) => _apiFetch('POST', `/api/leagues/${leagueId}/pairs/preview`, d),
+    addPair:        (leagueId, d) => _apiFetch('POST', `/api/leagues/${leagueId}/pairs`, d),
     replacePairPlayer: ({ leagueId, pairId, oldPlayerId, newPlayerId }) => _apiFetch('POST', `/api/leagues/${leagueId}/replace-pair-player`, { pairId, oldPlayerId, newPlayerId }),
     updateMatchTiming:(d)   => _apiFetch('PUT',  `/api/matches/${d.matchId}/timing`, d),
     sendInvite:        (id) => _apiFetch('POST', `/api/players/${id}/send-invite`),
     sendReset:         (id) => _apiFetch('POST', `/api/players/${id}/send-reset`),
+
+    // The signed-in member's own Settings.
+    getMySettings:        ()  => _apiFetch('GET',    '/api/me/settings'),
+    saveMyProfile:        (d) => _apiFetch('PUT',    '/api/me/profile', d),
+    setMyNotification:    (key, value) => _apiFetch('PUT', '/api/me/notifications', { key, value }),
+    changeMyEmail:        (email) => _apiFetch('POST', '/api/me/email', { email }),
+    resendMyEmailChange:  ()  => _apiFetch('POST',   '/api/me/email/resend'),
+    cancelMyEmailChange:  ()  => _apiFetch('DELETE', '/api/me/email'),
+    sendMyPasswordReset:  ()  => _apiFetch('POST',   '/api/me/password-reset'),
+
+    // Staff accounts (the admin account), a staff member's own account, the activity log.
+    getStaff:             ()  => _apiFetch('GET',    '/api/staff'),
+    getStaffMember:       (id) => _apiFetch('GET',   `/api/staff/${id}`),
+    inviteStaff:          (d) => _apiFetch('POST',   '/api/staff', d),
+    updateStaff:          (id, d) => _apiFetch('PUT', `/api/staff/${id}`, d),
+    resendStaffInvite:    (id) => _apiFetch('POST',  `/api/staff/${id}/resend-invite`),
+    cancelStaffInvite:    (id) => _apiFetch('DELETE', `/api/staff/${id}`),
+    disableStaff:         (id) => _apiFetch('POST',  `/api/staff/${id}/disable`),
+    enableStaff:          (id) => _apiFetch('POST',  `/api/staff/${id}/enable`),
+    sendStaffReset:       (id) => _apiFetch('POST',  `/api/staff/${id}/reset`),
+    getActivityLog:       (q) => _apiFetch('GET',    `/api/activity-log?${new URLSearchParams(q)}`),
+    getActivityLogFilters: () => _apiFetch('GET',    '/api/activity-log/filters'),
+    getMyAccount:         ()  => _apiFetch('GET',    '/api/account'),
+    saveMyAccount:        (d) => _apiFetch('PUT',    '/api/account', d),
+    // Both hand this device a fresh session, with a fresh CSRF token to fetch.
+    changeMyPassword:     async (d) => { const r = await _apiFetch('POST', '/api/account/password', d); _csrfToken = null; return r; },
+    signOutEverywhere:    async ()  => { const r = await _apiFetch('POST', '/api/account/sign-out-all'); _csrfToken = null; return r; },
+    newBackupCodes:       ()  => _apiFetch('POST',   '/api/account/backup-codes'),
+    turnOffTwoStep:       ()  => _apiFetch('POST',   '/api/account/two-step/off'),
     setPlayerPhoto:    (id, image) => _apiFetch('PUT',    `/api/players/${id}/photo`, { image }),
     deletePlayerPhoto: (id) => _apiFetch('DELETE', `/api/players/${id}/photo`),
     getSettings:       ()   => _apiFetch('GET', '/api/settings'),
@@ -116,10 +152,20 @@ if (typeof window !== 'undefined' && !window.api) {
 
     getTournaments:          ()        => _apiFetch('GET',    '/api/tournaments'),
     getTournament:           (id)      => _apiFetch('GET',    `/api/tournaments/${id}`),
+    announceTournament:      (d)       => _apiFetch('POST',   '/api/tournaments/upcoming', d),
+    editTournamentAnnouncement: (id, d) => _apiFetch('PUT',   `/api/tournaments/${id}/announcement`, d),
+    signUpForTournament:     (id)      => _apiFetch('POST',   `/api/tournaments/${id}/signup`),
+    withdrawFromTournament:  (id)      => _apiFetch('DELETE', `/api/tournaments/${id}/signup`),
+    addTournamentSignup:     (id, pid) => _apiFetch('POST',   `/api/tournaments/${id}/signups`, { playerId: pid }),
+    removeTournamentSignup:  (id, pid) => _apiFetch('DELETE', `/api/tournaments/${id}/signups/${pid}`),
+    checkTournamentSchedule: (d)       => _apiFetch('POST',   '/api/tournaments/check-schedule', d),
     createTournament:        (d)       => _apiFetch('POST',   '/api/tournaments', d),
+    updateTournamentSchedule: (id, d)  => _apiFetch('PUT',    `/api/tournaments/${id}/schedule`, d),
     deleteTournament:        (id)      => _apiFetch('DELETE', `/api/tournaments/${id}`),
-    checkTournamentDate:     (d)       => _apiFetch('POST',   '/api/tournaments/check-date', d),
-    suggestTournamentGroups: (d)       => _apiFetch('POST',   '/api/tournaments/suggest-groups', d),
+    replaceTournamentPlayer: (id, d)   => _apiFetch('POST',   `/api/tournaments/${id}/replace`, d),
+    withdrawTournamentPlayer: (id, pid) => _apiFetch('POST',  `/api/tournaments/${id}/withdraw`, { playerId: pid }),
+    messageTournamentPlayers: (id, d)  => _apiFetch('POST',   `/api/tournaments/${id}/message`, d),
+    bulkInviteTournament:    (id)      => _apiFetch('POST',   `/api/tournaments/${id}/bulk-invite`),
     updateTournamentScore:         (id, d) => _apiFetch('PUT',    `/api/tournament-matches/${id}/score`, d),
     reportTournamentPlayerScore:   (id, d) => _apiFetch('PUT',    `/api/tournament-matches/${id}/player-score`, d),
     clearTournamentScore:          (id)    => _apiFetch('DELETE', `/api/tournament-matches/${id}/score`),

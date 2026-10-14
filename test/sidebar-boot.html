@@ -17,6 +17,7 @@ const ME = {
   admin:  { role: 'admin',  playerId: null, is_member: 0, name: null, photo_path: null },
   member: { role: 'player', playerId: 7, is_member: 1, name: 'Mona Member', photo_path: null },
   guest:  { role: 'player', playerId: 8, is_member: 0, name: 'Nate Newcomer', photo_path: null },
+  staff:  { role: 'staff', playerId: null, staffId: 3, is_member: 0, name: 'Chris Nguyen', photo_path: null, permissions: ['tournaments'] },
 }[role];
 
 // A restored page would pull a whole page render into the boot; the suite is

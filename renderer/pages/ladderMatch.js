@@ -2,7 +2,7 @@
 // Entering a ladder result: the singles modal and the doubles one (2v2, any
 // signed-in player who played in it). Split from players.js.
 
-import { state, isAdmin } from '../state.js';
+import { state, can } from '../state.js';
 import { esc, toast, modal, avatarHTML } from '../utils.js';
 
 // A singles or doubles chip in the modal header, beside the title.
@@ -13,7 +13,7 @@ function _setMatchModalTitle(title, mode) {
 
 export async function openPickupGameModal({ mode = 'singles' } = {}) {
   if (mode === 'doubles') return openDoublesMatchModal();
-  const adminMode = isAdmin();
+  const adminMode = can('scores');
   const myId = state.currentUser?.playerId;
 
   modal.open('Enter a match', '<div class="modal-loading">Loading players…</div>', { medium: true });
@@ -361,7 +361,7 @@ export async function openPickupGameModal({ mode = 'singles' } = {}) {
 // The same shell as the singles modal, in two labelled groups: your team
 // (you and a teammate) and the two opponents. An admin fills all four.
 export async function openDoublesMatchModal() {
-  const adminMode = isAdmin();
+  const adminMode = can('scores');
   const myId = state.currentUser?.playerId;
 
   modal.open('Enter a doubles match', '<div class="modal-loading">Loading players…</div>', { medium: true });

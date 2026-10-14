@@ -2,14 +2,10 @@
 // each visit replaces, and who is told nothing at all.
 // Run: node --test test/unread-markers.test.js
 const bcrypt = require('bcryptjs');
-const { suite, scratchDb } = require('./lib/suite');
+const { suite, scratchDb, clubDay: iso } = require('./lib/suite');
 const { boot, client } = require('./lib/client');
 
 const ADMIN_PW = process.env.SITE_PASSWORD;
-const iso = (n) => {
-  const d = new Date(Date.now() + n * 864e5);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
 
 suite('a member is told which tabs have something new', async ({ ok, t }) => {
   const app = boot(scratchDb(t, 'unread-markers'), ({ run }) => {
@@ -124,7 +120,7 @@ suite('a member is told which tabs have something new', async ({ ok, t }) => {
   caughtUp();
   await a.send('POST', '/api/players/4/view-as');
   ok('they read as up to date', (await a.me()).unread.leagues === false);
-  ok('and the look left them a baseline', getDB().prepare('SELECT COUNT(*) AS n FROM member_tab_opens WHERE player_id = 4').get().n === 2);
+  ok('and the look left them a baseline', getDB().prepare('SELECT COUNT(*) AS n FROM member_tab_opens WHERE player_id = 4').get().n === 3);
 
   console.log('\nAND SOMETHING POSTED AFTER THAT LOOK REACHES THEM');
   caughtUp(4);

@@ -28,7 +28,9 @@ const correctness = {
 };
 
 module.exports = [
-  { ignores: ['node_modules/**', 'renderer/vendor/**', 'test/*.mjs', '!test/run-browser.mjs', '!test/*.harness.mjs', 'avatars/**', 'storage/**'] },
+  { ignores: ['node_modules/**', 'renderer/vendor/**', 'test/*.mjs', '!test/run-browser.mjs', '!test/*.harness.mjs', 'avatars/**', 'storage/**',
+    // Claude Design sync: its own package, toolchain and build output.
+    'design-system/**', '.design-sync/**', '.ds-sync/**', 'ds-bundle/**'] },
   js.configs.recommended,
   {
     // Server: CommonJS on Node.
