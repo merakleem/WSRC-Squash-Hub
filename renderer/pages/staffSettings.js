@@ -115,8 +115,6 @@ function _fieldError(input, message) {
 
 // ===== STAFF ACCOUNTS: THE LIST =====
 
-const GMAIL_HINT = (who) => `Gmail users can use an alias such as <code>${who}+staff@gmail.com</code>, which arrives in the same inbox.`;
-
 async function _renderStaffList(body) {
   document.getElementById('topbarActions').innerHTML = `<button class="btn btn-primary btn-sm" id="saInviteBtn">${PLUS}<span>Invite staff member</span></button>`;
   document.getElementById('saInviteBtn').addEventListener('click', () => window.navigate('staffMember', { staffId: null }));
@@ -125,7 +123,7 @@ async function _renderStaffList(body) {
     body.innerHTML = `<div style="max-width:860px"><div class="table-card"><div class="empty-state">
       <strong style="font-size:15px;color:var(--text)">No staff accounts yet</strong>
       <p style="max-width:420px;line-height:1.5">Invite each staff member and choose what they can do.</p>
-      <p style="max-width:420px;line-height:1.5">Each person needs their own email, different from their player account's. Gmail users can use an alias such as <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px">sam+staff@gmail.com</code>, which arrives in the same inbox.</p>
+      <p style="max-width:420px;line-height:1.5">Each staff member needs their own email, different from their player account's.</p>
     </div></div></div>`;
     return;
   }
@@ -208,7 +206,7 @@ export async function renderStaffMember() {
         <div class="season-settings" style="margin-bottom:0">
           <div class="form-group"><label class="form-label" for="fInvName">Name</label><input class="form-control" id="fInvName" type="text" placeholder="Their full name" autocomplete="off"></div>
           <div class="form-group" style="margin-bottom:0"><label class="form-label" for="fInvEmail">Email</label><input class="form-control" id="fInvEmail" type="email" placeholder="name@example.com" autocomplete="off">
-            <p class="sa-help">This must be different from the email on their player account, if they have one. ${GMAIL_HINT('jordan')}</p>
+            <p class="sa-help">This must be different from the email on their player account, if they have one.</p>
           </div>
         </div>
       </div>
