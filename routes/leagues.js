@@ -12,6 +12,7 @@ const { signupState: _signupState } = require('../lib/signups');
 const { sanitizeMessageHtml, messagePlayers, invitePlayers } = require('../lib/playerMail');
 
 const { playDates } = require('../services/leagueService');
+const { planAddPair, addPair } = require('../services/addPair');
 
 const router = express.Router();
 
@@ -298,6 +299,17 @@ router.post('/leagues/:id/replace-player', requirePerm('leagues'), audit('league
   if (!oldPlayerId || !newPlayerId) return res.status(400).json({ error: 'oldPlayerId and newPlayerId are required' });
   await leagueModel.replacePlayerInLeague(Number(req.params.id), Number(oldPlayerId), Number(newPlayerId));
   res.json({ ok: true });
+}));
+
+// A new pair in a doubles division with an odd count: it takes the bye seat,
+// so every existing match stays exactly as it is (services/addPair.js). The
+// preview says what would be added; the second call adds it.
+router.post('/leagues/:id/pairs/preview', requirePerm('leagues'), wrap(async (req, res) => {
+  res.json(planAddPair(Number(req.params.id), { playerIds: req.body?.playerIds, divisionId: req.body?.divisionId }));
+}));
+
+router.post('/leagues/:id/pairs', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {
+  res.json(addPair(Number(req.params.id), { playerIds: req.body?.playerIds, divisionId: req.body?.divisionId }));
 }));
 
 router.post('/leagues/:id/replace-pair-player', requirePerm('leagues'), audit('leagues'), wrap(async (req, res) => {

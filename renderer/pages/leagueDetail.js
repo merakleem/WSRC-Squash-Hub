@@ -596,6 +596,9 @@ export function renderLeagueDetail() {
 
   // Replace player buttons (admin, edit mode only)
   if (adminMode && leagueEditMode) {
+    content.querySelectorAll('.lg-add-pair').forEach((btn) => {
+      btn.addEventListener('click', () => openAddPairModal(league, Number(btn.dataset.divisionId), btn.dataset.divisionName));
+    });
     content.querySelectorAll('.replace-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         if (btn.dataset.pairId) {
@@ -834,9 +837,88 @@ function renderRostersDoubles(league, editMode = false) {
             </div>`;
           }).join('')}
           </div>
+          ${editMode && members.length % 2 === 1 ? `<button class="btn btn-outline btn-sm lg-add-pair" data-division-id="${div.id}" data-division-name="${esc(div.name)}">+ Add a pair</button>` : ''}
         </div>`;
     }).join('')}
   </div>`;
+}
+
+// A new pair in a division with an odd number of pairs takes the bye: it
+// plays each pair once, on the week that pair sits out, and nothing already
+// scheduled moves. Two steps: choose the players and see every match it
+// would add, then confirm.
+function openAddPairModal(league, divisionId, divisionName) {
+  const inLeague = new Set((league.players || []).map((p) => p.id ?? p.player_id));
+  for (const p of league.pairs || []) { inLeague.add(p.player1_id); inLeague.add(p.player2_id); }
+  const pool = (state.players || []).filter((p) => !inLeague.has(p.id)).sort((x, y) => x.name.localeCompare(y.name));
+  const options = `<option value="">Choose a player</option>${pool.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}`;
+
+  modal.open(`Add a pair to ${divisionName}`, `
+    <p class="ps-modal-intro">The new pair takes the bye. They play each pair once, on the week that pair would have sat out. Every match already scheduled stays exactly as it is.</p>
+    <div class="form-group"><label for="apP1">Player 1</label><select class="form-control" id="apP1">${options}</select></div>
+    <div class="form-group"><label for="apP2">Player 2</label><select class="form-control" id="apP2">${options}</select></div>
+    <div id="apPreview"></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="apCancel">Cancel</button>
+      <button class="btn btn-primary" id="apGo" disabled>Preview matches</button>
+    </div>`, { wide: true });
+
+  const p1 = document.getElementById('apP1');
+  const p2 = document.getElementById('apP2');
+  const go = document.getElementById('apGo');
+  const preview = document.getElementById('apPreview');
+  let plan = null;
+  const picked = () => [Number(p1.value), Number(p2.value)];
+  const reset = () => {
+    plan = null;
+    preview.innerHTML = '';
+    go.textContent = 'Preview matches';
+    go.disabled = !(p1.value && p2.value && p1.value !== p2.value);
+  };
+  p1.addEventListener('change', reset);
+  p2.addEventListener('change', reset);
+  document.getElementById('apCancel').addEventListener('click', modal.close);
+
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    if (!plan) {
+      try {
+        plan = await window.api.previewAddPair(league.id, { playerIds: picked(), divisionId });
+      } catch (err) {
+        go.disabled = false;
+        preview.innerHTML = `<div class="form-error" style="margin-bottom:12px">${esc(err.message)}</div>`;
+        return;
+      }
+      const today = clubTodayStr();
+      preview.innerHTML = `
+        <div class="lg-add-pair-plan">
+          <div class="lg-add-pair-plan-head">${plan.matches.length} new match${plan.matches.length === 1 ? '' : 'es'} for ${esc(plan.pair.names)}</div>
+          ${plan.matches.map((m) => `
+            <div class="lg-add-pair-row">
+              <span class="lg-add-pair-week">Week ${m.week_number}</span>
+              <span class="lg-add-pair-when">${esc(formatShortDate(m.date))} · ${esc(m.time)} · ${esc(m.court_name || '')}${m.date < today ? ' <span class="pill pill--amber">Past</span>' : ''}</span>
+              <span class="lg-add-pair-vs">vs ${esc(m.opponent)}</span>
+            </div>`).join('')}
+          ${plan.matches.some((m) => m.date < today) ? '<p class="form-hint" style="margin:8px 0 0">A match marked Past is on a night that has gone. Give it a make-up time from its row in the schedule.</p>' : ''}
+        </div>`;
+      go.textContent = 'Add pair';
+      go.disabled = false;
+      return;
+    }
+    go.textContent = 'Adding…';
+    try {
+      const done = await window.api.addPair(league.id, { playerIds: picked(), divisionId });
+      modal.close();
+      leagueEditMode = false;
+      state.currentLeague = await window.api.getLeague(league.id);
+      renderLeagueDetail();
+      toast(`${done.pair.names} added, with ${done.matches.length} new match${done.matches.length === 1 ? '' : 'es'}`, 'success');
+    } catch (err) {
+      go.disabled = false;
+      go.textContent = 'Add pair';
+      toast(err.message || 'Could not add the pair', 'error');
+    }
+  });
 }
 
 function openReplacePairPlayerModal(leagueId, pairId, oldPlayerId, oldPlayerName) {
